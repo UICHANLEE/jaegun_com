@@ -1,0 +1,15 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.vercel/
+.env.local
+.env.*.local
+.DS_Store
+
+# Local design and QA references (the production assets live in public/assets/jaegun/).
+/design-qa.md
+/design-qa*.jpg
+/implementation-*.jpg
+/implementation-*.png
+/source-option3-normalized.png
