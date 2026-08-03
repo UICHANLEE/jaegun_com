@@ -1,0 +1,23 @@
+project_id = "jaegun-community"
+
+[db]
+major_version = 15
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = [
+  "http://127.0.0.1:4173",
+  "http://localhost:4173",
+  "https://jaegun-com.vercel.app"
+]
+jwt_expiry = 3600
+enable_signup = true
+
+[storage]
+enabled = true
+file_size_limit = "500MiB"

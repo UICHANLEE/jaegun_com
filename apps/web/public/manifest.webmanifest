@@ -1,0 +1,19 @@
+{
+  "name": "재건 공동체",
+  "short_name": "재건 공동체",
+  "description": "교회별 소식과 안전한 회원 연결을 위한 재건 공동체 서비스",
+  "lang": "ko-KR",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f4ee",
+  "theme_color": "#174f3f",
+  "icons": [
+    {
+      "src": "/assets/brand-mark-tight.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

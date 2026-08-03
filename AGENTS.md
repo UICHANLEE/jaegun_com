@@ -1,12 +1,24 @@
-# Mobile Prototype Agent Guide
+# Jaegun Service Agent Guide
 
 ## Durable Design Decisions
 
-- The user selected visual Option 3 on 2026-08-03. Preserve its retreat-first home hierarchy: upcoming retreat, progress, vehicle and room assignment rows, one primary guide action, one presbytery notice, and five-item bottom navigation.
-- Use the Jaegun denomination-inspired orange, leaf-green, sky-blue, and deep-forest palette with large Korean type and older-adult-friendly tap targets.
-- Keep the generated product mark and church landscape as real raster assets under `public/assets/jaegun/`; do not replace them with CSS or inline SVG approximations.
+- The user explicitly retired the event-only Option 3 prototype and selected the production-service Option 1 on 2026-08-03. The exact reference is `design/reference-service-home.png`.
+- The deployed product is a responsive, mobile-first private church community service under `apps/web/`. It is not presented inside a phone frame.
+- Preserve Option 1's hierarchy: church identity and greeting, one official community update, role-aware approval entry, recent post, and five-item navigation (`홈`, `게시판`, `채팅`, `교회`, `내 정보`). Retreat content is a data-driven post/event, not the permanent product shell.
+- Use the Jaegun denomination-inspired orange, leaf-green, sky-blue, and deep-forest palette with readable Korean type and at least 44px tap targets.
+- Keep the generated product mark and church landscape as real raster assets under `apps/web/public/assets/`; do not replace them with CSS or inline SVG approximations.
+- The spreadsheet source is used only to pre-create church organizations. Never import attendee names, ages, gender, phone numbers, or inferred roles.
+- Authorization is enforced in the backend: the platform administrator approves ministers and executives; active ministers or executives approve members only within their own church. UI capability checks are supplementary, never the security boundary.
 
-## Prototype Instructions
+## Production Service
+
+- Build production UI, routing, authentication, organization onboarding, boards, direct chat, media uploads, church profiles, and management screens in `apps/web/`.
+- Keep Supabase migrations, RLS policies, secure approval RPCs, and organization seed data in `supabase/`.
+- The frontend may provide an explicitly labeled local demo data adapter for visual QA, but production authority must come from Supabase Auth, Postgres RLS/RPCs, Storage, and Realtime.
+- Never expose a Supabase service-role key or other administrator secret in Vite client code. Only `VITE_SUPABASE_URL` and the public anon/publishable key belong in client environment variables.
+- Root Vercel configuration deploys `apps/web/dist`; the legacy mobile prototype remains available for historical/runtime tests but is not the production entry point.
+
+## Legacy Prototype Instructions
 
 In ChatGPT Work Mode, run `sites-preview start "$PWD"`, open `http://terminal.local:4173/` in the cloud browser, and verify the rendered app and its primary interactions. Keep that preview open and tell the user to inspect it in the cloud browser; do not present the local URL as a user-facing chat link. In Codex Desktop, run the local server yourself, open the preview in the in-app browser, and provide the clickable local URL. Do not deploy to Sites unless the user explicitly asks to share, publish, or deploy. Do not give the user server-start instructions when you can run it.
 

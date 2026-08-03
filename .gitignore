@@ -1,13 +1,17 @@
 node_modules/
 dist/
+*.tsbuildinfo
 test-results/
 playwright-report/
 .vercel/
 .env.local
 .env.*.local
+.env
+.env.*
+!.env.example
 .DS_Store
 
-# Local design and QA references (the production assets live in public/assets/jaegun/).
+# Local design and QA references (the production assets live in apps/web/public/assets/).
 /design-qa.md
 /design-qa*.jpg
 /implementation-*.jpg

@@ -4,6 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "dev:web": "npm run dev --prefix apps/web",
+    "build:web": "npm run build --prefix apps/web",
+    "test:web": "npm run test --prefix apps/web",
+    "typecheck:web": "npm run typecheck --prefix apps/web",
     "check:runtime": "node scripts/check-mobile-runtime.mjs",
     "update:runtime-lock": "node scripts/update-mobile-runtime-lock.mjs",
     "test:runtime": "playwright test",
@@ -12,7 +16,7 @@
     "dev": "vite",
     "prebuild": "npm run check:runtime",
     "build:client": "tsc && vite build",
-    "build:vercel": "npm run check:runtime && npm run build:client",
+    "build:vercel": "npm run build:web",
     "build": "npm run build:client && node scripts/prepare-sites-build.mjs"
   },
   "dependencies": {
