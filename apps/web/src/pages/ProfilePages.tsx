@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Article,
@@ -10,14 +10,17 @@ import {
   Church,
   CircleNotch,
   Clock,
+  Coins,
   Crown,
   Envelope,
   Gear,
   MagnifyingGlass,
+  NotePencil,
   ShieldCheck,
   SignOut,
   User,
   UsersThree,
+  WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
@@ -34,7 +37,16 @@ import {
   RoleBadge,
 } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
-import type { MembershipApplication, MembershipRole } from "../types/domain";
+import { executiveApprovalErrorMessage, getExecutiveApprovalIssue } from "../executiveApprovalPolicy";
+import {
+  CHURCH_TITLE_LABELS,
+  EXECUTIVE_OFFICE_CODES,
+  EXECUTIVE_OFFICE_LABELS,
+  type ChurchTitleCode,
+  type ExecutiveOfficeCode,
+  type MembershipApplication,
+  type MembershipRole,
+} from "../types/domain";
 
 export function ProfilePage() {
   const { viewer, organizations, applications, mode, signOut } = useAppData();
@@ -49,7 +61,7 @@ export function ProfilePage() {
       <section className="profile-card">
         <div className="profile-card__identity">
           <Avatar name={viewer?.profile.displayName ?? "사용자"} src={viewer?.profile.avatarUrl} size="large" />
-          <div><h2>{viewer?.profile.displayName}</h2><p>{viewer?.profile.email}</p><span>{membership ? <RoleBadge role={membership.role} /> : null}{viewer?.profile.globalRole === "platform_admin" ? <em><ShieldCheck weight="fill" /> 플랫폼 관리자</em> : null}</span></div>
+          <div><h2>{viewer?.profile.displayName}</h2><p>{viewer?.profile.email}</p><span>{membership?.churchTitleCode ? <em className="church-title-badge">{CHURCH_TITLE_LABELS[membership.churchTitleCode]}</em> : null}{membership ? <RoleBadge role={membership.role} /> : null}{membership?.role === "executive" ? membership.executiveOfficeCodes.map((code) => <em className="executive-office-badge" key={code}>{EXECUTIVE_OFFICE_LABELS[code]}</em>) : null}{viewer?.profile.globalRole === "platform_admin" ? <em><ShieldCheck weight="fill" /> 플랫폼 관리자</em> : null}</span></div>
           <button className="icon-button icon-button--quiet" type="button" aria-label="프로필 설정"><Gear /></button>
         </div>
         <p className="profile-card__bio">{viewer?.profile.bio ?? "공동체 안에서 믿음과 일상을 함께 나누고 있어요."}</p>
@@ -61,7 +73,7 @@ export function ProfilePage() {
           <h2>나의 교회</h2>
           <Link className="profile-menu profile-menu--church" to={`/app/churches/${organization.id}`}>
             <span className="profile-menu__icon"><Church weight="fill" /></span>
-            <span><strong>{organization.name}</strong><small>{organization.presbytery} · {membership ? ROLE_LABELS[membership.role] : "회원"}</small></span>
+            <span><strong>{organization.name}</strong><small>{organization.presbytery} · {membership?.churchTitleCode ? `${CHURCH_TITLE_LABELS[membership.churchTitleCode]} · ` : ""}{membership ? ROLE_LABELS[membership.role] : "회원"}</small></span>
             <CaretRight />
           </Link>
         </section>
@@ -69,19 +81,36 @@ export function ProfilePage() {
 
       {canManage ? (
         <section className="profile-section">
-          <div className="profile-section__heading"><h2>공동체 관리</h2><span>승인 권한 적용 중</span></div>
+          <div className="profile-section__heading"><h2>공동체 관리</h2><Link to="/manage/home">관리 홈</Link></div>
           <div className="profile-menu-group">
             <Link className="profile-menu" to="/manage/approvals">
               <span className="profile-menu__icon profile-menu__icon--orange"><CheckCircle weight="fill" /></span>
               <span><strong>가입 승인</strong><small>역할과 소속에 따라 안전하게 승인해요.</small></span>
               {pendingCount ? <em className="profile-menu__count">{pendingCount}</em> : null}<CaretRight />
             </Link>
-            {membership ? (
+            {membership || viewer?.profile.globalRole === "platform_admin" ? (
               <Link className="profile-menu" to="/manage/members">
                 <span className="profile-menu__icon profile-menu__icon--blue"><UsersThree weight="fill" /></span>
-                <span><strong>회원 관리</strong><small>우리 교회 구성원과 역할을 확인해요.</small></span>
+                <span>
+                  <strong>{viewer?.profile.globalRole === "platform_admin" ? "임원직 설정" : "회원 관리"}</strong>
+                  <small>{viewer?.profile.globalRole === "platform_admin" ? "교회별 임원의 연간 직책을 배정해요." : "우리 교회 구성원과 역할을 확인해요."}</small>
+                </span>
                 <CaretRight />
               </Link>
+            ) : null}
+            {membership?.role === "executive" ? (
+              <>
+                <Link className="profile-menu" to="/manage/minutes">
+                  <span className="profile-menu__icon profile-menu__icon--orange"><NotePencil weight="fill" /></span>
+                  <span><strong>연도별 회의록</strong><small>임원 회의 기록을 함께 확인해요.</small></span>
+                  <CaretRight />
+                </Link>
+                <Link className="profile-menu" to="/manage/ledger">
+                  <span className="profile-menu__icon profile-menu__icon--blue"><Coins weight="fill" /></span>
+                  <span><strong>회계장부</strong><small>수입·지출과 잔액을 연도별로 확인해요.</small></span>
+                  <CaretRight />
+                </Link>
+              </>
             ) : null}
           </div>
         </section>
@@ -105,17 +134,26 @@ export function ProfilePage() {
 function ApplicationReviewCard({
   application,
   churchName,
+  currentYear,
   onReview,
 }: {
   application: MembershipApplication;
   churchName: string;
+  currentYear: number;
   onReview: (id: string, decision: "approved" | "rejected", note?: string) => Promise<void>;
 }) {
   const [note, setNote] = useState("");
   const [reviewing, setReviewing] = useState<"approved" | "rejected" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const executiveApprovalIssue = getExecutiveApprovalIssue(application, currentYear);
+  const requiresExecutiveReapplication = executiveApprovalIssue !== null;
+  const reapplicationWarningId = `executive-reapplication-${application.id}`;
 
   async function review(decision: "approved" | "rejected") {
+    if (decision === "approved" && requiresExecutiveReapplication) {
+      setError(executiveApprovalErrorMessage(executiveApprovalIssue));
+      return;
+    }
     if (decision === "rejected" && !note.trim()) {
       setError("반려 사유를 입력해 주세요.");
       return;
@@ -140,13 +178,29 @@ function ApplicationReviewCard({
       <dl className="application-details">
         <div><dt>신청 교회</dt><dd>{churchName}</dd></div>
         <div><dt>요청 역할</dt><dd>{ROLE_LABELS[application.requestedRole]}</dd></div>
+        {application.requestedRole === "executive" ? <div><dt>임원 직책</dt><dd>{application.requestedExecutiveOfficeCodes.length ? application.requestedExecutiveOfficeCodes.map((code) => EXECUTIVE_OFFICE_LABELS[code]).join(" · ") : "미선택"}</dd></div> : null}
+        {application.requestedRole === "executive" ? <div><dt>직책 적용 연도</dt><dd>{application.requestedServiceYear ? `${application.requestedServiceYear}년` : "미입력"}</dd></div> : null}
+        <div><dt>교회 직분</dt><dd>{application.churchTitleCode ? CHURCH_TITLE_LABELS[application.churchTitleCode] : "미입력"}</dd></div>
         <div><dt>가입 메모</dt><dd>{application.applicantNote ?? "작성된 메모가 없습니다."}</dd></div>
       </dl>
+      {requiresExecutiveReapplication ? (
+        <div className="application-card__legacy-warning" id={reapplicationWarningId} role="alert">
+          <WarningCircle weight="fill" />
+          <span>
+            <strong>반려 후 재신청 필요</strong>
+            <small>{executiveApprovalIssue === "missing_offices"
+              ? "연간 임원 직책이 없는 기존 신청입니다. 반려 메모로 직책 선택 후 다시 신청하도록 안내해 주세요."
+              : executiveApprovalIssue === "invalid_service_year"
+                ? `${application.requestedServiceYear ?? "미입력"}년 신청은 승인 가능한 기간이 지났습니다. ${currentYear}년 또는 ${currentYear + 1}년 직책을 선택해 다시 신청하도록 안내해 주세요.`
+                : `연간 임원 직책과 적용 연도가 현재 운영 기준과 맞지 않습니다. ${currentYear}년 또는 ${currentYear + 1}년 기준으로 다시 신청하도록 안내해 주세요.`}</small>
+          </span>
+        </div>
+      ) : null}
       <label className="review-note"><span>처리 메모 <small>승인 선택 · 반려 필수</small></span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={300} placeholder="신청자에게 전달할 안내를 적어 주세요." /></label>
       {error ? <ErrorBanner message={error} /> : null}
       <div className="application-card__actions">
         <button className="button button--reject" type="button" disabled={Boolean(reviewing)} onClick={() => void review("rejected")}>{reviewing === "rejected" ? <CircleNotch className="spin" /> : <X weight="bold" />} 반려</button>
-        <button className="button button--approve" type="button" disabled={Boolean(reviewing)} onClick={() => void review("approved")}>{reviewing === "approved" ? <CircleNotch className="spin" /> : <Check weight="bold" />} 승인</button>
+        <button className="button button--approve" type="button" disabled={Boolean(reviewing) || requiresExecutiveReapplication} aria-describedby={requiresExecutiveReapplication ? reapplicationWarningId : undefined} onClick={() => void review("approved")}>{reviewing === "approved" ? <CircleNotch className="spin" /> : <Check weight="bold" />} 승인</button>
       </div>
     </article>
   );
@@ -154,7 +208,7 @@ function ApplicationReviewCard({
 
 export function ApprovalsPage() {
   const navigate = useNavigate();
-  const { viewer, organizations, applications, reviewApplication } = useAppData();
+  const { viewer, organizations, applications, reviewApplication, serviceYear } = useAppData();
   const reviewable = reviewableApplications(viewer, applications);
   const [role, setRole] = useState<"all" | MembershipRole>("all");
   const [success, setSuccess] = useState<string | null>(null);
@@ -171,7 +225,7 @@ export function ApprovalsPage() {
     <div className="focused-page management-page">
       <header className="page-toolbar">
         <button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button>
-        <h1>가입 승인</h1>
+        <span className="page-toolbar__title">가입 승인</span>
         <span />
       </header>
       <div className="management-content">
@@ -187,10 +241,10 @@ export function ApprovalsPage() {
         </div>
         <div className="application-list">
           {filtered.map((application) => (
-            <ApplicationReviewCard key={application.id} application={application} churchName={organizations.find((item) => item.id === application.organizationId)?.name ?? "재건 교회"} onReview={handleReview} />
+            <ApplicationReviewCard key={application.id} application={application} churchName={organizations.find((item) => item.id === application.organizationId)?.name ?? "재건 교회"} currentYear={serviceYear} onReview={handleReview} />
           ))}
         </div>
-        {!filtered.length ? <EmptyState icon={<CheckCircle />} title="확인할 신청이 없어요" description="새로운 가입 신청이 도착하면 이곳에 표시됩니다." action={<button className="button button--secondary" type="button" onClick={() => navigate("/app/home")}>홈으로</button>} /> : null}
+        {!filtered.length ? <EmptyState icon={<CheckCircle />} title="확인할 신청이 없어요" description="새로운 가입 신청이 도착하면 이곳에 표시됩니다." action={<button className="button button--secondary" type="button" onClick={() => navigate("/manage/home")}>관리 홈으로</button>} /> : null}
       </div>
     </div>
   );
@@ -207,11 +261,114 @@ const MEMBER_STATUS_LABELS: Record<ManagedMemberStatus, string> = {
 interface ManagedMember {
   membershipId: string;
   userId: string;
+  organizationId: string;
+  organizationName: string;
   name: string;
   email: string;
   role: MembershipRole;
+  churchTitleCode?: ChurchTitleCode;
+  executiveOfficeCodes: ExecutiveOfficeCode[];
+  executiveOfficesByYear?: Partial<Record<number, ExecutiveOfficeCode[]>>;
   status: ManagedMemberStatus;
   joinedAt: string;
+}
+
+function executiveOfficesForYear(member: ManagedMember, year: number, currentYear: number) {
+  return member.executiveOfficesByYear?.[year]
+    ?? (year === currentYear ? member.executiveOfficeCodes : []);
+}
+
+function ExecutiveOfficeAssignmentForm({
+  member,
+  currentYear,
+  onSetExecutiveOffices,
+  onSuccess,
+}: {
+  member: ManagedMember;
+  currentYear: number;
+  onSetExecutiveOffices: (membershipId: string, serviceYear: number, officeCodes: ExecutiveOfficeCode[]) => Promise<void>;
+  onSuccess: (message: string) => void;
+}) {
+  const serviceYears = [currentYear, currentYear + 1];
+  const [serviceYear, setServiceYear] = useState(currentYear);
+  const [officeCodes, setOfficeCodes] = useState<ExecutiveOfficeCode[]>(
+    () => [...executiveOfficesForYear(member, currentYear, currentYear)],
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const descriptionId = `executive-office-help-${member.membershipId}`;
+
+  function changeYear(year: number) {
+    setServiceYear(year);
+    setOfficeCodes([...executiveOfficesForYear(member, year, currentYear)]);
+    setError(null);
+  }
+
+  function toggleOffice(code: ExecutiveOfficeCode) {
+    setOfficeCodes((current) => {
+      const next = current.includes(code)
+        ? current.filter((item) => item !== code)
+        : [...current, code];
+      return EXECUTIVE_OFFICE_CODES.filter((item) => next.includes(item));
+    });
+    setError(null);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!officeCodes.length) {
+      setError("임원 직책을 하나 이상 선택해 주세요.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSetExecutiveOffices(member.membershipId, serviceYear, officeCodes);
+      onSuccess(`${member.name}님의 ${serviceYear}년 임원직을 저장했습니다.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "임원직을 저장하지 못했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="executive-office-assignment" role="cell" onSubmit={handleSubmit} aria-busy={saving}>
+      <div className="executive-office-assignment__heading">
+        <span><Crown weight="fill" /></span>
+        <span>
+          <strong>연간 임원직 설정</strong>
+          <small id={descriptionId}>선택한 연도에 맡을 직책을 하나 이상 지정하세요.</small>
+        </span>
+      </div>
+      <label className="executive-office-assignment__year">
+        <span>적용 연도</span>
+        <select value={serviceYear} onChange={(event) => changeYear(Number(event.target.value))} disabled={saving}>
+          {serviceYears.map((year) => <option key={year} value={year}>{year}년{year === currentYear ? " · 현재" : " · 다음"}</option>)}
+        </select>
+      </label>
+      <fieldset className="executive-office-assignment__offices" aria-describedby={descriptionId}>
+        <legend>임원 직책 <em>하나 이상</em></legend>
+        <div className="executive-office-toggles executive-office-toggles--compact">
+          {EXECUTIVE_OFFICE_CODES.map((code) => {
+            const selected = officeCodes.includes(code);
+            return (
+              <label className={selected ? "is-selected" : ""} key={code}>
+                <input type="checkbox" checked={selected} disabled={saving} onChange={() => toggleOffice(code)} />
+                <span className="executive-office-toggles__check" aria-hidden="true">{selected ? <Check weight="bold" /> : null}</span>
+                <span><strong>{EXECUTIVE_OFFICE_LABELS[code]}</strong></span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+      {error ? <ErrorBanner message={error} /> : null}
+      <button className="button button--approve executive-office-assignment__save" type="submit" disabled={saving || officeCodes.length === 0}>
+        {saving ? <CircleNotch className="spin" /> : <Check weight="bold" />}
+        {saving ? "저장 중" : `${serviceYear}년 저장`}
+      </button>
+    </form>
+  );
 }
 
 function MemberStatusBadge({ status }: { status: ManagedMemberStatus }) {
@@ -229,14 +386,22 @@ function MemberManagementRow({
   index,
   isSelf,
   canChangeRole,
+  showOrganization,
+  canAssignExecutiveOffices,
+  currentYear,
   onChangeStatus,
+  onSetExecutiveOffices,
   onSuccess,
 }: {
   member: ManagedMember;
   index: number;
   isSelf: boolean;
   canChangeRole: boolean;
+  showOrganization: boolean;
+  canAssignExecutiveOffices: boolean;
+  currentYear: number;
   onChangeStatus: (membershipId: string, status: ManagedMemberStatus, reason: string) => Promise<void>;
+  onSetExecutiveOffices: (membershipId: string, serviceYear: number, officeCodes: ExecutiveOfficeCode[]) => Promise<void>;
   onSuccess: (message: string) => void;
 }) {
   const [targetStatus, setTargetStatus] = useState<ManagedMemberStatus | null>(null);
@@ -299,9 +464,10 @@ function MemberManagementRow({
         <span>
           <strong>{member.name}{isSelf ? <em>나</em> : null}</strong>
           <small>{member.email}</small>
+          {showOrganization ? <small className="member-row__church"><Church weight="fill" /> {member.organizationName}</small> : null}
         </span>
       </span>
-      <span className="member-row__role" role="cell"><RoleBadge role={member.role} /></span>
+      <span className="member-row__role" role="cell"><strong>{member.churchTitleCode ? CHURCH_TITLE_LABELS[member.churchTitleCode] : "성도"}</strong><RoleBadge role={member.role} />{member.role === "executive" && member.executiveOfficeCodes.length ? <small>{member.executiveOfficeCodes.map((code) => EXECUTIVE_OFFICE_LABELS[code]).join(" · ")}</small> : null}</span>
       <span className="member-row__joined" role="cell">{new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "short", day: "numeric" }).format(new Date(member.joinedAt))}</span>
       <span className="member-row__status" role="cell"><MemberStatusBadge status={member.status} /></span>
       <span className="member-row__actions" role="cell">
@@ -348,57 +514,83 @@ function MemberManagementRow({
           </div>
         </form>
       ) : null}
+      {canAssignExecutiveOffices ? (
+        <ExecutiveOfficeAssignmentForm key={`${member.membershipId}-${currentYear}`} member={member} currentYear={currentYear} onSetExecutiveOffices={onSetExecutiveOffices} onSuccess={onSuccess} />
+      ) : null}
     </div>
   );
 }
 
 export function MembersPage() {
   const navigate = useNavigate();
-  const { viewer, members: organizationMembers, setMembershipStatus } = useAppData();
+  const { viewer, organizations, members: organizationMembers, serviceYear, setMembershipStatus, setExecutiveOffices } = useAppData();
   const [query, setQuery] = useState("");
   const [role, setRole] = useState<"all" | MembershipRole>("all");
   const [status, setStatus] = useState<"all" | ManagedMemberStatus>("all");
+  const [organizationId, setOrganizationId] = useState<"all" | string>("all");
   const [success, setSuccess] = useState<string | null>(null);
+  const isPlatformAdmin = viewer?.profile.globalRole === "platform_admin";
+  const organizationsById = useMemo(
+    () => new Map(organizations.map((organization) => [organization.id, organization])),
+    [organizations],
+  );
+  const organizationOptions = useMemo(
+    () => [...organizations].sort((left, right) => left.name.localeCompare(right.name, "ko")),
+    [organizations],
+  );
   const members: ManagedMember[] = organizationMembers
-    .filter((item) => item.organizationId === viewer?.membership?.organizationId)
+    .filter((item) => isPlatformAdmin || item.organizationId === viewer?.membership?.organizationId)
     .map((item) => ({
       membershipId: item.membershipId,
       userId: item.userId,
+      organizationId: item.organizationId,
+      organizationName: organizationsById.get(item.organizationId)?.name ?? "교회 미지정",
       name: item.displayName,
       email: item.userId === viewer?.profile.id ? viewer.profile.email : "이메일 비공개",
       role: item.role,
+      churchTitleCode: item.churchTitleCode,
+      executiveOfficeCodes: item.executiveOfficeCodes,
+      executiveOfficesByYear: item.executiveOfficesByYear,
       joinedAt: item.joinedAt,
       status: item.status,
-    }));
-  const filtered = members.filter((item) => {
-    const queryMatches = !query.trim() || `${item.name} ${item.email}`.toLowerCase().includes(query.trim().toLowerCase());
+    }))
+    .sort((left, right) => left.organizationName.localeCompare(right.organizationName, "ko") || left.name.localeCompare(right.name, "ko"));
+  const churchScopedMembers = members.filter((item) => organizationId === "all" || item.organizationId === organizationId);
+  const filtered = churchScopedMembers.filter((item) => {
+    const queryMatches = !query.trim() || `${item.name} ${item.email} ${item.organizationName}`.toLowerCase().includes(query.trim().toLowerCase());
     const roleMatches = role === "all" || item.role === role;
     const statusMatches = status === "all" || item.status === status;
     return queryMatches && roleMatches && statusMatches;
   });
-  const canManageLeaders = viewer?.profile.globalRole === "platform_admin";
+  const canManageLeaders = isPlatformAdmin;
 
   return (
     <div className="focused-page management-page">
       <header className="page-toolbar">
         <button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button>
-        <h1>회원 관리</h1>
+        <span className="page-toolbar__title">{isPlatformAdmin ? "임원직 설정" : "회원 관리"}</span>
         <span />
       </header>
       <div className="management-content">
         <div className="management-intro management-intro--members">
-          <p className="eyebrow">OUR PEOPLE</p>
-          <h1>함께하는 구성원</h1>
-          <p>활성·정지·해지 상태를 확인하고 권한 범위 안에서 회원을 안전하게 관리하세요.</p>
+          <p className="eyebrow">{isPlatformAdmin ? "EXECUTIVE OFFICES" : "OUR PEOPLE"}</p>
+          <h1>{isPlatformAdmin ? "교회별 연간 임원직 설정" : "함께하는 구성원"}</h1>
+          <p>{isPlatformAdmin ? "전체 교회의 활성 임원에게 올해 또는 다음 해의 직책을 배정하세요." : "활성·정지·해지 상태를 확인하고 권한 범위 안에서 회원을 안전하게 관리하세요."}</p>
           <div className="member-stats">
-            <div><UsersThree weight="fill" /><span><strong>{members.filter((item) => item.status === "active").length}</strong><small>활성</small></span></div>
-            <div><Clock weight="fill" /><span><strong>{members.filter((item) => item.status === "suspended").length}</strong><small>정지</small></span></div>
-            <div><X weight="bold" /><span><strong>{members.filter((item) => item.status === "revoked").length}</strong><small>해지</small></span></div>
+            <div><UsersThree weight="fill" /><span><strong>{churchScopedMembers.filter((item) => item.status === "active").length}</strong><small>활성</small></span></div>
+            <div><Clock weight="fill" /><span><strong>{churchScopedMembers.filter((item) => item.status === "suspended").length}</strong><small>정지</small></span></div>
+            <div><X weight="bold" /><span><strong>{churchScopedMembers.filter((item) => item.status === "revoked").length}</strong><small>해지</small></span></div>
           </div>
         </div>
         {success ? <div className="success-toast member-success" role="status"><CheckCircle weight="fill" />{success}</div> : null}
         <label className="search-field search-field--large"><MagnifyingGlass /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="이름 또는 이메일 검색" aria-label="회원 검색" />{query ? <button type="button" onClick={() => setQuery("")} aria-label="검색어 지우기"><X /></button> : null}</label>
         <div className="member-filter-groups">
+          {isPlatformAdmin ? (
+            <label className="member-organization-filter">
+              <span>교회</span>
+              <span><Church weight="fill" /><select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)} aria-label="교회 필터"><option value="all">전체 교회</option>{organizationOptions.map((organization) => <option key={organization.id} value={organization.id}>{organization.name}</option>)}</select></span>
+            </label>
+          ) : null}
           <div><span>역할</span><div className="filter-chips management-filters" role="group" aria-label="회원 역할 필터">
             {(["all", "member", "executive", "minister"] as const).map((item) => <button key={item} type="button" aria-pressed={role === item} onClick={() => setRole(item)}>{item === "all" ? "전체" : ROLE_LABELS[item]}</button>)}
           </div></div>
@@ -406,8 +598,8 @@ export function MembersPage() {
             {(["all", "active", "suspended", "revoked"] as const).map((item) => <button key={item} type="button" aria-pressed={status === item} onClick={() => setStatus(item)}>{item === "all" ? "전체" : MEMBER_STATUS_LABELS[item]}</button>)}
           </div></div>
         </div>
-        <div className="member-table" role="table" aria-label="회원 목록">
-          <div className="member-table__head" role="row"><span role="columnheader">구성원</span><span role="columnheader">역할</span><span role="columnheader">가입일</span><span role="columnheader">상태</span><span role="columnheader">관리</span></div>
+        <div className="member-table" role="table" aria-label={isPlatformAdmin ? "전체 교회 임원직 설정 목록" : "회원 목록"}>
+          <div className="member-table__head" role="row"><span role="columnheader">{isPlatformAdmin ? "교회 / 구성원" : "구성원"}</span><span role="columnheader">역할</span><span role="columnheader">가입일</span><span role="columnheader">상태</span><span role="columnheader">관리</span></div>
           {filtered.map((member, index) => (
             <MemberManagementRow
               key={member.membershipId}
@@ -415,7 +607,11 @@ export function MembersPage() {
               index={index}
               isSelf={member.userId === viewer?.profile.id}
               canChangeRole={member.role === "member" || canManageLeaders}
+              showOrganization={isPlatformAdmin}
+              canAssignExecutiveOffices={isPlatformAdmin && member.role === "executive" && member.status === "active"}
+              currentYear={serviceYear}
               onChangeStatus={setMembershipStatus}
+              onSetExecutiveOffices={setExecutiveOffices}
               onSuccess={setSuccess}
             />
           ))}

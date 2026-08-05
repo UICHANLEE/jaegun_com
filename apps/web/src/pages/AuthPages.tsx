@@ -16,15 +16,59 @@ import {
   User,
   UsersThree,
 } from "@phosphor-icons/react";
+import { useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
 import { ApplicationStatusBadge, ErrorBanner, ROLE_LABELS } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
-import type { MembershipRole } from "../types/domain";
+import {
+  CHURCH_TITLE_CODES,
+  CHURCH_TITLE_LABELS,
+  EXECUTIVE_OFFICE_CODES,
+  EXECUTIVE_OFFICE_LABELS,
+  type ChurchTitleCode,
+  type ExecutiveOfficeCode,
+  type MembershipRole,
+} from "../types/domain";
 
 type AuthView = "login" | "signup";
 
+const EXECUTIVE_OFFICE_DESCRIPTIONS: Readonly<Record<ExecutiveOfficeCode, string>> = {
+  president: "회의와 회계를 포함한 전체 운영",
+  vice_president: "회장 보좌와 회의 운영",
+  general_secretary: "연간 사역과 회의 진행 정리",
+  secretary: "회의록 작성과 문서 정리",
+  treasurer: "수입·지출과 회계장부 관리",
+};
+
+function ExecutiveOfficeToggles({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: ExecutiveOfficeCode[];
+  onChange: (value: ExecutiveOfficeCode[]) => void;
+  compact?: boolean;
+}) {
+  function toggle(code: ExecutiveOfficeCode) {
+    onChange(value.includes(code) ? value.filter((item) => item !== code) : [...value, code]);
+  }
+
+  return (
+    <div className={`executive-office-toggles${compact ? " executive-office-toggles--compact" : ""}`} role="group" aria-label="임원 직책 선택">
+      {EXECUTIVE_OFFICE_CODES.map((code) => (
+        <label key={code} className={value.includes(code) ? "is-selected" : ""}>
+          <input aria-label={EXECUTIVE_OFFICE_LABELS[code]} type="checkbox" checked={value.includes(code)} onChange={() => toggle(code)} />
+          <span className="executive-office-toggles__check"><Check weight="bold" /></span>
+          <span><strong>{EXECUTIVE_OFFICE_LABELS[code]}</strong>{compact ? null : <small>{EXECUTIVE_OFFICE_DESCRIPTIONS[code]}</small>}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export function LoginPage() {
   const { signIn, signUp, enterDemo, error } = useAppData();
+  const navigate = useNavigate();
   const [view, setView] = useState<AuthView>("login");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -32,6 +76,7 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [localSuccess, setLocalSuccess] = useState<string | null>(null);
+  const [executiveOfficeCodes, setExecutiveOfficeCodes] = useState<ExecutiveOfficeCode[]>([]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,6 +95,11 @@ export function LoginPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function openDemo(persona: "owner" | "member" | "new" | "minister" | "executive") {
+    enterDemo(persona, persona === "executive" ? executiveOfficeCodes : undefined);
+    navigate("/", { replace: true });
   }
 
   return (
@@ -109,10 +159,21 @@ export function LoginPage() {
           <div className="demo-access">
             <div className="demo-access__label"><span>서비스 미리보기</span></div>
             <p>실제 계정 없이 역할별 화면과 기능을 안전하게 확인할 수 있어요.</p>
-            <div className="demo-access__grid">
-              <button type="button" onClick={() => enterDemo("owner")}><Crown weight="fill" /><span><strong>관리자</strong><small>승인·회원관리 포함</small></span><ArrowRight /></button>
-              <button type="button" onClick={() => enterDemo("member")}><UsersThree weight="fill" /><span><strong>일반 회원</strong><small>게시판·채팅 중심</small></span><ArrowRight /></button>
-              <button type="button" onClick={() => enterDemo("new")}><User weight="fill" /><span><strong>신규 가입자</strong><small>교회 가입 흐름</small></span><ArrowRight /></button>
+            <div className="demo-access__grid demo-access__grid--roles">
+              <button type="button" onClick={() => openDemo("owner")}><Buildings weight="fill" /><span><strong>플랫폼 관리자</strong><small>사역자·임원 승인</small></span><ArrowRight /></button>
+              <button type="button" onClick={() => openDemo("minister")}><ShieldCheck weight="fill" /><span><strong>사역자</strong><small>회원 승인·목회 운영</small></span><ArrowRight /></button>
+              <button type="button" onClick={() => openDemo("member")}><UsersThree weight="fill" /><span><strong>일반 회원</strong><small>게시판·채팅 중심</small></span><ArrowRight /></button>
+              <button type="button" onClick={() => openDemo("new")}><User weight="fill" /><span><strong>신규 가입자</strong><small>교회 가입 흐름</small></span><ArrowRight /></button>
+            </div>
+            <div className="executive-demo-entry">
+              <div className="executive-demo-entry__heading">
+                <span className="executive-demo-entry__icon"><Crown weight="fill" /></span>
+                <span><strong>임원 화면 미리보기</strong><small>맡은 직책을 복수로 선택할 수 있어요.</small></span>
+              </div>
+              <ExecutiveOfficeToggles value={executiveOfficeCodes} onChange={setExecutiveOfficeCodes} compact />
+              <button className="button button--secondary button--full" type="button" disabled={!executiveOfficeCodes.length} onClick={() => openDemo("executive")}>
+                선택한 임원 화면 입장 <ArrowRight />
+              </button>
             </div>
           </div>
         </div>
@@ -132,12 +193,26 @@ const ROLE_OPTIONS: Array<{
   { value: "minister", title: "사역자", description: "교회 공동체와 회원을 관리해요.", icon: ShieldCheck },
 ];
 
+const DEFAULT_TITLE_BY_ROLE: Record<MembershipRole, ChurchTitleCode> = {
+  member: "congregant",
+  executive: "deacon",
+  minister: "pastor",
+};
+
 export function OnboardingPage() {
-  const { viewer, organizations, requestMembership, signOut, mode } = useAppData();
+  const { viewer, organizations, requestMembership, signOut, mode, serviceYear } = useAppData();
   const rejectedApplication = viewer?.application?.status === "rejected" ? viewer.application : undefined;
   const [query, setQuery] = useState("");
   const [organizationId, setOrganizationId] = useState(rejectedApplication?.organizationId ?? "");
   const [role, setRole] = useState<MembershipRole>(rejectedApplication?.requestedRole ?? "member");
+  const [churchTitleCode, setChurchTitleCode] = useState<ChurchTitleCode>(
+    rejectedApplication?.churchTitleCode ?? DEFAULT_TITLE_BY_ROLE[rejectedApplication?.requestedRole ?? "member"],
+  );
+  const [executiveOfficeCodes, setExecutiveOfficeCodes] = useState<ExecutiveOfficeCode[]>(
+    rejectedApplication?.requestedExecutiveOfficeCodes?.length
+      ? rejectedApplication.requestedExecutiveOfficeCodes
+      : [],
+  );
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -156,10 +231,21 @@ export function OnboardingPage() {
       setLocalError("소속 교회를 먼저 선택해 주세요.");
       return;
     }
+    if (role === "executive" && !executiveOfficeCodes.length) {
+      setLocalError("임원 직책을 하나 이상 선택해 주세요.");
+      return;
+    }
     setSubmitting(true);
     setLocalError(null);
     try {
-      await requestMembership({ organizationId, requestedRole: role, note: note.trim() || undefined });
+      await requestMembership({
+        organizationId,
+        requestedRole: role,
+        churchTitleCode,
+        executiveOfficeCodes: role === "executive" ? executiveOfficeCodes : undefined,
+        serviceYear: role === "executive" ? serviceYear : undefined,
+        note: note.trim() || undefined,
+      });
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : "가입 신청을 보내지 못했습니다.");
     } finally {
@@ -213,7 +299,16 @@ export function OnboardingPage() {
                 const Icon = option.icon;
                 return (
                   <label key={option.value} className={role === option.value ? "is-selected" : ""}>
-                    <input type="radio" name="role" value={option.value} checked={role === option.value} onChange={() => setRole(option.value)} />
+                    <input
+                      type="radio"
+                      name="role"
+                      value={option.value}
+                      checked={role === option.value}
+                      onChange={() => {
+                        setRole(option.value);
+                        setChurchTitleCode(DEFAULT_TITLE_BY_ROLE[option.value]);
+                      }}
+                    />
                     <Icon weight="fill" />
                     <span><strong>{option.title}</strong><small>{option.description}</small></span>
                     <span className="role-picker__check"><Check weight="bold" /></span>
@@ -224,6 +319,22 @@ export function OnboardingPage() {
             {role !== "member" ? <p className="approval-note"><ShieldCheck weight="fill" /> 사역자와 임원은 재건 공동체 관리자가 확인 후 승인합니다.</p> : <p className="approval-note"><UsersThree weight="fill" /> 회원은 해당 교회의 사역자 또는 임원이 승인합니다.</p>}
           </fieldset>
 
+          {role === "executive" ? (
+            <fieldset className="executive-office-fieldset">
+              <legend><span>3</span> 맡은 임원 직책을 선택해 주세요</legend>
+              <p className="field-hint">{serviceYear}년도 기준이며 여러 직책을 함께 맡을 수 있어요. 최종 직책은 플랫폼 관리자 승인 후 적용됩니다.</p>
+              <ExecutiveOfficeToggles value={executiveOfficeCodes} onChange={setExecutiveOfficeCodes} />
+            </fieldset>
+          ) : null}
+
+          <label className="field church-title-field">
+            <span>교회 직분 <small>권한과 별도로 표시됩니다</small></span>
+            <select value={churchTitleCode} onChange={(event) => setChurchTitleCode(event.target.value as ChurchTitleCode)}>
+              {CHURCH_TITLE_CODES.map((code) => <option key={code} value={code}>{CHURCH_TITLE_LABELS[code]}</option>)}
+            </select>
+            <small className="field-hint">장로·집사 같은 직분만으로 관리 기능이 열리지는 않습니다.</small>
+          </label>
+
           <label className="field">
             <span>가입 메모 <small>선택</small></span>
             <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={300} placeholder="담당자가 확인할 수 있도록 간단히 소개해 주세요." />
@@ -233,7 +344,10 @@ export function OnboardingPage() {
           <div className="onboarding-submit">
             <div>
               <span>가입할 공동체</span>
-              <strong>{selectedOrganization?.name ?? "교회를 선택해 주세요"} · {ROLE_LABELS[role]}</strong>
+              <strong>
+                {selectedOrganization?.name ?? "교회를 선택해 주세요"} · {CHURCH_TITLE_LABELS[churchTitleCode]} · {ROLE_LABELS[role]}
+                {role === "executive" && executiveOfficeCodes.length ? ` · ${executiveOfficeCodes.map((code) => EXECUTIVE_OFFICE_LABELS[code]).join("·")}` : ""}
+              </strong>
             </div>
             <button className="button button--primary" type="submit" disabled={!organizationId || submitting}>
               {submitting ? <CircleNotch className="spin" /> : null} 가입 승인 요청
@@ -268,6 +382,9 @@ export function PendingPage() {
           <div className="pending-summary">
             <div><span>신청 교회</span><strong>{organization?.name ?? "선택한 교회"}</strong></div>
             <div><span>신청 역할</span><strong>{ROLE_LABELS[application.requestedRole]}</strong></div>
+            {application.requestedRole === "executive" && application.requestedExecutiveOfficeCodes.length ? (
+              <div><span>신청 직책</span><strong>{application.requestedExecutiveOfficeCodes.map((code) => EXECUTIVE_OFFICE_LABELS[code]).join(" · ")}</strong></div>
+            ) : null}
             <div><span>현재 상태</span><ApplicationStatusBadge status={application.status} /></div>
             {application.reviewNote ? <div className="pending-summary__note"><span>담당자 메모</span><p>{application.reviewNote}</p></div> : null}
           </div>

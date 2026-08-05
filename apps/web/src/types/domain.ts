@@ -1,6 +1,50 @@
 export type AppMode = "demo" | "supabase";
 export type GlobalRole = "platform_admin" | "user";
 export type MembershipRole = "minister" | "executive" | "member";
+export const CHURCH_TITLE_CODES = [
+  "congregant",
+  "deacon",
+  "ordained_deacon",
+  "kwonsa",
+  "elder",
+  "evangelist",
+  "pastor",
+] as const;
+export type ChurchTitleCode = (typeof CHURCH_TITLE_CODES)[number];
+export const CHURCH_TITLE_LABELS: Readonly<Record<ChurchTitleCode, string>> = {
+  congregant: "성도",
+  deacon: "집사",
+  ordained_deacon: "안수집사",
+  kwonsa: "권사",
+  elder: "장로",
+  evangelist: "전도사",
+  pastor: "목사",
+};
+export function isChurchTitleCode(value: unknown): value is ChurchTitleCode {
+  return typeof value === "string" && CHURCH_TITLE_CODES.includes(value as ChurchTitleCode);
+}
+export function getChurchTitleLabel(code: ChurchTitleCode): string {
+  return CHURCH_TITLE_LABELS[code];
+}
+export const EXECUTIVE_OFFICE_CODES = [
+  "president",
+  "vice_president",
+  "general_secretary",
+  "secretary",
+  "treasurer",
+] as const;
+export type ExecutiveOfficeCode = (typeof EXECUTIVE_OFFICE_CODES)[number];
+export const EXECUTIVE_OFFICE_LABELS: Readonly<Record<ExecutiveOfficeCode, string>> = {
+  president: "회장",
+  vice_president: "부회장",
+  general_secretary: "총무",
+  secretary: "서기",
+  treasurer: "회계",
+};
+export function isExecutiveOfficeCode(value: unknown): value is ExecutiveOfficeCode {
+  return typeof value === "string" && EXECUTIVE_OFFICE_CODES.includes(value as ExecutiveOfficeCode);
+}
+export type ExecutiveOfficesByYear = Record<number, ExecutiveOfficeCode[]>;
 export type MembershipStatus = "pending" | "active" | "rejected" | "suspended" | "left";
 export type ApplicationStatus = "pending" | "approved" | "rejected" | "cancelled";
 export type PostCategory = "notice" | "sharing" | "prayer" | "photo_video";
@@ -33,6 +77,8 @@ export interface Membership {
   organizationId: string;
   userId: string;
   role: MembershipRole;
+  churchTitleCode?: ChurchTitleCode;
+  executiveOfficeCodes: ExecutiveOfficeCode[];
   status: Exclude<MembershipStatus, "pending" | "rejected">;
   approvedAt?: string;
 }
@@ -44,6 +90,9 @@ export interface OrganizationMember {
   displayName: string;
   avatarUrl?: string;
   role: MembershipRole;
+  churchTitleCode?: ChurchTitleCode;
+  executiveOfficeCodes: ExecutiveOfficeCode[];
+  executiveOfficesByYear?: ExecutiveOfficesByYear;
   status: "active" | "suspended" | "revoked";
   joinedAt: string;
 }
@@ -55,6 +104,9 @@ export interface MembershipApplication {
   applicantName: string;
   applicantEmail?: string;
   requestedRole: MembershipRole;
+  churchTitleCode?: ChurchTitleCode;
+  requestedExecutiveOfficeCodes: ExecutiveOfficeCode[];
+  requestedServiceYear?: number;
   status: ApplicationStatus;
   applicantNote?: string;
   reviewNote?: string;
@@ -127,6 +179,42 @@ export interface Notification {
   href?: string;
 }
 
+export interface MeetingMinute {
+  id: string;
+  organizationId: string;
+  meetingYear: number;
+  meetingDate: string;
+  title: string;
+  body: string;
+  status: "draft" | "published";
+  authorName: string;
+  updatedAt: string;
+}
+
+export type MeetingMinuteInput = Omit<
+  MeetingMinute,
+  "id" | "organizationId" | "authorName" | "updatedAt"
+> & { id?: string };
+
+export interface LedgerEntry {
+  id: string;
+  organizationId: string;
+  fiscalYear: number;
+  entryDate: string;
+  entryType: "income" | "expense";
+  category: string;
+  description: string;
+  amount: number;
+  memo?: string;
+  authorName: string;
+  updatedAt: string;
+}
+
+export type LedgerEntryInput = Omit<
+  LedgerEntry,
+  "id" | "organizationId" | "authorName" | "updatedAt"
+> & { id?: string };
+
 export interface ViewerContext {
   profile: Profile;
   membership?: Membership;
@@ -149,6 +237,9 @@ export interface SignUpInput {
 export interface MembershipRequestInput {
   organizationId: string;
   requestedRole: MembershipRole;
+  churchTitleCode?: ChurchTitleCode;
+  executiveOfficeCodes?: ExecutiveOfficeCode[];
+  serviceYear?: number;
   note?: string;
 }
 
@@ -163,4 +254,6 @@ export interface AppDataState {
   conversations: Conversation[];
   messagesByConversation: Record<string, Message[]>;
   notifications: Notification[];
+  meetingMinutes: MeetingMinute[];
+  ledgerEntries: LedgerEntry[];
 }

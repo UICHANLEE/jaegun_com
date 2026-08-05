@@ -1,9 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { reviewableApplications } from "../components/access";
+import { resolveAppBranch, reviewableApplications } from "../components/access";
 import { DEMO_APPLICATIONS, DEMO_VIEWER } from "../data/seed";
 import type { ViewerContext } from "../types/domain";
 
 describe("approval capability projection", () => {
+  it("keeps church titles separate from the branch authorization role", () => {
+    const ordinaryElder: ViewerContext = {
+      profile: { ...DEMO_VIEWER, globalRole: "user" },
+      membership: {
+        organizationId: "org-19",
+        userId: DEMO_VIEWER.id,
+        role: "member",
+        churchTitleCode: "elder",
+        executiveOfficeCodes: [],
+        status: "active",
+      },
+    };
+
+    expect(resolveAppBranch(ordinaryElder)).toBe("member");
+    expect(resolveAppBranch({ profile: DEMO_VIEWER })).toBe("platform_admin");
+    expect(resolveAppBranch({
+      ...ordinaryElder,
+      membership: { ...ordinaryElder.membership!, role: "executive" },
+    })).toBe("executive");
+  });
+
   it("lets the platform administrator review minister and executive requests", () => {
     const viewer: ViewerContext = { profile: DEMO_VIEWER };
     const reviewable = reviewableApplications(viewer, DEMO_APPLICATIONS);
@@ -17,6 +38,7 @@ describe("approval capability projection", () => {
         organizationId: "org-19",
         userId: DEMO_VIEWER.id,
         role: "minister",
+        executiveOfficeCodes: [],
         status: "active",
       },
     };
@@ -33,6 +55,7 @@ describe("approval capability projection", () => {
         organizationId: "org-19",
         userId: DEMO_VIEWER.id,
         role: "member",
+        executiveOfficeCodes: [],
         status: "active",
       },
     };

@@ -5,10 +5,15 @@
 - The user explicitly retired the event-only Option 3 prototype and selected the production-service Option 1 on 2026-08-03. The exact reference is `design/reference-service-home.png`.
 - The deployed product is a responsive, mobile-first private church community service under `apps/web/`. It is not presented inside a phone frame.
 - Preserve Option 1's hierarchy: church identity and greeting, one official community update, role-aware approval entry, recent post, and five-item navigation (`홈`, `게시판`, `채팅`, `교회`, `내 정보`). Retreat content is a data-driven post/event, not the permanent product shell.
+- Keep minister and executive management experiences distinct. Ministers center member approval and pastoral community operations; executives receive a separate operations home plus yearly meeting-minutes and accounting-ledger areas.
+- Executive office assignments (`회장`, `부회장`, `총무`, `서기`, `회계`) are year-scoped metadata separate from the authorization-bearing `executive` app role. A person may hold multiple offices, and selected offices tailor dashboard actions without granting the base executive role.
+- The platform administrator renews executive offices for the current or next service year through the audited assignment flow. Legacy executive applications without an explicit office selection must be rejected and resubmitted, never approved into an unscoped executive role.
+- Enforce office-specific write capabilities in the backend as well as the UI: authorized executive offices manage minutes or ledger entries, while all active executives in the same church may read the annual records. Ministers and ordinary members do not receive executive-record access by default.
 - Use the Jaegun denomination-inspired orange, leaf-green, sky-blue, and deep-forest palette with readable Korean type and at least 44px tap targets.
 - Keep the generated product mark and church landscape as real raster assets under `apps/web/public/assets/`; do not replace them with CSS or inline SVG approximations.
 - The spreadsheet source is used only to pre-create church organizations. Never import attendee names, ages, gender, phone numbers, or inferred roles.
 - Authorization is enforced in the backend: the platform administrator approves ministers and executives; active ministers or executives approve members only within their own church. UI capability checks are supplementary, never the security boundary.
+- Annual executive assignments, meeting minutes, and accounting use the backend-authoritative `Asia/Seoul` service year. Signed-in clients must consume the server clock and schedule from its rollover delay so current/next-year controls and database authorization switch on the same Korean midnight boundary even when a device clock is wrong.
 
 ## Production Service
 

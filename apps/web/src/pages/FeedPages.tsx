@@ -16,7 +16,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PostCard } from "../components/PostCard";
 import {
   Avatar,
@@ -118,7 +118,12 @@ function fileSizeLabel(size: number) {
 export function ComposerPage() {
   const { createPost } = useAppData();
   const navigate = useNavigate();
-  const [category, setCategory] = useState<PostCategory>("sharing");
+  const [searchParams] = useSearchParams();
+  const requestedCategory = searchParams.get("category");
+  const initialCategory: PostCategory = requestedCategory === "notice" || requestedCategory === "prayer" || requestedCategory === "photo_video"
+    ? requestedCategory
+    : "sharing";
+  const [category, setCategory] = useState<PostCategory>(initialCategory);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [files, setFiles] = useState<File[]>([]);

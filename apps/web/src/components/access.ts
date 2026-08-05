@@ -1,5 +1,14 @@
 import type { MembershipApplication, ViewerContext } from "../types/domain";
 
+export type AppBranch = "platform_admin" | "minister" | "executive" | "member";
+
+export function resolveAppBranch(viewer: ViewerContext | null): AppBranch {
+  if (viewer?.profile.globalRole === "platform_admin") return "platform_admin";
+  if (viewer?.membership?.role === "minister") return "minister";
+  if (viewer?.membership?.role === "executive") return "executive";
+  return "member";
+}
+
 export function reviewableApplications(
   viewer: ViewerContext | null,
   applications: MembershipApplication[],
@@ -19,8 +28,5 @@ export function reviewableApplications(
 }
 
 export function canManageChurch(viewer: ViewerContext | null) {
-  return Boolean(
-    viewer?.profile.globalRole === "platform_admin" ||
-    (viewer?.membership && (viewer.membership.role === "minister" || viewer.membership.role === "executive")),
-  );
+  return resolveAppBranch(viewer) !== "member";
 }
