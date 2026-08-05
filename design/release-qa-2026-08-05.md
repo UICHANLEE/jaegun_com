@@ -103,12 +103,16 @@
 - DB smoke는 expected-sender 채팅 batch/rollback, suspended 본인-only reconciliation, 계정 전환 거부, 게시글 exact-media/분류 재생성, Storage owner RLS, 회의록·장부 tombstone 비부활을 포함하며 최종 출력은 `ALL P1 RECONCILIATION, TOMBSTONE, AND STORAGE SCENARIOS PASSED`였다.
 - 루트 `npm audit --omit=dev`는 취약점 0건이다. 웹 앱의 React Router audit 2건은 소스에서 unstable RSC API 사용이 0건임을 확인했다: https://github.com/advisories/GHSA-qwww-vcr4-c8h2
 - 브라우저 번들에 service-role key, 비밀키, 실제 Supabase 운영 URL이 노출되지 않았고, 잘못된 Supabase URL도 React mount 전 crash하지 않고 fail-closed 처리한다.
-- CSP, frame 차단, MIME sniff 방지, referrer/permissions 정책은 `vercel.json`에 추가했으며 푸시 후 운영 응답에서 다시 확인한다.
+- GitHub `main`의 `8cdaa7a`를 Vercel production deployment `dpl_H2cKSKyAGNFGZf6DU5f6114tbVZc`로 빌드했고 상태 `READY`, alias 오류 0건, 최근 30분 runtime error 0건을 확인했다.
+- `https://jaegun-com.vercel.app/`의 실제 응답에서 CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, HSTS, referrer/permissions 정책을 확인했다. 매니페스트와 192/512 아이콘도 운영에서 응답한다.
+- 운영 브라우저의 390×844 및 1440×900 화면은 가로 overflow·깨진 이미지·대비 실패가 0건이고, 운영 URL로 한정한 console warning/error도 0건이다. Supabase 미설정 상태에서는 데모 데이터 대신 안전한 준비 화면만 보인다.
 
 ### 시각 증거
 
 - `qa-audit-2026-08-05/10-mobile-member-home-final.png` — 390×844 성도 홈
 - `qa-audit-2026-08-05/11-desktop-manager-final.png` — 1440×900 임원 운영 홈
+- `qa-audit-2026-08-05/12-mobile-chat-final.png` — 390×844 실제 조직·역할·날짜를 쓰는 채팅
+- `qa-audit-2026-08-05/13-production-config-block.png` — 운영 Supabase 미설정 시 개인정보 보호용 fail-closed 화면
 - `qa-audit-2026-08-05/reference-vs-fixed-mobile-home.png` — 선택한 Option 1 기준과 수정본 비교
 
 ## 운영 활성화 게이트
