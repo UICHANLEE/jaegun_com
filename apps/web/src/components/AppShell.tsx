@@ -13,6 +13,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAppData } from "../data/AppDataProvider";
 import { canManageChurch } from "./access";
 import { Brand } from "./Brand";
+import { ServiceErrorNotice } from "./ServiceErrorNotice";
 
 const NAV_ITEMS = [
   { to: "/app/home", label: "홈", icon: House },
@@ -82,6 +83,7 @@ export function AppShell() {
           </header>
         ) : null}
         {mode === "demo" ? <div className="demo-ribbon">안전한 로컬 데모 데이터로 둘러보는 중입니다.</div> : null}
+        <ServiceErrorNotice />
         <main className="app-main">
           <Outlet />
         </main>

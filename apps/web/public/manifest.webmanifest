@@ -10,10 +10,16 @@
   "theme_color": "#174f3f",
   "icons": [
     {
-      "src": "/assets/brand-mark-tight.png",
-      "sizes": "any",
+      "src": "/assets/brand-icon-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/assets/brand-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }

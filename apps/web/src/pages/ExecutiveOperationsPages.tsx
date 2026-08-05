@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   BookOpenText,
@@ -31,6 +31,7 @@ import type {
   LedgerEntry,
   MeetingMinute,
 } from "../types/domain";
+import { confirmDiscardChanges, useUnsavedChangesWarning } from "../unsavedChanges";
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const YEAR_PATTERN = /^(\d{4})/;
@@ -67,6 +68,35 @@ const LEDGER_TYPE_LABELS: Record<LedgerEntryType, string> = {
   income: "수입",
   expense: "지출",
 };
+
+const MINUTE_OPERATION_KEY_PREFIX = "jaegun-minute-operation-v1:";
+const LEDGER_OPERATION_KEY_PREFIX = "jaegun-ledger-operation-v1:";
+
+function readPendingOperation(key: string) {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(key) ?? "null") as unknown;
+    return value && typeof value === "object" ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePendingOperation(key: string, value: Record<string, unknown>) {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // The current in-memory operation id still prevents duplicate clicks.
+  }
+}
+
+function clearPendingOperation(key: string | null) {
+  if (!key) return;
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Storage availability must not break an explicit save or cancel action.
+  }
+}
 
 function localDateValue(date = new Date()) {
   return getServiceDateValue(date);
@@ -167,11 +197,24 @@ export function MeetingMinutesPage() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [status, setStatus] = useState<MeetingMinuteStatus>("draft");
+  const [clientOperationId, setClientOperationId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const operationStorageKey = viewer?.profile.id
+    ? `${MINUTE_OPERATION_KEY_PREFIX}${viewer.profile.id}`
+    : null;
   const canWrite = selectedYear === currentYear && canWriteCurrentYear;
+  const formBaseline = useRef({ meetingDate, title: "", body: "", status: "draft" as MeetingMinuteStatus });
+  const isFormDirty = formOpen && (
+    meetingDate !== formBaseline.current.meetingDate
+    || title !== formBaseline.current.title
+    || body !== formBaseline.current.body
+    || status !== formBaseline.current.status
+  );
+
+  const confirmHistoryNavigation = useUnsavedChangesWarning(isFormDirty);
 
   useEffect(() => {
     setSelectedYear((previous) => previous === currentYear - 1 ? currentYear : previous);
@@ -181,8 +224,53 @@ export function MeetingMinutesPage() {
     setTitle("");
     setBody("");
     setStatus("draft");
+    setClientOperationId(null);
     setLocalError(null);
   }, [currentYear]);
+
+  useEffect(() => {
+    if (!operationStorageKey) return;
+    const pending = readPendingOperation(operationStorageKey);
+    if (!pending
+      || typeof pending.operationId !== "string"
+      || typeof pending.meetingDate !== "string"
+      || typeof pending.title !== "string"
+      || typeof pending.body !== "string"
+      || (pending.status !== "draft" && pending.status !== "published")
+      || yearFromDate(pending.meetingDate, currentYear) !== currentYear) {
+      clearPendingOperation(operationStorageKey);
+      return;
+    }
+    if (meetingMinutes.some((minute) => minute.id === pending.operationId)) {
+      clearPendingOperation(operationStorageKey);
+      return;
+    }
+    setEditingId(null);
+    setMeetingDate(pending.meetingDate);
+    setTitle(pending.title);
+    setBody(pending.body);
+    setStatus(pending.status);
+    setClientOperationId(pending.operationId);
+    setFormOpen(true);
+  // Restore once per signed-in user/year; later list refreshes must not overwrite typing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentYear, operationStorageKey]);
+
+  useEffect(() => {
+    if (!operationStorageKey || !clientOperationId || editingId || !formOpen) return;
+    writePendingOperation(operationStorageKey, {
+      operationId: clientOperationId,
+      meetingDate,
+      title,
+      body,
+      status,
+    });
+  }, [body, clientOperationId, editingId, formOpen, meetingDate, operationStorageKey, status, title]);
+
+  useEffect(() => {
+    if (!clientOperationId || !meetingMinutes.some((minute) => minute.id === clientOperationId)) return;
+    clearPendingOperation(operationStorageKey);
+  }, [clientOperationId, meetingMinutes, operationStorageKey]);
 
   const visibleMinutes = useMemo(
     () => meetingMinutes
@@ -193,22 +281,31 @@ export function MeetingMinutesPage() {
   );
 
   function resetForm() {
+    const nextMeetingDate = localDateValue();
     setEditingId(null);
-    setMeetingDate(localDateValue());
+    setMeetingDate(nextMeetingDate);
     setTitle("");
     setBody("");
     setStatus("draft");
+    setClientOperationId(null);
+    clearPendingOperation(operationStorageKey);
     setLocalError(null);
+    formBaseline.current = { meetingDate: nextMeetingDate, title: "", body: "", status: "draft" };
   }
 
   function beginCreate() {
+    if (saving || !confirmDiscardChanges(isFormDirty)) return;
     resetForm();
+    setClientOperationId(crypto.randomUUID());
     setSuccess(null);
     setFormOpen(true);
   }
 
   function beginEdit(minute: MeetingMinute) {
+    if (saving || !confirmDiscardChanges(isFormDirty)) return;
     setEditingId(minute.id);
+    setClientOperationId(null);
+    clearPendingOperation(operationStorageKey);
     setMeetingDate(minute.meetingDate);
     setTitle(minute.title);
     setBody(minute.body);
@@ -216,12 +313,24 @@ export function MeetingMinutesPage() {
     setLocalError(null);
     setSuccess(null);
     setFormOpen(true);
+    formBaseline.current = {
+      meetingDate: minute.meetingDate,
+      title: minute.title,
+      body: minute.body,
+      status: minute.status,
+    };
   }
 
   function closeForm() {
-    if (saving) return;
+    if (saving || !confirmDiscardChanges(isFormDirty)) return false;
     resetForm();
     setFormOpen(false);
+    return true;
+  }
+
+  function handleBack() {
+    if (saving || !confirmHistoryNavigation()) return;
+    navigate(-1);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -237,8 +346,11 @@ export function MeetingMinutesPage() {
     setLocalError(null);
     setSuccess(null);
     try {
+      const operationId = editingId ? undefined : clientOperationId ?? crypto.randomUUID();
+      if (!editingId && !clientOperationId) setClientOperationId(operationId ?? null);
       await saveMeetingMinute({
         id: editingId ?? undefined,
+        clientOperationId: operationId,
         meetingYear: yearFromDate(meetingDate, currentYear),
         meetingDate,
         title: trimmedTitle,
@@ -263,7 +375,10 @@ export function MeetingMinutesPage() {
     setSuccess(null);
     try {
       await deleteMeetingMinute(minute.id);
-      if (editingId === minute.id) closeForm();
+      if (editingId === minute.id) {
+        resetForm();
+        setFormOpen(false);
+      }
       if (expandedId === minute.id) setExpandedId(null);
       setSuccess("회의록을 삭제했습니다.");
     } catch (reason) {
@@ -283,9 +398,9 @@ export function MeetingMinutesPage() {
   return (
     <div className="focused-page management-page executive-ops__page executive-ops__page--minutes">
       <header className="page-toolbar executive-ops__toolbar">
-        <button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button>
+        <button className="icon-button icon-button--quiet" type="button" disabled={saving} onClick={handleBack} aria-label="뒤로"><ArrowLeft /></button>
         <h1>회의록</h1>
-        {canWrite ? <button className="toolbar-submit executive-ops__toolbar-action" type="button" onClick={beginCreate}><Plus weight="bold" /> 작성</button> : <span />}
+        {canWrite ? <button className="toolbar-submit executive-ops__toolbar-action" type="button" disabled={saving} onClick={beginCreate}><Plus weight="bold" /> 작성</button> : <span />}
       </header>
 
       <div className="management-content executive-ops__content">
@@ -309,7 +424,7 @@ export function MeetingMinutesPage() {
             years={years}
             value={selectedYear}
             onChange={(year) => {
-              closeForm();
+              if (!closeForm()) return;
               setSelectedYear(year);
               setExpandedId(null);
             }}
@@ -390,7 +505,7 @@ export function MeetingMinutesPage() {
                         <p>{minute.body}</p>
                         {canWrite ? (
                           <div className="executive-ops__card-actions">
-                            <button className="button button--secondary executive-ops__edit" type="button" disabled={deleting} onClick={() => beginEdit(minute)}><PencilSimple weight="bold" /> 수정</button>
+                            <button className="button button--secondary executive-ops__edit" type="button" disabled={deleting || saving} onClick={() => beginEdit(minute)}><PencilSimple weight="bold" /> 수정</button>
                             <button className="button button--danger executive-ops__delete" type="button" disabled={deleting} onClick={() => void handleDelete(minute)}>
                               {deleting ? <CircleNotch className="spin" /> : <Trash weight="bold" />}{deleting ? "삭제 중" : "삭제"}
                             </button>
@@ -442,11 +557,33 @@ export function AccountingLedgerPage() {
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
+  const [clientOperationId, setClientOperationId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const operationStorageKey = viewer?.profile.id
+    ? `${LEDGER_OPERATION_KEY_PREFIX}${viewer.profile.id}`
+    : null;
   const canWrite = selectedYear === currentYear && canWriteCurrentYear;
+  const formBaseline = useRef({
+    entryDate,
+    entryType: "income" as LedgerEntryType,
+    category: "",
+    description: "",
+    amount: "",
+    memo: "",
+  });
+  const isFormDirty = formOpen && (
+    entryDate !== formBaseline.current.entryDate
+    || entryType !== formBaseline.current.entryType
+    || category !== formBaseline.current.category
+    || description !== formBaseline.current.description
+    || amount !== formBaseline.current.amount
+    || memo !== formBaseline.current.memo
+  );
+
+  const confirmHistoryNavigation = useUnsavedChangesWarning(isFormDirty);
 
   useEffect(() => {
     setSelectedYear((previous) => previous === currentYear - 1 ? currentYear : previous);
@@ -458,8 +595,59 @@ export function AccountingLedgerPage() {
     setDescription("");
     setAmount("");
     setMemo("");
+    setClientOperationId(null);
     setLocalError(null);
   }, [currentYear]);
+
+  useEffect(() => {
+    if (!operationStorageKey) return;
+    const pending = readPendingOperation(operationStorageKey);
+    if (!pending
+      || typeof pending.operationId !== "string"
+      || typeof pending.entryDate !== "string"
+      || (pending.entryType !== "income" && pending.entryType !== "expense")
+      || typeof pending.category !== "string"
+      || typeof pending.description !== "string"
+      || typeof pending.amount !== "string"
+      || typeof pending.memo !== "string"
+      || yearFromDate(pending.entryDate, currentYear) !== currentYear) {
+      clearPendingOperation(operationStorageKey);
+      return;
+    }
+    if (ledgerEntries.some((entry) => entry.id === pending.operationId)) {
+      clearPendingOperation(operationStorageKey);
+      return;
+    }
+    setEditingId(null);
+    setEntryDate(pending.entryDate);
+    setEntryType(pending.entryType);
+    setCategory(pending.category);
+    setDescription(pending.description);
+    setAmount(pending.amount);
+    setMemo(pending.memo);
+    setClientOperationId(pending.operationId);
+    setFormOpen(true);
+  // Restore once per signed-in user/year; later list refreshes must not overwrite typing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentYear, operationStorageKey]);
+
+  useEffect(() => {
+    if (!operationStorageKey || !clientOperationId || editingId || !formOpen) return;
+    writePendingOperation(operationStorageKey, {
+      operationId: clientOperationId,
+      entryDate,
+      entryType,
+      category,
+      description,
+      amount,
+      memo,
+    });
+  }, [amount, category, clientOperationId, description, editingId, entryDate, entryType, formOpen, memo, operationStorageKey]);
+
+  useEffect(() => {
+    if (!clientOperationId || !ledgerEntries.some((entry) => entry.id === clientOperationId)) return;
+    clearPendingOperation(operationStorageKey);
+  }, [clientOperationId, ledgerEntries, operationStorageKey]);
 
   const yearEntries = useMemo(
     () => ledgerEntries.filter((entry) => (entry.fiscalYear || yearFromDate(entry.entryDate, currentYear)) === selectedYear),
@@ -483,24 +671,40 @@ export function AccountingLedgerPage() {
   );
 
   function resetForm() {
+    const nextEntryDate = localDateValue();
     setEditingId(null);
-    setEntryDate(localDateValue());
+    setEntryDate(nextEntryDate);
     setEntryType("income");
     setCategory("");
     setDescription("");
     setAmount("");
     setMemo("");
+    setClientOperationId(null);
+    clearPendingOperation(operationStorageKey);
     setLocalError(null);
+    formBaseline.current = {
+      entryDate: nextEntryDate,
+      entryType: "income",
+      category: "",
+      description: "",
+      amount: "",
+      memo: "",
+    };
   }
 
   function beginCreate() {
+    if (saving || !confirmDiscardChanges(isFormDirty)) return;
     resetForm();
+    setClientOperationId(crypto.randomUUID());
     setSuccess(null);
     setFormOpen(true);
   }
 
   function beginEdit(entry: LedgerEntry) {
+    if (saving || !confirmDiscardChanges(isFormDirty)) return;
     setEditingId(entry.id);
+    setClientOperationId(null);
+    clearPendingOperation(operationStorageKey);
     setEntryDate(entry.entryDate);
     setEntryType(entry.entryType);
     setCategory(entry.category);
@@ -510,12 +714,26 @@ export function AccountingLedgerPage() {
     setLocalError(null);
     setSuccess(null);
     setFormOpen(true);
+    formBaseline.current = {
+      entryDate: entry.entryDate,
+      entryType: entry.entryType,
+      category: entry.category,
+      description: entry.description,
+      amount: String(entry.amount),
+      memo: entry.memo ?? "",
+    };
   }
 
   function closeForm() {
-    if (saving) return;
+    if (saving || !confirmDiscardChanges(isFormDirty)) return false;
     resetForm();
     setFormOpen(false);
+    return true;
+  }
+
+  function handleBack() {
+    if (saving || !confirmHistoryNavigation()) return;
+    navigate(-1);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -536,8 +754,11 @@ export function AccountingLedgerPage() {
     setLocalError(null);
     setSuccess(null);
     try {
+      const operationId = editingId ? undefined : clientOperationId ?? crypto.randomUUID();
+      if (!editingId && !clientOperationId) setClientOperationId(operationId ?? null);
       await saveLedgerEntry({
         id: editingId ?? undefined,
+        clientOperationId: operationId,
         fiscalYear: yearFromDate(entryDate, currentYear),
         entryDate,
         entryType,
@@ -564,7 +785,10 @@ export function AccountingLedgerPage() {
     setSuccess(null);
     try {
       await deleteLedgerEntry(entry.id);
-      if (editingId === entry.id) closeForm();
+      if (editingId === entry.id) {
+        resetForm();
+        setFormOpen(false);
+      }
       setSuccess("장부 항목을 삭제했습니다.");
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : "장부 항목을 삭제하지 못했습니다.");
@@ -576,9 +800,9 @@ export function AccountingLedgerPage() {
   return (
     <div className="focused-page management-page executive-ops__page executive-ops__page--ledger">
       <header className="page-toolbar executive-ops__toolbar">
-        <button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button>
+        <button className="icon-button icon-button--quiet" type="button" disabled={saving} onClick={handleBack} aria-label="뒤로"><ArrowLeft /></button>
         <h1>회계장부</h1>
-        {canWrite ? <button className="toolbar-submit executive-ops__toolbar-action" type="button" onClick={beginCreate}><Plus weight="bold" /> 등록</button> : <span />}
+        {canWrite ? <button className="toolbar-submit executive-ops__toolbar-action" type="button" disabled={saving} onClick={beginCreate}><Plus weight="bold" /> 등록</button> : <span />}
       </header>
 
       <div className="management-content executive-ops__content">
@@ -602,7 +826,7 @@ export function AccountingLedgerPage() {
             years={years}
             value={selectedYear}
             onChange={(year) => {
-              closeForm();
+              if (!closeForm()) return;
               setSelectedYear(year);
             }}
           />
@@ -656,7 +880,7 @@ export function AccountingLedgerPage() {
               </label>
               <label className="executive-ops__field">
                 <span>금액 <em>필수</em></span>
-                <span className="executive-ops__amount-input"><CurrencyKrw weight="bold" aria-hidden="true" /><input type="number" inputMode="numeric" required min="1" step="1" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></span>
+                <span className="executive-ops__amount-input"><CurrencyKrw weight="bold" aria-hidden="true" /><input type="number" inputMode="numeric" required min="1" max="9999999999999.99" step="1" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0" /></span>
               </label>
             </div>
 
@@ -707,7 +931,7 @@ export function AccountingLedgerPage() {
                     <strong className="executive-ops__ledger-amount">{signedAmount}</strong>
                     {canWrite ? (
                       <div className="executive-ops__card-actions executive-ops__ledger-actions">
-                        <button className="icon-button icon-button--quiet executive-ops__edit" type="button" disabled={deleting} onClick={() => beginEdit(entry)} aria-label={`${entry.description} 수정`}><PencilSimple /></button>
+                        <button className="icon-button icon-button--quiet executive-ops__edit" type="button" disabled={deleting || saving} onClick={() => beginEdit(entry)} aria-label={`${entry.description} 수정`}><PencilSimple /></button>
                         <button className="icon-button icon-button--quiet executive-ops__delete" type="button" disabled={deleting} onClick={() => void handleDelete(entry)} aria-label={`${entry.description} 삭제`}>
                           {deleting ? <CircleNotch className="spin" /> : <Trash />}
                         </button>

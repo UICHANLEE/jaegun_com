@@ -27,9 +27,11 @@ import {
   formatDateTime,
   formatRelativeKorean,
   PageIntro,
+  ResilientImage,
 } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 import type { PostCategory } from "../types/domain";
+import { confirmDiscardChanges, useUnsavedChangesWarning } from "../unsavedChanges";
 
 const CATEGORIES: Array<{ value: "all" | PostCategory; label: string }> = [
   { value: "all", label: "전체" },
@@ -38,6 +40,18 @@ const CATEGORIES: Array<{ value: "all" | PostCategory; label: string }> = [
   { value: "prayer", label: "기도" },
   { value: "photo_video", label: "사진·영상" },
 ];
+
+const MEDIA_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,video/mp4,video/quicktime,video/webm";
+const POST_OPERATION_KEY_PREFIX = "jaegun-post-operation-v1:";
+
+function clearPostOperation(key: string | null) {
+  if (!key) return;
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Navigation and successful saves must not fail with blocked browser storage.
+  }
+}
 
 export function FeedPage() {
   const { posts, viewer, hasMorePosts, loadMorePosts } = useAppData();
@@ -116,7 +130,7 @@ function fileSizeLabel(size: number) {
 }
 
 export function ComposerPage() {
-  const { createPost } = useAppData();
+  const { createPost, posts, viewer } = useAppData();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedCategory = searchParams.get("category");
@@ -131,12 +145,62 @@ export function ComposerPage() {
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [clientOperationId, setClientOperationId] = useState<string>(() => crypto.randomUUID());
+  const operationStorageKey = viewer?.profile.id
+    ? `${POST_OPERATION_KEY_PREFIX}${viewer.profile.id}`
+    : null;
+  const isDirty = category !== initialCategory || title.length > 0 || body.length > 0 || files.length > 0;
+
+  const confirmHistoryNavigation = useUnsavedChangesWarning(isDirty);
 
   useEffect(() => {
     const urls = files.map((file) => URL.createObjectURL(file));
     setPreviews(urls);
     return () => urls.forEach((url) => URL.revokeObjectURL(url));
   }, [files]);
+
+  useEffect(() => {
+    if (!operationStorageKey) return;
+    try {
+      const pending = JSON.parse(window.sessionStorage.getItem(operationStorageKey) ?? "null") as unknown;
+      if (!pending || typeof pending !== "object") return;
+      const value = pending as Record<string, unknown>;
+      if (typeof value.operationId !== "string"
+        || typeof value.title !== "string"
+        || typeof value.body !== "string"
+        || (value.category !== "notice" && value.category !== "sharing" && value.category !== "prayer" && value.category !== "photo_video")) return;
+      setClientOperationId(value.operationId);
+      setCategory(value.category);
+      setTitle(value.title);
+      setBody(value.body);
+      if (value.hadFiles === true) {
+        setLocalError("이전 등록 시도의 첨부 파일은 보안상 복원되지 않습니다. 필요한 파일을 다시 선택해 주세요.");
+      }
+    } catch {
+      clearPostOperation(operationStorageKey);
+    }
+  }, [operationStorageKey]);
+
+  useEffect(() => {
+    if (!operationStorageKey || !isDirty) return;
+    try {
+      window.sessionStorage.setItem(operationStorageKey, JSON.stringify({
+        operationId: clientOperationId,
+        category,
+        title,
+        body,
+        hadFiles: files.length > 0,
+      }));
+    } catch {
+      // The provider still deduplicates duplicate clicks for this page lifetime.
+    }
+  }, [body, category, clientOperationId, files.length, isDirty, operationStorageKey, title]);
+
+  useEffect(() => {
+    if (!operationStorageKey || !posts.some((post) => post.id === clientOperationId)) return;
+    clearPostOperation(operationStorageKey);
+    navigate(`/app/posts/${clientOperationId}`, { replace: true });
+  }, [clientOperationId, navigate, operationStorageKey, posts]);
 
   function addFiles(event: ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(event.target.files ?? []);
@@ -151,9 +215,10 @@ export function ComposerPage() {
     setProgress(files.length ? 0.04 : 1);
     try {
       const post = await createPost(
-        { category, title: title.trim(), body: body.trim(), files },
+        { clientOperationId, category, title: title.trim(), body: body.trim(), files },
         (nextProgress) => setProgress(Math.max(0.04, nextProgress)),
       );
+      clearPostOperation(operationStorageKey);
       navigate(`/app/posts/${post.id}`, { replace: true });
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : "게시글을 등록하지 못했습니다.");
@@ -161,10 +226,16 @@ export function ComposerPage() {
     }
   }
 
+  function handleBack() {
+    if (submitting || !confirmHistoryNavigation()) return;
+    clearPostOperation(operationStorageKey);
+    navigate(-1);
+  }
+
   return (
     <div className="focused-page composer-page">
       <header className="page-toolbar">
-        <button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button>
+        <button className="icon-button icon-button--quiet" type="button" disabled={submitting} onClick={handleBack} aria-label="뒤로"><ArrowLeft /></button>
         <h1>새 글 작성</h1>
         <button className="toolbar-submit" form="post-composer" type="submit" disabled={submitting || !title.trim() || !body.trim()}>등록</button>
       </header>
@@ -209,7 +280,7 @@ export function ComposerPage() {
           )}
           <label className={`button button--secondary upload-button ${files.length >= 6 ? "is-disabled" : ""}`}>
             <UploadSimple /> 파일 선택
-            <input disabled={files.length >= 6} type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" multiple onChange={addFiles} />
+            <input disabled={files.length >= 6} type="file" accept={MEDIA_ACCEPT} multiple onChange={addFiles} />
           </label>
         </section>
 
@@ -235,26 +306,92 @@ export function ComposerPage() {
 export function PostDetailPage() {
   const { postId } = useParams();
   const navigate = useNavigate();
-  const { posts, addComment } = useAppData();
+  const { posts, addComment, ensurePost, viewer } = useAppData();
   const post = posts.find((item) => item.id === postId);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [liked, setLiked] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [lookupAttempt, setLookupAttempt] = useState(0);
+  const [postLookup, setPostLookup] = useState<{
+    key: string;
+    status: "loading" | "not_found" | "error";
+  }>({ key: "", status: "loading" });
+  const lookupKey = `${viewer?.profile.id ?? "signed-out"}:${postId ?? "missing"}`;
+
+  useEffect(() => {
+    if (post || !postId) return;
+    let active = true;
+    setPostLookup({ key: lookupKey, status: "loading" });
+
+    void ensurePost(postId)
+      .then((result) => {
+        if (!active) return;
+        setPostLookup({
+          key: lookupKey,
+          status: result === "not_found" ? "not_found" : "loading",
+        });
+      })
+      .catch((reason: unknown) => {
+        if (!active || (reason instanceof Error && reason.name === "AbortError")) return;
+        setPostLookup({ key: lookupKey, status: "error" });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [ensurePost, lookupAttempt, lookupKey, post, postId]);
+
+  const lookupStatus = post
+    ? "loaded"
+    : !postId
+      ? "not_found"
+      : postLookup.key === lookupKey
+        ? postLookup.status
+        : "loading";
 
   async function handleComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!post || !comment.trim()) return;
+    const trimmedComment = comment.trim();
+    if (!post || !trimmedComment) return;
+    if (trimmedComment.length > 5000) {
+      setLocalError("댓글은 5,000자 이하로 입력해 주세요.");
+      return;
+    }
     setSubmitting(true);
     setLocalError(null);
     try {
-      await addComment(post.id, comment.trim());
+      await addComment(post.id, trimmedComment);
       setComment("");
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : "댓글을 등록하지 못했습니다.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (!post && lookupStatus === "loading") {
+    return (
+      <div className="focused-page">
+        <header className="page-toolbar"><button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button><h1>게시글</h1><span /></header>
+        <div className="post-lookup-state" role="status" aria-live="polite">
+          <EmptyState icon={<CircleNotch className="spin" />} title="게시글을 불러오고 있어요" description="잠시만 기다려 주세요." />
+        </div>
+      </div>
+    );
+  }
+
+  if (!post && lookupStatus === "error") {
+    return (
+      <div className="focused-page">
+        <header className="page-toolbar"><button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button><h1>게시글</h1><span /></header>
+        <EmptyState
+          icon={<WarningCircle />}
+          title="게시글을 불러오지 못했어요"
+          description="네트워크 연결을 확인한 뒤 다시 시도해 주세요."
+          action={<button className="button button--secondary" type="button" onClick={() => setLookupAttempt((current) => current + 1)}>다시 시도</button>}
+        />
+      </div>
+    );
   }
 
   if (!post) {
@@ -283,15 +420,28 @@ export function PostDetailPage() {
         <h1>{post.title}</h1>
         <p className="post-detail__body">{post.body}</p>
         {post.id === "post-retreat" ? (
-          <div className="post-detail__event-image"><img src="/assets/church-retreat-landscape.png" alt="수련회 장소를 연상시키는 교회 풍경" /></div>
+          <div className="post-detail__event-image">
+            <ResilientImage
+              src="/assets/church-retreat-landscape.png"
+              alt="수련회 장소를 연상시키는 교회 풍경"
+              fallbackLabel="수련회 이미지를 불러오지 못했어요"
+            />
+          </div>
         ) : null}
         {post.media.length ? (
           <div className={`post-detail__media post-detail__media--${Math.min(post.media.length, 3)}`}>
-            {post.media.map((media) => media.kind === "image" ? <img key={media.id} src={media.url} alt={media.alt ?? post.title} /> : <video key={media.id} src={media.url} controls preload="metadata" />)}
+            {post.media.map((media) => media.kind === "image" ? (
+              <ResilientImage
+                key={media.id}
+                src={media.url}
+                alt={media.alt ?? post.title}
+                fallbackLabel="게시글 이미지를 불러오지 못했어요"
+              />
+            ) : <video key={media.id} src={media.url} controls preload="metadata" />)}
           </div>
         ) : null}
         <div className="post-detail__actions">
-          <button type="button" className={liked ? "is-active" : ""} onClick={() => setLiked((current) => !current)}><Heart weight={liked ? "fill" : "regular"} /> 공감 {post.reactionCount + (liked ? 1 : 0)}</button>
+          <span aria-label={`공감 ${post.reactionCount}개`}><Heart weight="regular" /> 공감 {post.reactionCount}</span>
           <span><ChatCircle /> 댓글 {post.comments.length}</span>
         </div>
       </article>
@@ -310,8 +460,23 @@ export function PostDetailPage() {
         ) : <p className="comments__empty">첫 댓글로 따뜻한 마음을 나눠보세요.</p>}
         {localError ? <ErrorBanner message={localError} /> : null}
         <form className="comment-composer" onSubmit={handleComment}>
-          <label><span className="sr-only">댓글</span><textarea rows={1} value={comment} onChange={(event) => setComment(event.target.value)} placeholder="따뜻한 댓글을 남겨주세요" /></label>
-          <button type="submit" disabled={!comment.trim() || submitting} aria-label="댓글 등록">{submitting ? <CircleNotch className="spin" /> : <PaperPlaneTilt weight="fill" />}</button>
+          <label>
+            <span className="sr-only">댓글</span>
+            <textarea
+              rows={1}
+              maxLength={5000}
+              value={comment}
+              onChange={(event) => {
+                setComment(event.target.value);
+                if (localError === "댓글은 5,000자 이하로 입력해 주세요.") setLocalError(null);
+              }}
+              placeholder="따뜻한 댓글을 남겨주세요"
+              aria-describedby="comment-character-count"
+              aria-invalid={comment.trim().length > 5000}
+            />
+            <small id="comment-character-count">{comment.length.toLocaleString("ko-KR")}/5,000</small>
+          </label>
+          <button type="submit" disabled={!comment.trim() || comment.trim().length > 5000 || submitting} aria-label="댓글 등록">{submitting ? <CircleNotch className="spin" /> : <PaperPlaneTilt weight="fill" />}</button>
         </form>
       </section>
     </div>

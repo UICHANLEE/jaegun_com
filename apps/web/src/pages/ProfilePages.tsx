@@ -13,7 +13,6 @@ import {
   Coins,
   Crown,
   Envelope,
-  Gear,
   MagnifyingGlass,
   NotePencil,
   ShieldCheck,
@@ -50,10 +49,24 @@ import {
 
 export function ProfilePage() {
   const { viewer, organizations, applications, mode, signOut } = useAppData();
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const membership = viewer?.membership;
   const organization = organizations.find((item) => item.id === membership?.organizationId);
   const pendingCount = reviewableApplications(viewer, applications).length;
   const canManage = canManageChurch(viewer);
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    setSignOutError(null);
+    try {
+      await signOut();
+    } catch (reason) {
+      setSignOutError(reason instanceof Error ? reason.message : "로그아웃하지 못했습니다. 다시 시도해 주세요.");
+      setSigningOut(false);
+    }
+  }
 
   return (
     <div className="page profile-page">
@@ -62,7 +75,6 @@ export function ProfilePage() {
         <div className="profile-card__identity">
           <Avatar name={viewer?.profile.displayName ?? "사용자"} src={viewer?.profile.avatarUrl} size="large" />
           <div><h2>{viewer?.profile.displayName}</h2><p>{viewer?.profile.email}</p><span>{membership?.churchTitleCode ? <em className="church-title-badge">{CHURCH_TITLE_LABELS[membership.churchTitleCode]}</em> : null}{membership ? <RoleBadge role={membership.role} /> : null}{membership?.role === "executive" ? membership.executiveOfficeCodes.map((code) => <em className="executive-office-badge" key={code}>{EXECUTIVE_OFFICE_LABELS[code]}</em>) : null}{viewer?.profile.globalRole === "platform_admin" ? <em><ShieldCheck weight="fill" /> 플랫폼 관리자</em> : null}</span></div>
-          <button className="icon-button icon-button--quiet" type="button" aria-label="프로필 설정"><Gear /></button>
         </div>
         <p className="profile-card__bio">{viewer?.profile.bio ?? "공동체 안에서 믿음과 일상을 함께 나누고 있어요."}</p>
         {mode === "demo" ? <span className="profile-card__demo">로컬 데모 계정</span> : null}
@@ -125,7 +137,10 @@ export function ProfilePage() {
         </div>
       </section>
 
-      <button className="button button--danger button--full profile-signout" type="button" onClick={() => void signOut()}><SignOut /> 로그아웃</button>
+      {signOutError ? <ErrorBanner message={signOutError} /> : null}
+      <button className="button button--danger button--full profile-signout" type="button" disabled={signingOut} onClick={() => void handleSignOut()}>
+        {signingOut ? <CircleNotch className="spin" /> : <SignOut />} 로그아웃
+      </button>
       <footer className="profile-footer"><strong>재건 공동체</strong><span>안전하게 연결되는 교회 커뮤니티 · v1.0</span></footer>
     </div>
   );
@@ -625,24 +640,42 @@ export function MembersPage() {
 export function NotificationsPage() {
   const navigate = useNavigate();
   const { notifications, markNotificationsRead } = useAppData();
+  const [markingRead, setMarkingRead] = useState(false);
+  const [markError, setMarkError] = useState<string | null>(null);
   const unreadCount = notifications.filter((item) => !item.readAt).length;
   const iconForHref = (href?: string) => href?.includes("approvals") ? <UsersThree weight="fill" /> : href?.includes("posts") ? <Article weight="fill" /> : <Bell weight="fill" />;
+
+  async function handleMarkAllRead() {
+    if (!unreadCount || markingRead) return;
+    setMarkingRead(true);
+    setMarkError(null);
+    try {
+      await markNotificationsRead();
+    } catch (reason) {
+      setMarkError(reason instanceof Error ? reason.message : "알림 상태를 저장하지 못했습니다.");
+    } finally {
+      setMarkingRead(false);
+    }
+  }
 
   return (
     <div className="focused-page notifications-page">
       <header className="page-toolbar">
         <button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button>
         <h1>알림</h1>
-        <button className="toolbar-submit" type="button" disabled={!unreadCount} onClick={() => void markNotificationsRead()}>모두 읽음</button>
+        <button className="toolbar-submit" type="button" disabled={!unreadCount || markingRead} onClick={() => void handleMarkAllRead()}>
+          {markingRead ? <CircleNotch className="spin" /> : null} 모두 읽음
+        </button>
       </header>
       <div className="notifications-content">
+        {markError ? <ErrorBanner message={markError} /> : null}
         <div className="notifications-heading"><h2>새 소식</h2><span>{unreadCount ? `읽지 않은 알림 ${unreadCount}개` : "모두 확인했어요"}</span></div>
         <div className="notification-list">
           {notifications.map((notification) => {
             const content = (
               <>
                 <span className="notification-row__icon">{iconForHref(notification.href)}</span>
-                <span className="notification-row__copy"><span><strong>{notification.title}</strong>{!notification.readAt ? <i /> : null}</span><p>{notification.body}</p><small>{formatDateTime(notification.createdAt)}</small></span>
+                <span className="notification-row__copy"><span><strong>{notification.title}</strong>{!notification.readAt ? <><i aria-hidden="true" /><span className="sr-only">읽지 않음</span></> : null}</span><p>{notification.body}</p><small>{formatDateTime(notification.createdAt)}</small></span>
                 {notification.href ? <CaretRight /> : null}
               </>
             );
@@ -650,7 +683,6 @@ export function NotificationsPage() {
           })}
         </div>
         {!notifications.length ? <EmptyState icon={<Bell />} title="도착한 알림이 없어요" description="공동체의 새로운 소식이 오면 알려드릴게요." /> : null}
-        <div className="notification-settings"><Gear /><p><strong>알림 설정</strong><span>승인, 게시글, 채팅 알림을 기기에서 받아보세요.</span></p><button type="button">설정</button></div>
       </div>
     </div>
   );

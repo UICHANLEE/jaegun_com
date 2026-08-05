@@ -1,8 +1,18 @@
-import type { ReactNode } from "react";
 import {
+  Component,
+  useState,
+  type ErrorInfo,
+  type ImgHTMLAttributes,
+  type ReactNode,
+} from "react";
+import {
+  ArrowClockwise,
   CheckCircle,
+  House,
   HourglassMedium,
+  ImageBroken,
   Info,
+  User,
   WarningCircle,
 } from "@phosphor-icons/react";
 import type {
@@ -57,10 +67,60 @@ interface AvatarProps {
 }
 
 export function Avatar({ name, src, size = "medium", tone = "green" }: AvatarProps) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const shouldRenderImage = Boolean(src && failedSrc !== src);
+  const initial = name.trim().slice(0, 1);
+
   return (
     <span className={`avatar avatar--${size} avatar--${tone}`} aria-hidden="true">
-      {src ? <img src={src} alt="" /> : name.trim().slice(0, 1)}
+      {shouldRenderImage ? (
+        <img src={src} alt="" onError={() => setFailedSrc(src ?? null)} />
+      ) : src || !initial ? (
+        <User className="avatar__fallback" weight="bold" />
+      ) : initial}
     </span>
+  );
+}
+
+type ResilientImageProps = ImgHTMLAttributes<HTMLImageElement> & {
+  src: string;
+  fallbackLabel?: string;
+};
+
+export function ResilientImage({
+  src,
+  alt,
+  className,
+  fallbackLabel = "이미지를 불러오지 못했어요",
+  onError,
+  ...imageProps
+}: ResilientImageProps) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+
+  if (failedSrc === src) {
+    return (
+      <span
+        className={["media-fallback", className].filter(Boolean).join(" ")}
+        role="img"
+        aria-label={fallbackLabel}
+      >
+        <ImageBroken weight="duotone" aria-hidden="true" />
+        <span aria-hidden="true">{fallbackLabel}</span>
+      </span>
+    );
+  }
+
+  return (
+    <img
+      {...imageProps}
+      className={className}
+      src={src}
+      alt={alt}
+      onError={(event) => {
+        setFailedSrc(src);
+        onError?.(event);
+      }}
+    />
   );
 }
 
@@ -117,6 +177,45 @@ export function LoadingScreen() {
       <p>공동체를 준비하고 있어요.</p>
     </main>
   );
+}
+
+interface AppErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface AppErrorBoundaryState {
+  hasError: boolean;
+}
+
+export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
+  state: AppErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): AppErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("The application UI failed to render.", error, info.componentStack);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+
+    return (
+      <main className="system-page" aria-labelledby="runtime-error-title">
+        <section className="system-card" role="alert">
+          <span className="system-card__icon system-card__icon--error" aria-hidden="true"><WarningCircle weight="fill" /></span>
+          <p className="eyebrow">화면 오류</p>
+          <h1 id="runtime-error-title">화면을 불러오지 못했어요</h1>
+          <p>일시적인 오류일 수 있습니다. 새로고침한 뒤에도 반복되면 홈으로 돌아가 다시 시도해 주세요.</p>
+          <div className="system-card__actions">
+            <button className="button button--primary" type="button" onClick={() => window.location.reload()}><ArrowClockwise weight="bold" /> 새로고침</button>
+            <a className="button button--secondary" href="/"><House weight="fill" /> 홈으로 이동</a>
+          </div>
+        </section>
+      </main>
+    );
+  }
 }
 
 export function ErrorBanner({ message }: { message: string }) {

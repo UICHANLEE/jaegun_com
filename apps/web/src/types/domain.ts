@@ -194,7 +194,7 @@ export interface MeetingMinute {
 export type MeetingMinuteInput = Omit<
   MeetingMinute,
   "id" | "organizationId" | "authorName" | "updatedAt"
-> & { id?: string };
+> & { id?: string; clientOperationId?: string };
 
 export interface LedgerEntry {
   id: string;
@@ -213,7 +213,7 @@ export interface LedgerEntry {
 export type LedgerEntryInput = Omit<
   LedgerEntry,
   "id" | "organizationId" | "authorName" | "updatedAt"
-> & { id?: string };
+> & { id?: string; clientOperationId?: string };
 
 export interface ViewerContext {
   profile: Profile;
@@ -222,6 +222,7 @@ export interface ViewerContext {
 }
 
 export interface PostDraft {
+  clientOperationId?: string;
   category: PostCategory;
   title: string;
   body: string;

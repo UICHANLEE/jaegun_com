@@ -20,6 +20,7 @@
 - Build production UI, routing, authentication, organization onboarding, boards, direct chat, media uploads, church profiles, and management screens in `apps/web/`.
 - Keep Supabase migrations, RLS policies, secure approval RPCs, and organization seed data in `supabase/`.
 - The frontend may provide an explicitly labeled local demo data adapter for visual QA, but production authority must come from Supabase Auth, Postgres RLS/RPCs, Storage, and Realtime.
+- Production builds must fail closed when the public Supabase URL or anon/publishable key is missing. Never expose local demo personas or mock management data on a deployed production domain.
 - Never expose a Supabase service-role key or other administrator secret in Vite client code. Only `VITE_SUPABASE_URL` and the public anon/publishable key belong in client environment variables.
 - Root Vercel configuration deploys `apps/web/dist`; the legacy mobile prototype remains available for historical/runtime tests but is not the production entry point.
 

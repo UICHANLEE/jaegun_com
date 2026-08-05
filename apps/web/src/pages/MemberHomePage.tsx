@@ -6,12 +6,10 @@ import {
   ChatCircle,
   HandsPraying,
   ImageSquare,
-  MapPin,
   NotePencil,
-  UsersThree,
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import { Avatar, EmptyState, formatDateTime, formatRelativeKorean } from "../components/ui";
+import { Avatar, EmptyState, formatDateTime, formatRelativeKorean, ResilientImage } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 import { getChurchTitleLabel, type Membership, type MembershipRole } from "../types/domain";
 
@@ -62,7 +60,6 @@ export function MemberHomePage() {
   const recentPosts = posts.filter((item) => item.id !== officialPost?.id).slice(0, 3);
   const firstName = viewer?.profile.displayName ?? "성도";
   const officeTitle = resolveOfficeTitle(membership);
-  const isRetreatNotice = officialPost?.id === "post-retreat" || officialPost?.title.includes("수련회");
   const weeklySchedule = church?.worshipSchedule?.slice(0, 2) ?? [];
   const scheduleItems = weeklySchedule.length
     ? weeklySchedule.map((schedule, index) => ({
@@ -101,13 +98,6 @@ export function MemberHomePage() {
               <div className="official-card__divider" />
               <h3>{officialPost.title}</h3>
               <p>{officialPost.body}</p>
-              {isRetreatNotice ? (
-                <dl className="event-facts">
-                  <div><dt><CalendarBlank /></dt><dd>8월 14일(금)–16일(일)</dd></div>
-                  <div><dt><MapPin /></dt><dd>은혜수양관</dd></div>
-                  <div><dt><UsersThree /></dt><dd>대상: {church?.name ?? "재건 공동체"} 청년</dd></div>
-                </dl>
-              ) : null}
               <Link className="button button--light" to={`/app/posts/${officialPost.id}`}>자세히 보기 <ArrowRight /></Link>
             </article>
           ) : (
@@ -152,7 +142,14 @@ export function MemberHomePage() {
                 {recentPosts.map((post, index) => (
                   <Link className="recent-post" key={post.id} to={`/app/posts/${post.id}`}>
                     {post.media[0]?.kind === "image" ? (
-                      <img src={post.media[0].url} alt={post.media[0].alt ?? ""} loading="lazy" decoding="async" />
+                      <ResilientImage
+                        className="recent-post__image"
+                        src={post.media[0].url}
+                        alt={post.media[0].alt ?? ""}
+                        fallbackLabel="게시글 이미지 없음"
+                        loading="lazy"
+                        decoding="async"
+                      />
                     ) : (
                       <span className="recent-post__placeholder"><ChatCircle weight="regular" /></span>
                     )}

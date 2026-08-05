@@ -5,7 +5,7 @@ import {
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import type { MediaAsset, Post } from "../types/domain";
-import { Avatar, CategoryBadge, formatRelativeKorean } from "./ui";
+import { Avatar, CategoryBadge, formatRelativeKorean, ResilientImage } from "./ui";
 
 function MediaPreview({ media, title }: { media: MediaAsset[]; title: string }) {
   if (!media.length) return null;
@@ -13,11 +13,16 @@ function MediaPreview({ media, title }: { media: MediaAsset[]; title: string }) 
   return (
     <div className={`post-card__media ${media.length > 1 ? "post-card__media--multiple" : ""}`}>
       {first.kind === "video" ? (
-        <video src={first.url} controls preload="metadata" aria-label={`${title} 영상`} />
+        <video src={first.url} muted playsInline preload="metadata" aria-label={`${title} 영상 미리보기`} />
       ) : (
-        <img src={first.url} alt={first.alt ?? title} loading="lazy" />
+        <ResilientImage
+          src={first.url}
+          alt={first.alt ?? title}
+          fallbackLabel="게시글 이미지를 불러오지 못했어요"
+          loading="lazy"
+        />
       )}
-      {media.length > 1 ? <span>+{media.length - 1}</span> : null}
+      {media.length > 1 ? <span className="post-card__media-count">+{media.length - 1}</span> : null}
     </div>
   );
 }

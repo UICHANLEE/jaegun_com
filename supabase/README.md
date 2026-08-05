@@ -99,16 +99,24 @@ update_organization_profile(p_organization_id uuid, p_patch jsonb) -> jsonb
 get_or_create_conversation(p_other_user_id uuid) -> uuid
 get_conversation_summaries() -> table(id uuid, organization_id uuid, participants jsonb, last_message jsonb, unread_count bigint)
 send_message(p_conversation_id uuid, p_kind message_kind, p_body text = null, p_media_path text = null, p_media_metadata jsonb = {}, p_client_nonce uuid = generated) -> uuid
+send_message_batch(p_conversation_id uuid, p_expected_sender_id uuid, p_messages jsonb) -> uuid[]
+reconcile_message_batch(p_conversation_id uuid, p_expected_sender_id uuid, p_client_nonces uuid[]) -> table(client_nonce uuid)
+save_owned_post_draft(p_post_id uuid, p_expected_author_id uuid, p_organization_id uuid, p_board_id uuid, p_title text, p_body text) -> jsonb
+publish_owned_post(p_post_id uuid, p_expected_author_id uuid, p_expected_media_paths text[]) -> jsonb
+reconcile_post_operation(p_post_id uuid, p_expected_author_id uuid) -> jsonb
+prepare_post_media_cleanup(p_post_id uuid, p_expected_author_id uuid, p_storage_paths text[]) -> jsonb
 mark_conversation_read(p_conversation_id uuid, p_message_id uuid = null) -> void
 mark_notifications_read(p_notification_ids uuid[] = null) -> integer
-save_meeting_minute(p_id uuid, p_organization_id uuid, p_meeting_year integer, p_meeting_date date, p_title text, p_body text, p_status text) -> uuid
+save_meeting_minute(p_id uuid, p_create boolean, p_organization_id uuid, p_meeting_year integer, p_meeting_date date, p_title text, p_body text, p_status text) -> uuid
 delete_meeting_minute(p_id uuid) -> void
-save_ledger_entry(p_id uuid, p_organization_id uuid, p_fiscal_year integer, p_entry_date date, p_entry_type text, p_category text, p_description text, p_amount numeric, p_memo text) -> uuid
+save_ledger_entry(p_id uuid, p_create boolean, p_organization_id uuid, p_fiscal_year integer, p_entry_date date, p_entry_type text, p_category text, p_description text, p_amount numeric, p_memo text) -> uuid
 delete_ledger_entry(p_id uuid) -> void
 set_executive_offices(p_membership_id uuid, p_service_year integer, p_office_codes text[]) -> jsonb
 ```
 
-게시물·댓글은 RLS를 거쳐 테이블에 직접 `insert/update`하고, 채팅·승인·회원 상태·조직 수정·알림 읽음은 반드시 RPC를 사용합니다. 승인 대기 목록은 `membership_applications`를 `profiles(id=user_id)` 및 `organizations(id=organization_id)`와 조인합니다. 게시물 목록은 `posts`를 `boards`와 `post_media`에 조인합니다. 채팅 목록은 `get_conversation_summaries()`를 호출해 대화별 참가자 배열, 마지막 메시지 객체(`id`, `sender_id`, `kind`, `body`, `created_at`), `conversation_reads.last_read_at` 이후 상대방이 보낸 메시지의 `unread_count`만 받습니다. 목록 화면에서 `messages` 전체를 먼저 읽지 마세요. RLS가 승인 전·타 교회 데이터를 자동으로 숨깁니다.
+새 회의록·회계 항목은 폼을 열 때 만든 UUID를 `p_id`로 보내고 `p_create=true`를 사용합니다. 네트워크 응답이 유실되어도 같은 작업 UUID를 재사용하면 같은 행만 갱신됩니다. 기존 기록 편집은 `p_create=false`로 보내며, 그 사이 삭제된 기록은 다시 생성되지 않고 `not_found`로 실패합니다.
+
+게시글 작성·게시·재조정·실패 미디어 정리와 채팅 전송·재조정은 요청을 시작한 사용자 ID를 함께 받는 전용 RPC를 사용합니다. 이 ID와 실제 `auth.uid()`가 다르면 계정 전환으로 간주해 즉시 거부합니다. 댓글은 RLS를 거쳐 직접 기록하고, 승인·회원 상태·조직 수정·알림 읽음도 지정 RPC를 사용합니다. 승인 대기 목록은 `membership_applications`를 `profiles(id=user_id)` 및 `organizations(id=organization_id)`와 조인합니다. 게시물 목록은 `posts`를 `boards`와 `post_media`에 조인합니다. 채팅 목록은 `get_conversation_summaries()`를 호출해 대화별 참가자 배열, 마지막 메시지 객체(`id`, `sender_id`, `kind`, `body`, `created_at`), `conversation_reads.last_read_at` 이후 상대방이 보낸 메시지의 `unread_count`만 받습니다. 목록 화면에서 `messages` 전체를 먼저 읽지 마세요. RLS가 승인 전·타 교회 데이터를 자동으로 숨깁니다.
 
 임원 직책은 회원 역할과 분리된 연도별 메타데이터입니다. `executive_office_assignments`를 클라이언트에서 직접 수정하지 말고 최고 관리자의 승인 흐름 또는 최고 관리자 전용 `set_executive_offices` RPC로 배정합니다. 같은 교회의 활성 임원만 회의록과 회계장부를 열람할 수 있습니다. 회의록 쓰기는 회장·부회장·총무·서기, 회계장부 쓰기는 회장·회계에게만 허용되며 과거 연도는 보존 기록으로 읽기 전용입니다. 서비스 연도는 데이터베이스가 `Asia/Seoul` 기준으로 계산하고, 로그인한 클라이언트는 `get_service_year()`로 동일한 값을 받아 사용합니다. 플랫폼 최고 관리자도 해당 교회의 활성 임원 자격 없이는 운영 기록에 접근할 수 없고, 사역자와 일반 회원 역시 접근할 수 없습니다.
 

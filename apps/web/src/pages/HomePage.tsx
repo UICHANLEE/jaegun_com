@@ -10,7 +10,7 @@ import {
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import { reviewableApplications } from "../components/access";
-import { Avatar, formatDateTime, formatRelativeKorean } from "../components/ui";
+import { Avatar, formatDateTime, formatRelativeKorean, ResilientImage } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 
 export function HomePage() {
@@ -88,7 +88,14 @@ export function HomePage() {
               {recentPosts.map((post, index) => (
                 <Link className="recent-post" key={post.id} to={`/app/posts/${post.id}`}>
                   {post.media[0]?.kind === "image" ? (
-                    <img src={post.media[0].url} alt={post.media[0].alt ?? ""} />
+                    <ResilientImage
+                      className="recent-post__image"
+                      src={post.media[0].url}
+                      alt={post.media[0].alt ?? ""}
+                      fallbackLabel="게시글 이미지 없음"
+                      loading="lazy"
+                      decoding="async"
+                    />
                   ) : (
                     <span className="recent-post__placeholder"><ChatCircle weight="regular" /></span>
                   )}

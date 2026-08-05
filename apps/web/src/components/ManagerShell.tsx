@@ -17,6 +17,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { resolveAppBranch, type AppBranch } from "./access";
 import { Brand } from "./Brand";
 import { useAppData } from "../data/AppDataProvider";
+import { ServiceErrorNotice } from "./ServiceErrorNotice";
 
 const PLATFORM_NAV_ITEMS = [
   { to: "/manage/home", label: "관리 홈", icon: Gauge, end: true },
@@ -133,6 +134,7 @@ export function ManagerShell() {
         </header>
 
         {mode === "demo" ? <div className="demo-ribbon">안전한 로컬 데모 데이터로 {modeLabel} 기능을 둘러보는 중입니다.</div> : null}
+        <ServiceErrorNotice />
         <main className="app-main manager-main">
           <Outlet />
         </main>

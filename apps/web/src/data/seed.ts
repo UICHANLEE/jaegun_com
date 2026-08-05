@@ -172,7 +172,7 @@ export const DEMO_POSTS: Post[] = [
       {
         id: "media-community",
         kind: "image",
-        url: "/assets/community-small-group.png",
+        url: "/assets/community-small-group.jpg",
         alt: "청년들이 둘러앉아 이야기를 나누는 목장 모임",
       },
     ],

@@ -3,15 +3,28 @@ import { supabase } from "./supabase";
 const LARGE_FILE_THRESHOLD = 6 * 1024 * 1024;
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 500 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/avif",
+  "image/heic",
+  "image/heif",
+]);
+const ALLOWED_VIDEO_TYPES = new Set([
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+]);
 
 export function validateMediaFile(file: File): string | null {
-  if (file.type.startsWith("image/")) {
+  if (ALLOWED_IMAGE_TYPES.has(file.type)) {
     return file.size <= MAX_IMAGE_SIZE ? null : "사진은 파일당 15MB까지 업로드할 수 있습니다.";
   }
-  if (file.type.startsWith("video/")) {
+  if (ALLOWED_VIDEO_TYPES.has(file.type)) {
     return file.size <= MAX_VIDEO_SIZE ? null : "영상은 파일당 500MB까지 업로드할 수 있습니다.";
   }
-  return "사진 또는 영상 파일만 업로드할 수 있습니다.";
+  return "JPG, PNG, WebP, AVIF, HEIC, HEIF 사진 또는 MP4, MOV, WebM 영상만 업로드할 수 있습니다.";
 }
 
 export async function uploadCommunityFile(
@@ -48,6 +61,7 @@ export async function uploadCommunityFile(
         apikey: import.meta.env.VITE_SUPABASE_ANON_KEY!,
       },
       uploadDataDuringCreation: true,
+      storeFingerprintForResuming: false,
       removeFingerprintOnSuccess: true,
       metadata: {
         bucketName: "community-media",
@@ -60,10 +74,12 @@ export async function uploadCommunityFile(
       onProgress: (uploaded, total) => onProgress(total ? uploaded / total : 0),
       onSuccess: () => resolve(),
     });
-    upload.findPreviousUploads().then((previous) => {
-      if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
-      upload.start();
-    }, reject);
+    // Each caller provides a unique, authorization-scoped objectPath. The TUS
+    // library's default fingerprint does not include that path, so resuming a
+    // previous URL can upload bytes to one object while the caller signs another.
+    // Start this explicit destination directly; failed partial uploads expire on
+    // the Storage service and are never reused for a different object path.
+    upload.start();
   });
 
   const { data } = await supabase.storage.from("community-media").createSignedUrl(objectPath, 60 * 60);

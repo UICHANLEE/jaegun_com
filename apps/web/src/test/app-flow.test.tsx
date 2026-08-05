@@ -19,6 +19,66 @@ function renderApp(initialEntries = ["/"]) {
 }
 
 describe("primary service journeys", () => {
+  it("redirects signed-out protected routes to the explicit authentication page", async () => {
+    renderApp(["/app/posts"]);
+
+    expect(await screen.findByRole("heading", { name: "다시 만나 반가워요" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "비밀번호를 잊으셨나요?" })).toHaveAttribute("href", "/forgot-password");
+  });
+
+  it("does not expose raw authentication provider errors", async () => {
+    renderApp(["/auth"]);
+    fireEvent.change(await screen.findByLabelText("이메일"), { target: { value: "member@example.com" } });
+    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("로그인하지 못했습니다");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("실서비스 로그인이 아직 연결되지 않았습니다");
+  });
+
+  it("blocks account creation when the password confirmation does not match", async () => {
+    renderApp(["/auth"]);
+    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
+    fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "different123" } });
+    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 서로 일치하지 않습니다");
+  });
+
+  it("offers password recovery and rejects a reset page without a valid recovery session", async () => {
+    const forgotView = renderApp(["/forgot-password"]);
+    expect(await screen.findByRole("heading", { name: "비밀번호를 잊으셨나요?" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "재설정 링크 받기" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /로그인으로 돌아가기/ })).toHaveAttribute("href", "/auth");
+    forgotView.unmount();
+
+    const missingView = renderApp(["/reset-password"]);
+    expect(await screen.findByRole("heading", { name: "새 비밀번호 설정" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("유효한 비밀번호 재설정 정보가 없습니다");
+    expect(screen.getByRole("link", { name: "새 재설정 링크 요청" })).toHaveAttribute("href", "/forgot-password");
+    missingView.unmount();
+
+    renderApp(["/reset-password?error=access_denied&error_code=otp_expired"]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("재설정 링크가 만료되었거나 이미 사용되었습니다");
+  });
+
+  it("does not trust an unverified recovery code from the URL", async () => {
+    renderApp(["/reset-password?code=recovery-code"]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("유효한 비밀번호 재설정 정보가 없습니다");
+    expect(screen.queryByLabelText("새 비밀번호")).not.toBeInTheDocument();
+  });
+
+  it("renders an accessible 404 page instead of silently redirecting an invalid URL", async () => {
+    renderApp(["/this-page-does-not-exist"]);
+
+    expect(await screen.findByRole("heading", { name: "길을 잘못 찾으신 것 같아요" })).toBeInTheDocument();
+    expect(screen.getByText(/404 · 페이지를 찾을 수 없음/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /홈으로 이동/ })).toHaveAttribute("href", "/auth");
+  });
+
   it("opens the complete administrator home from the explicit demo entry", async () => {
     renderApp();
     const administratorLabel = await screen.findByText("플랫폼 관리자");
@@ -227,6 +287,46 @@ describe("primary service journeys", () => {
     expect(screen.getByText("읽기 전용")).toBeInTheDocument();
     expect(screen.getByText(/지난 연도 회계장부는 보존 기록으로 열람만/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "항목 등록" })).not.toBeInTheDocument();
+  });
+
+  it("restores one pending ledger operation and clears it after a successful save", async () => {
+    const base = createDemoState();
+    window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({
+      ...base,
+      viewer: {
+        profile: { ...DEMO_VIEWER, globalRole: "user" },
+        membership: {
+          id: "executive-treasurer-membership",
+          organizationId: "org-19",
+          userId: DEMO_VIEWER.id,
+          role: "executive",
+          churchTitleCode: "elder",
+          executiveOfficeCodes: ["treasurer"],
+          status: "active",
+        },
+      },
+    }));
+    const operationId = "55555555-5555-4555-8555-555555555555";
+    const storageKey = `jaegun-ledger-operation-v1:${DEMO_VIEWER.id}`;
+    window.sessionStorage.setItem(storageKey, JSON.stringify({
+      operationId,
+      entryDate: `${getServiceYear()}-08-05`,
+      entryType: "income",
+      category: "헌금",
+      description: "복원된 장부 작업",
+      amount: "120000",
+      memo: "응답 유실 복구",
+    }));
+
+    renderApp(["/manage/ledger"]);
+    expect(await screen.findByDisplayValue("복원된 장부 작업")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("120000")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "항목 저장" }));
+
+    expect(await screen.findByText("장부 항목을 저장했습니다.")).toBeInTheDocument();
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(DEMO_STORAGE_KEY) ?? "{}").ledgerEntries)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: operationId })]));
   });
 
   it("routes a church executive to management and blocks an ordinary member from it", async () => {
