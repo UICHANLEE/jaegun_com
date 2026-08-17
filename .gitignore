@@ -4,6 +4,8 @@ dist/
 test-results/
 playwright-report/
 .vercel/
+supabase/.temp/
+supabase/.branches/
 .env.local
 .env.*.local
 .env
