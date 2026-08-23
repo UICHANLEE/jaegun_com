@@ -44,6 +44,9 @@ function authSubmitError(reason: unknown, view: AuthView) {
   if (message.includes("email not confirmed") || message.includes("confirm your email") || message.includes("email confirmation")) {
     return "이메일 확인이 필요합니다. 가입할 때 받은 확인 메일을 열어 주세요.";
   }
+  if (message.includes("email address not authorized") || message.includes("confirmation email") || message.includes("smtp")) {
+    return "가입 확인 메일을 보낼 수 없습니다. 관리자에게 문의해 주세요.";
+  }
   if (message.includes("rate") || message.includes("too many") || message.includes("너무 많")) {
     return "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.";
   }
@@ -154,7 +157,7 @@ export function LoginPage() {
     try {
       if (view === "signup") {
         await signUp({ displayName: displayName.trim(), email: email.trim(), password });
-        setLocalSuccess("가입 확인 메일을 보냈습니다. 이메일의 링크를 연 뒤 로그인해 주세요.");
+        setLocalSuccess("가입 요청을 처리했습니다. 확인 메일의 링크를 연 뒤 로그인해 주세요. 메일이 도착하지 않으면 관리자에게 문의해 주세요.");
       } else {
         await signIn({ email: email.trim(), password });
       }

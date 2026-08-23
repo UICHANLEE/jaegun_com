@@ -1661,7 +1661,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     clearPasswordRecovery();
     remoteLoadsBlockedRef.current = false;
     invalidateRemoteWork(null);
-    replaceState(createEmptyState("supabase", true));
+    // Keep signed-out routes mounted while Supabase validates credentials.
+    // The auth page owns its submitting state; toggling the global loader here
+    // unmounts the form and drops the provider error returned to its caller.
+    replaceState(createEmptyState("supabase", false));
     setError(null);
     const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
     if (authError) {
@@ -1680,7 +1683,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     clearPasswordRecovery();
     remoteLoadsBlockedRef.current = false;
     invalidateRemoteWork(null);
-    replaceState(createEmptyState("supabase", true));
+    // Keep the signup form mounted so delivery/provider failures remain visible.
+    // A session-bearing signup is moved into the global loading state by the
+    // onAuthStateChange handler below.
+    replaceState(createEmptyState("supabase", false));
     setError(null);
     const { data, error: authError } = await supabase.auth.signUp({
       email,

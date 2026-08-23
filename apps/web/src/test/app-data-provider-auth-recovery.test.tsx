@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type MockUser = { id: string; email: string; user_metadata: Record<string, unknown> };
@@ -8,7 +9,8 @@ type AuthCallback = (event: string, session: MockSession extends null ? never : 
 const remote = vi.hoisted(() => ({
   currentSession: null as { user: MockUser; access_token: string } | null,
   authCallback: null as ((event: string, session: { user: MockUser; access_token: string } | null) => void) | null,
-  signIn: vi.fn(async () => ({ data: { session: null }, error: null })),
+  signIn: vi.fn(async (): Promise<{ data: { session: null }; error: Error | null }> => ({ data: { session: null }, error: null })),
+  signUp: vi.fn(async (): Promise<{ data: { session: null }; error: Error | null }> => ({ data: { session: null }, error: null })),
   signOut: vi.fn(async (): Promise<{ error: Error | null }> => ({ error: null })),
   updateUser: vi.fn(async () => ({ data: {}, error: null })),
   unsubscribe: vi.fn(),
@@ -20,7 +22,7 @@ vi.mock("../data/supabase", () => ({
     auth: {
       getSession: vi.fn(async () => ({ data: { session: remote.currentSession }, error: null })),
       signInWithPassword: remote.signIn,
-      signUp: vi.fn(async () => ({ data: { session: null }, error: null })),
+      signUp: remote.signUp,
       signOut: remote.signOut,
       updateUser: remote.updateUser,
       resetPasswordForEmail: vi.fn(async () => ({ error: null })),
@@ -40,6 +42,7 @@ vi.mock("../data/supabase", () => ({
 }));
 
 import { AppDataProvider, useAppData } from "../data/AppDataProvider";
+import App from "../App";
 
 let latestData: ReturnType<typeof useAppData> | null = null;
 
@@ -51,6 +54,7 @@ function AuthProbe() {
       <button type="button" onClick={() => void data.signOut()}>sign out</button>
       <button type="button" onClick={() => void data.signIn({ email: "user@example.com", password: "password123" })}>sign in</button>
       <output data-testid="recovery-ready">{String(data.passwordRecoveryReady)}</output>
+      <output data-testid="loading">{String(data.loading)}</output>
     </>
   );
 }
@@ -63,6 +67,7 @@ beforeEach(() => {
   remote.currentSession = null;
   remote.authCallback = null;
   remote.signIn.mockClear();
+  remote.signUp.mockClear();
   remote.signOut.mockReset();
   remote.signOut.mockResolvedValue({ error: null });
   remote.updateUser.mockClear();
@@ -141,5 +146,112 @@ describe("AppDataProvider password recovery trust boundary", () => {
       await Promise.resolve();
     });
     expect(remote.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps signed-out routes mounted while login and signup provider errors are pending", async () => {
+    let resolveSignIn!: (value: { data: { session: null }; error: Error }) => void;
+    const pendingSignIn = new Promise<{ data: { session: null }; error: Error }>((resolve) => {
+      resolveSignIn = resolve;
+    });
+    remote.signIn.mockReturnValueOnce(pendingSignIn);
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+
+    let loginAttempt!: Promise<void>;
+    act(() => {
+      loginAttempt = latestData!.signIn({ email: "user@example.com", password: "password123" });
+    });
+    expect(screen.getByTestId("loading")).toHaveTextContent("false");
+
+    await act(async () => {
+      resolveSignIn({ data: { session: null }, error: new Error("Email not confirmed") });
+      await expect(loginAttempt).rejects.toThrow("Email not confirmed");
+    });
+    expect(screen.getByTestId("loading")).toHaveTextContent("false");
+
+    let resolveSignUp!: (value: { data: { session: null }; error: Error }) => void;
+    const pendingSignUp = new Promise<{ data: { session: null }; error: Error }>((resolve) => {
+      resolveSignUp = resolve;
+    });
+    remote.signUp.mockReturnValueOnce(pendingSignUp);
+
+    let signupAttempt!: Promise<void>;
+    act(() => {
+      signupAttempt = latestData!.signUp({ displayName: "가입자", email: "new@example.com", password: "password123" });
+    });
+    expect(screen.getByTestId("loading")).toHaveTextContent("false");
+
+    await act(async () => {
+      resolveSignUp({ data: { session: null }, error: new Error("Error sending confirmation email") });
+      await expect(signupAttempt).rejects.toThrow("Error sending confirmation email");
+    });
+    expect(screen.getByTestId("loading")).toHaveTextContent("false");
+  });
+
+  it("keeps the login form and displays the provider's email confirmation error", async () => {
+    remote.signIn.mockResolvedValueOnce({
+      data: { session: null },
+      error: new Error("Email not confirmed"),
+    });
+    render(
+      <MemoryRouter initialEntries={["/auth"]}>
+        <AppDataProvider><App /></AppDataProvider>
+      </MemoryRouter>,
+    );
+
+    const emailInput = await screen.findByLabelText("이메일");
+    const passwordInput = screen.getByLabelText("비밀번호");
+    fireEvent.change(emailInput, { target: { value: "member@example.com" } });
+    fireEvent.change(passwordInput, { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("이메일 확인이 필요합니다");
+    expect(emailInput).toHaveValue("member@example.com");
+  });
+
+  it("keeps the signup form and explains a confirmation-email delivery failure", async () => {
+    remote.signUp.mockResolvedValueOnce({
+      data: { session: null },
+      error: new Error("Email address not authorized"),
+    });
+    render(
+      <MemoryRouter initialEntries={["/auth"]}>
+        <AppDataProvider><App /></AppDataProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
+    const emailInput = screen.getByLabelText("이메일");
+    fireEvent.change(emailInput, { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("가입 확인 메일을 보낼 수 없습니다");
+    expect(emailInput).toHaveValue("new@example.com");
+  });
+
+  it("keeps the signup form and explains an email address rejected by the provider", async () => {
+    remote.signUp.mockResolvedValueOnce({
+      data: { session: null },
+      error: new Error("Email address is invalid"),
+    });
+    render(
+      <MemoryRouter initialEntries={["/auth"]}>
+        <AppDataProvider><App /></AppDataProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
+    const emailInput = screen.getByLabelText("이메일");
+    fireEvent.change(emailInput, { target: { value: "member@example.com" } });
+    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password123" } });
+    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("올바른 이메일 주소를 입력해 주세요");
+    expect(emailInput).toHaveValue("member@example.com");
   });
 });
