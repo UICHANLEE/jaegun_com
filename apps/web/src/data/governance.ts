@@ -126,6 +126,10 @@ export async function listGovernanceRoster({
   });
   const { data, error } = await (signal ? request.abortSignal(signal) : request);
   if (error) throw error;
+  return mapGovernanceRoster(data);
+}
+
+function mapGovernanceRoster(data: unknown): GovernanceRosterEntry[] {
   return records(data).flatMap((row) => {
     if (!row.user_id) return [];
     const role = row.membership_role === "minister" || row.membership_role === "executive"
@@ -144,6 +148,36 @@ export async function listGovernanceRoster({
       totalCount: Number(row.total_count ?? 0),
     }];
   });
+}
+
+export async function listGovernanceOfficeCandidates({
+  scopeId,
+  serviceYear,
+  officeCode,
+  search = "",
+  limit = 50,
+  offset = 0,
+  signal,
+}: {
+  scopeId: string;
+  serviceYear: number;
+  officeCode: GovernanceOfficeCode;
+  search?: string;
+  limit?: number;
+  offset?: number;
+  signal?: AbortSignal;
+}): Promise<GovernanceRosterEntry[]> {
+  const request = client().rpc("list_governance_office_candidates", {
+    p_scope_id: scopeId,
+    p_service_year: serviceYear,
+    p_office_code: officeCode,
+    p_search: search.trim(),
+    p_limit: limit,
+    p_offset: offset,
+  });
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
+  if (error) throw error;
+  return mapGovernanceRoster(data);
 }
 
 export async function listGovernanceDelegations(scopeId: string, signal?: AbortSignal): Promise<GovernanceDelegation[]> {
@@ -183,6 +217,34 @@ export async function setGovernanceOffices(
     p_service_year: serviceYear,
     p_user_id: userId,
     p_office_codes: codes,
+  });
+  if (error) throw error;
+}
+
+export async function assignGovernanceOffice(
+  scopeId: string,
+  serviceYear: number,
+  officeCode: GovernanceOfficeCode,
+  userId: string,
+) {
+  const { error } = await client().rpc("assign_governance_office", {
+    p_scope_id: scopeId,
+    p_service_year: serviceYear,
+    p_office_code: officeCode,
+    p_user_id: userId,
+  });
+  if (error) throw error;
+}
+
+export async function clearGovernanceOffice(
+  scopeId: string,
+  serviceYear: number,
+  officeCode: GovernanceOfficeCode,
+) {
+  const { error } = await client().rpc("clear_governance_office", {
+    p_scope_id: scopeId,
+    p_service_year: serviceYear,
+    p_office_code: officeCode,
   });
   if (error) throw error;
 }

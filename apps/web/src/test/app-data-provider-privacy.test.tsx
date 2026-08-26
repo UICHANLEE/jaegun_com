@@ -69,10 +69,11 @@ describe("AppDataProvider private-state boundaries", () => {
     expect(fresh.postIds).toContain("post-retreat");
   });
 
-  it("clears every private collection immediately on sign out", async () => {
+  it("clears every private collection while retaining the public signup directory on sign out", async () => {
     render(<AppDataProvider><ProviderProbe /></AppDataProvider>);
     fireEvent.click(screen.getByRole("button", { name: "fresh demo" }));
     expect(providerSnapshot().viewerId).toBe("demo-executive");
+    const publicOrganizationIds = providerSnapshot().organizationIds;
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "sign out" }));
@@ -80,8 +81,8 @@ describe("AppDataProvider private-state boundaries", () => {
 
     const signedOut = providerSnapshot();
     expect(signedOut.viewerId).toBeNull();
+    expect(signedOut.organizationIds).toEqual(publicOrganizationIds);
     for (const key of [
-      "organizationIds",
       "postIds",
       "applicationIds",
       "memberIds",

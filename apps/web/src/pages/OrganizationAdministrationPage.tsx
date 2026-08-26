@@ -25,12 +25,14 @@ import { useNavigate } from "react-router-dom";
 import { Avatar, EmptyState, ErrorBanner, ROLE_LABELS, RoleBadge } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 import {
+  assignGovernanceOffice,
+  clearGovernanceOffice,
   getGovernanceTree,
   grantGovernanceDelegation,
   listGovernanceDelegations,
+  listGovernanceOfficeCandidates,
   listGovernanceRoster,
   revokeGovernanceDelegation,
-  setGovernanceOffices,
 } from "../data/governance";
 import {
   EXECUTIVE_OFFICE_CODES,
@@ -162,6 +164,25 @@ function demoOfficeKey(scopeId: string, serviceYear: number, userId: string) {
   return `${scopeId}:${serviceYear}:${userId}`;
 }
 
+function assignDemoOffice(
+  current: Record<string, GovernanceOfficeCode[]>,
+  scopeId: string,
+  serviceYear: number,
+  userId: string,
+  officeCode: GovernanceOfficeCode,
+) {
+  const prefix = `${scopeId}:${serviceYear}:`;
+  const targetKey = demoOfficeKey(scopeId, serviceYear, userId);
+  const next = Object.fromEntries(Object.entries(current).map(([key, codes]) => [
+    key,
+    key.startsWith(prefix) && key !== targetKey
+      ? codes.filter((code) => code !== officeCode)
+      : codes,
+  ]));
+  next[targetKey] = [...new Set([...(next[targetKey] ?? []), officeCode])];
+  return next;
+}
+
 function initialDemoOffices(serviceYear: number): Record<string, GovernanceOfficeCode[]> {
   return {
     [demoOfficeKey("demo-scope-general-assembly", serviceYear, "demo-owner")]: ["president"],
@@ -218,6 +239,7 @@ export function OrganizationAdministrationPage() {
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [officerRoster, setOfficerRoster] = useState<GovernanceRosterEntry[]>([]);
+  const [officerLoading, setOfficerLoading] = useState(false);
   const [candidateRoster, setCandidateRoster] = useState<GovernanceRosterEntry[]>([]);
   const [candidateSearchInput, setCandidateSearchInput] = useState("");
   const [candidateSearch, setCandidateSearch] = useState("");
@@ -251,21 +273,26 @@ export function OrganizationAdministrationPage() {
     const membership = viewer?.membership;
     const churchScope = tree.find((item) => item.organizationId === membership?.organizationId);
     if (!churchScope) return rawAccess;
-    const isPastor = membership?.role === "minister" && membership.churchTitleCode === "pastor";
-    const isPresident = membership?.role === "executive" && membership.executiveOfficeCodes.includes("president");
+    const assignedOffices = demoOffices[demoOfficeKey(
+      churchScope.scopeId,
+      serviceYear,
+      viewer?.profile.id ?? "",
+    )] ?? [];
+    const isPastor = assignedOffices.includes("pastor");
+    const isPresident = assignedOffices.includes("president");
     if (!isPastor && !isPresident) return rawAccess;
     return [{
       scopeId: churchScope.scopeId,
       scopeType: "church",
       scopeName: churchScope.displayName,
-      authoritySource: isPastor ? "church_pastor" : "office",
-      officeCodes: isPastor ? ["pastor"] : ["president"],
+      authoritySource: "office",
+      officeCodes: assignedOffices.filter((code) => code === "pastor" || code === "president"),
       canManageOfficers: true,
       canManageDelegations: true,
       canViewRoster: true,
       expiresAt: null,
     }];
-  }, [isPlatformAdmin, mode, rawAccess, tree, viewer?.membership]);
+  }, [demoOffices, isPlatformAdmin, mode, rawAccess, serviceYear, tree, viewer?.membership, viewer?.profile.id]);
   const effectiveAccess = mode === "demo" && demoAccess.length ? demoAccess : rawAccess;
 
   const accessForSelectedScope = useMemo(() => {
@@ -325,6 +352,14 @@ export function OrganizationAdministrationPage() {
   }, [selectedScopeId]);
 
   useEffect(() => {
+    setOfficerRoster([]);
+    setCandidateRoster([]);
+    setAppointmentUserId("");
+    setDelegateUserId("");
+    setRosterError(null);
+  }, [selectedScopeId, selectedYear]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       setSearch(searchInput.trim());
       setPage(0);
@@ -354,12 +389,6 @@ export function OrganizationAdministrationPage() {
     return matching.slice(offset, offset + limit).map((member) => {
       const organization = organizations.find((item) => item.id === member.organizationId);
       const storedCodes = demoOffices[demoOfficeKey(scope.scopeId, selectedYear, member.userId)];
-      const defaultCodes: GovernanceOfficeCode[] = scope.scopeType === "church"
-        ? [
-            ...(member.role === "minister" && member.churchTitleCode === "pastor" ? ["pastor" as const] : []),
-            ...member.executiveOfficeCodes,
-          ]
-        : [];
       return {
         userId: member.userId,
         displayName: member.displayName,
@@ -368,7 +397,7 @@ export function OrganizationAdministrationPage() {
         organizationId: member.organizationId,
         organizationName: organization?.name ?? "소속 교회 없음",
         presbyteryName: organization?.presbytery ?? "소속 노회 없음",
-        officeCodes: storedCodes ?? defaultCodes,
+        officeCodes: storedCodes ?? [],
         totalCount: matching.length,
       };
     });
@@ -407,8 +436,11 @@ export function OrganizationAdministrationPage() {
   const reloadOfficerRoster = useCallback(async (signal?: AbortSignal) => {
     if (!selectedScope || !accessForSelectedScope?.canViewRoster) {
       setOfficerRoster([]);
+      setOfficerLoading(false);
       return;
     }
+    setOfficerRoster([]);
+    setOfficerLoading(true);
     try {
       const next = mode === "demo"
         ? makeDemoRoster(selectedScope, { query: "", offset: 0, limit: PAGE_SIZE })
@@ -423,6 +455,8 @@ export function OrganizationAdministrationPage() {
       if (!signal?.aborted) setOfficerRoster(next);
     } catch (reason) {
       if (!signal?.aborted) setRosterError(reason instanceof Error ? reason.message : "임원 현황을 불러오지 못했습니다.");
+    } finally {
+      if (!signal?.aborted) setOfficerLoading(false);
     }
   }, [accessForSelectedScope?.canViewRoster, makeDemoRoster, mode, selectedScope, selectedYear]);
 
@@ -436,19 +470,33 @@ export function OrganizationAdministrationPage() {
     const controller = new AbortController();
     if (!selectedScope || (!editingOffice && !delegationOpen)) {
       setCandidateRoster([]);
+      setCandidateLoading(false);
       return () => controller.abort();
     }
+    setCandidateRoster([]);
+    setAppointmentUserId("");
+    setDelegateUserId("");
     setCandidateLoading(true);
     const load = mode === "demo"
       ? Promise.resolve(makeDemoRoster(selectedScope, { query: candidateSearch, offset: 0, limit: PAGE_SIZE }))
-      : listGovernanceRoster({
-          scopeId: selectedScope.scopeId,
-          serviceYear: selectedYear,
-          search: candidateSearch,
-          limit: 200,
-          offset: 0,
-          signal: controller.signal,
-        });
+      : editingOffice
+        ? listGovernanceOfficeCandidates({
+            scopeId: selectedScope.scopeId,
+            serviceYear: selectedYear,
+            officeCode: editingOffice,
+            search: candidateSearch,
+            limit: 50,
+            offset: 0,
+            signal: controller.signal,
+          })
+        : listGovernanceRoster({
+            scopeId: selectedScope.scopeId,
+            serviceYear: selectedYear,
+            search: candidateSearch,
+            limit: 200,
+            offset: 0,
+            signal: controller.signal,
+          });
     void load.then((next) => {
       if (!controller.signal.aborted) setCandidateRoster(next);
     }).catch((reason) => {
@@ -573,7 +621,7 @@ export function OrganizationAdministrationPage() {
       : accessForSelectedScope?.authoritySource === "delegation"
         ? "위임 관리자"
         : accessForSelectedScope?.officeCodes.includes("pastor")
-          ? "목사 권한"
+          ? (selectedScope?.scopeType === "church" ? "담임목사" : "목사 권한")
           : accessForSelectedScope?.officeCodes.includes("president")
             ? "회장"
             : "조직 열람";
@@ -635,18 +683,20 @@ export function OrganizationAdministrationPage() {
     const target = eligibleOfficeCandidates.find((item) => item.userId === appointmentUserId)
       ?? officerRoster.find((item) => item.userId === appointmentUserId && isEligibleOfficeCandidate(item, editingOffice, selectedScope.scopeType));
     if (!target) return;
-    const nextCodes = [...new Set([...target.officeCodes, editingOffice])];
     setSavingOffice(true);
     setRosterError(null);
     try {
       if (mode === "demo") {
-        setDemoOffices((current) => ({
-          ...current,
-          [demoOfficeKey(selectedScope.scopeId, selectedYear, target.userId)]: nextCodes,
-        }));
+        setDemoOffices((current) => assignDemoOffice(
+          current,
+          selectedScope.scopeId,
+          selectedYear,
+          target.userId,
+          editingOffice,
+        ));
         setDemoRevision((current) => current + 1);
       } else {
-        await setGovernanceOffices(selectedScope.scopeId, selectedYear, target.userId, nextCodes);
+        await assignGovernanceOffice(selectedScope.scopeId, selectedYear, editingOffice, target.userId);
         await Promise.all([reloadRoster(), reloadOfficerRoster()]);
       }
       setEditingOffice(null);
@@ -672,7 +722,7 @@ export function OrganizationAdministrationPage() {
         }));
         setDemoRevision((current) => current + 1);
       } else {
-        await setGovernanceOffices(selectedScope.scopeId, selectedYear, holder.userId, nextCodes);
+        await clearGovernanceOffice(selectedScope.scopeId, selectedYear, code);
         await Promise.all([reloadRoster(), reloadOfficerRoster()]);
       }
       setEditingOffice(null);
@@ -811,15 +861,12 @@ export function OrganizationAdministrationPage() {
           {tab === "officers" ? <section id="governance-panel-officers" className="governance-section" role="tabpanel" aria-labelledby="governance-tab-officers">
             <div className="governance-section-heading"><div><p className="eyebrow">YEARLY OFFICERS</p><h2 id="officers-heading">{selectedScope.displayName} 임원 구성</h2></div><span>{selectedYear}년</span></div>
             <div className={`authority-banner ${canManageOfficers ? "" : "governance-readonly"}`}><ShieldCheck weight="fill" /><span><strong>{canManageOfficers ? `${authorityLabel} 권한으로 구성합니다.` : "현재 범위는 열람만 가능합니다."}</strong><small>{isDelegatedAuthority ? "위임 관리자는 회장·목사 권한을 지정하거나 해제할 수 없습니다." : "저장 시 서버가 조직 범위, 임기와 권한을 다시 검증합니다."}</small></span></div>
-            {rosterLoading ? <div className="governance-inline-loading" role="status"><CircleNotch className="spin" /> 명단 확인 중</div> : null}
+            {officerLoading ? <div className="governance-inline-loading" role="status"><CircleNotch className="spin" /> 임원 현황 확인 중</div> : null}
             <div className="governance-office-grid">{officers.map((code) => {
               const holder = officeHolders.get(code);
-              const isCurrentChurchPastor = code === "pastor"
-                && selectedScope.scopeType === "church"
-                && selectedYear === serviceYear;
               const holderHasAuthorityOffice = holder?.officeCodes.some((holderCode) => holderCode === "president" || holderCode === "pastor") ?? false;
               const canEditOffice = canManageOfficers && !(isDelegatedAuthority && (code === "president" || code === "pastor" || holderHasAuthorityOffice));
-              return <article className={`governance-office-card ${holder ? "is-filled" : "is-empty"}`} key={code}><span className="governance-office-card__icon">{code === "pastor" ? <Church weight="fill" /> : <Crown weight="fill" />}</span><div><small>{officeLabel(selectedScope.scopeType, code)}</small><strong>{holder?.displayName ?? (isCurrentChurchPastor ? "등록된 사역자 없음" : "담당자 미지정")}</strong><span>{isCurrentChurchPastor ? "현재 사역자 역할과 자동 연동" : holder ? <><RoleBadge role={holder.membershipRole} /> {holder.organizationName}</> : "담당자를 설정해 주세요."}</span></div>{canManageOfficers ? isCurrentChurchPastor ? <button type="button" disabled aria-label="담임목사는 사역자 역할과 자동 연동됩니다">역할 연동</button> : canEditOffice ? <button type="button" onClick={() => openOfficeEditor(code)}>{holder ? "변경" : "설정"}</button> : <button type="button" disabled aria-label={`${officeLabel(selectedScope.scopeType, code)} 지정은 원 권한자만 할 수 있습니다`}>원권한 전용</button> : null}</article>;
+              return <article className={`governance-office-card ${holder ? "is-filled" : "is-empty"}`} key={code}><span className="governance-office-card__icon">{code === "pastor" ? <Church weight="fill" /> : <Crown weight="fill" />}</span><div><small>{officeLabel(selectedScope.scopeType, code)}</small><strong>{holder?.displayName ?? "담당자 미지정"}</strong><span>{holder ? <><RoleBadge role={holder.membershipRole} /> {holder.organizationName}</> : code === "pastor" ? "승인된 사역자 중 담당자를 지정해 주세요." : "담당자를 설정해 주세요."}</span></div>{canManageOfficers ? canEditOffice ? <button type="button" disabled={officerLoading || savingOffice} onClick={() => openOfficeEditor(code)}>{holder ? "변경" : "설정"}</button> : <button type="button" disabled aria-label={`${officeLabel(selectedScope.scopeType, code)} 지정은 원 권한자만 할 수 있습니다`}>원권한 전용</button> : null}</article>;
             })}</div>
             {editingOffice ? <form className="governance-editor" onSubmit={saveOffice} aria-busy={savingOffice}><div className="governance-editor__heading"><span><UserCircle weight="fill" /></span><div><strong>{officeLabel(selectedScope.scopeType, editingOffice)} 담당자</strong><small>해당 직책에 맞는 사역자·임원만 표시하며 이름으로 검색할 수 있습니다.</small></div></div><label className="search-field search-field--large"><MagnifyingGlass /><input value={candidateSearchInput} onChange={(event) => setCandidateSearchInput(event.target.value)} placeholder="담당자 이름 또는 교회 검색" aria-label="담당자 후보 검색" />{candidateSearchInput ? <button type="button" onClick={() => setCandidateSearchInput("")} aria-label="후보 검색어 지우기"><X /></button> : null}</label><label><span>담당자 선택</span><select required value={appointmentUserId} onChange={(event) => setAppointmentUserId(event.target.value)} disabled={candidateLoading}><option value="">{candidateLoading ? "후보를 찾는 중입니다" : eligibleOfficeCandidates.length ? "담당자를 선택하세요" : "자격 있는 담당자가 없습니다"}</option>{eligibleOfficeCandidates.map((member) => <option key={member.userId} value={member.userId}>{member.displayName} · {member.organizationName}</option>)}</select></label><div className="governance-editor__actions"><button className="button button--secondary" type="button" disabled={savingOffice} onClick={() => setEditingOffice(null)}>취소</button>{officeHolders.get(editingOffice) ? <button className="button button--danger" type="button" disabled={savingOffice} onClick={() => void clearOffice(editingOffice)}>공석 처리</button> : null}<button className="button button--approve" type="submit" disabled={savingOffice || candidateLoading || !appointmentUserId}>{savingOffice ? <CircleNotch className="spin" /> : <Check weight="bold" />} 적용</button></div></form> : null}
           </section> : null}

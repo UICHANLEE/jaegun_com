@@ -124,13 +124,15 @@ function ExecutiveOfficeToggles({
 }
 
 export function LoginPage() {
-  const { signIn, signUp, enterDemo, error, refresh, mode } = useAppData();
+  const { signIn, signUp, enterDemo, error, refresh, mode, organizations } = useAppData();
   const navigate = useNavigate();
   const [view, setView] = useState<AuthView>("login");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [presbytery, setPresbytery] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
   const submittingRef = useRef(false);
   const retryingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -138,6 +140,20 @@ export function LoginPage() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [localSuccess, setLocalSuccess] = useState<string | null>(null);
   const [executiveOfficeCodes, setExecutiveOfficeCodes] = useState<ExecutiveOfficeCode[]>([]);
+  const availableOrganizations = useMemo(
+    () => organizations.filter((organization) => organization.status !== "archived"),
+    [organizations],
+  );
+  const presbyteries = useMemo(
+    () => [...new Set(availableOrganizations.map((organization) => organization.presbytery))]
+      .sort((left, right) => left.localeCompare(right, "ko")),
+    [availableOrganizations],
+  );
+  const presbyteryOrganizations = useMemo(
+    () => availableOrganizations.filter((organization) => organization.presbytery === presbytery),
+    [availableOrganizations, presbytery],
+  );
+  const selectedSignupOrganization = presbyteryOrganizations.find((organization) => organization.id === organizationId);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -152,11 +168,24 @@ export function LoginPage() {
       setLocalError("비밀번호가 서로 일치하지 않습니다.");
       return;
     }
+    if (view === "signup" && !presbytery) {
+      setLocalError("소속 노회를 선택해 주세요.");
+      return;
+    }
     submittingRef.current = true;
     setSubmitting(true);
     try {
       if (view === "signup") {
-        await signUp({ displayName: displayName.trim(), email: email.trim(), password });
+        if (!selectedSignupOrganization) {
+          setLocalError("선택한 노회에 속한 교회를 선택해 주세요.");
+          return;
+        }
+        await signUp({
+          displayName: displayName.trim(),
+          email: email.trim(),
+          password,
+          organizationId: selectedSignupOrganization.id,
+        });
         setLocalSuccess("가입 요청을 처리했습니다. 확인 메일의 링크를 연 뒤 로그인해 주세요. 메일이 도착하지 않으면 관리자에게 문의해 주세요.");
       } else {
         await signIn({ email: email.trim(), password });
@@ -236,10 +265,45 @@ export function LoginPage() {
 
             <form className="auth-form" aria-busy={submitting} onSubmit={handleSubmit}>
               {view === "signup" ? (
-                <label className="field">
-                  <span>이름</span>
-                  <span className="field__control"><User /><input required maxLength={50} autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="예: 이재건" /></span>
-                </label>
+                <>
+                  <label className="field">
+                    <span>이름</span>
+                    <span className="field__control"><User /><input required maxLength={50} autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="예: 이재건" /></span>
+                  </label>
+                  <div className="auth-organization-fields" role="group" aria-label="소속 공동체 선택">
+                    <label className="field">
+                      <span>소속 노회</span>
+                      <select
+                        aria-label="소속 노회"
+                        aria-required="true"
+                        value={presbytery}
+                        onChange={(event) => {
+                          setPresbytery(event.target.value);
+                          setOrganizationId("");
+                        }}
+                      >
+                        <option value="">노회를 선택하세요</option>
+                        {presbyteries.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>소속 교회</span>
+                      <select
+                        aria-label="소속 교회"
+                        aria-required="true"
+                        disabled={!presbytery}
+                        value={organizationId}
+                        onChange={(event) => setOrganizationId(event.target.value)}
+                      >
+                        <option value="">{presbytery ? "교회를 선택하세요" : "노회를 먼저 선택하세요"}</option>
+                        {presbyteryOrganizations.map((organization) => (
+                          <option key={organization.id} value={organization.id}>{organization.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <p>가입 후에도 최종 가입 승인 요청 전 소속 교회를 다시 확인할 수 있습니다.</p>
+                  </div>
+                </>
               ) : null}
               <label className="field">
                 <span>이메일</span>
@@ -487,8 +551,11 @@ const DEFAULT_TITLE_BY_ROLE: Record<MembershipRole, ChurchTitleCode> = {
 export function OnboardingPage() {
   const { viewer, organizations, requestMembership, signOut, mode, serviceYear } = useAppData();
   const rejectedApplication = viewer?.application?.status === "rejected" ? viewer.application : undefined;
+  const preferredOrganizationId = rejectedApplication?.organizationId ?? viewer?.signupOrganizationId ?? "";
+  const preferredOrganization = organizations.find((item) => item.id === preferredOrganizationId);
   const [query, setQuery] = useState("");
-  const [organizationId, setOrganizationId] = useState(rejectedApplication?.organizationId ?? "");
+  const [presbytery, setPresbytery] = useState(preferredOrganization?.presbytery ?? "");
+  const [organizationId, setOrganizationId] = useState(preferredOrganization?.id ?? "");
   const [role, setRole] = useState<MembershipRole>(rejectedApplication?.requestedRole ?? "member");
   const [churchTitleCode, setChurchTitleCode] = useState<ChurchTitleCode>(
     rejectedApplication?.churchTitleCode ?? DEFAULT_TITLE_BY_ROLE[rejectedApplication?.requestedRole ?? "member"],
@@ -502,18 +569,35 @@ export function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  const availableOrganizations = useMemo(
+    () => organizations.filter((organization) => organization.status !== "archived"),
+    [organizations],
+  );
+  const presbyteries = useMemo(
+    () => [...new Set(availableOrganizations.map((organization) => organization.presbytery))]
+      .sort((left, right) => left.localeCompare(right, "ko")),
+    [availableOrganizations],
+  );
+  const presbyteryOrganizations = useMemo(
+    () => availableOrganizations.filter((organization) => organization.presbytery === presbytery),
+    [availableOrganizations, presbytery],
+  );
   const filteredOrganizations = useMemo(() => {
     const normalized = query.trim().replace(/\s/g, "");
-    if (!normalized) return organizations;
-    return organizations.filter((item) => `${item.name}${item.presbytery}`.replace(/\s/g, "").includes(normalized));
-  }, [organizations, query]);
+    if (!normalized) return presbyteryOrganizations;
+    return presbyteryOrganizations.filter((item) => item.name.replace(/\s/g, "").includes(normalized));
+  }, [presbyteryOrganizations, query]);
 
-  const selectedOrganization = organizations.find((item) => item.id === organizationId);
+  const selectedOrganization = presbyteryOrganizations.find((item) => item.id === organizationId);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!organizationId) {
-      setLocalError("소속 교회를 먼저 선택해 주세요.");
+    if (!presbytery) {
+      setLocalError("소속 노회를 먼저 선택해 주세요.");
+      return;
+    }
+    if (!selectedOrganization) {
+      setLocalError("선택한 노회에 속한 교회를 선택해 주세요.");
       return;
     }
     if (role === "executive" && !executiveOfficeCodes.length) {
@@ -547,7 +631,7 @@ export function OnboardingPage() {
       {mode === "demo" ? <div className="demo-ribbon demo-ribbon--standalone">신규 가입자 데모 화면입니다.</div> : null}
       <section className="onboarding-card">
         <div className="onboarding-card__intro">
-          <span className="step-pill">가입 설정 · 1단계</span>
+          <span className="step-pill">가입 설정 · 소속과 역할 확인</span>
           <h1>{viewer?.profile.displayName}님,<br />어느 공동체와 함께하시나요?</h1>
           <p>소속 교회와 역할을 선택하면 담당자의 확인 후 모든 기능을 이용할 수 있어요.</p>
         </div>
@@ -558,27 +642,50 @@ export function OnboardingPage() {
           ) : null}
           {localError ? <ErrorBanner message={localError} /> : null}
           <fieldset>
-            <legend><span>1</span> 소속 교회를 선택해 주세요</legend>
+            <legend><span>1</span> 소속 노회를 선택해 주세요</legend>
+            <label className="field onboarding-presbytery-field">
+              <span>노회</span>
+              <select
+                aria-label="소속 노회"
+                aria-required="true"
+                value={presbytery}
+                onChange={(event) => {
+                  setPresbytery(event.target.value);
+                  setOrganizationId("");
+                  setQuery("");
+                  setLocalError(null);
+                }}
+              >
+                <option value="">노회를 선택하세요</option>
+                {presbyteries.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+              <small className="field-hint">교회 목록은 선택한 노회에 속한 조직만 표시됩니다.</small>
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend><span>2</span> 소속 교회를 선택해 주세요</legend>
             <label className="search-field search-field--large">
               <MagnifyingGlass />
-              <input aria-label="교회 이름 또는 노회 검색" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="교회 이름 또는 노회 검색" />
+              <input aria-label="교회 이름 검색" disabled={!presbytery} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={presbytery ? "교회 이름 검색" : "노회를 먼저 선택해 주세요"} />
             </label>
             <div className="organization-picker" role="radiogroup" aria-label="소속 교회">
               {filteredOrganizations.slice(0, 12).map((organization) => (
                 <label key={organization.id} className={organization.id === organizationId ? "is-selected" : ""}>
-                  <input type="radio" name="organization" value={organization.id} checked={organization.id === organizationId} onChange={() => setOrganizationId(organization.id)} />
+                  <input type="radio" name="organization" value={organization.id} checked={organization.id === organizationId} onChange={() => { setOrganizationId(organization.id); setLocalError(null); }} />
                   <span className="organization-picker__icon"><Church weight="fill" /></span>
                   <span><strong>{organization.name}</strong><small>{organization.presbytery} · {organization.status === "active" ? "운영 중" : "조직 준비됨"}</small></span>
                   <span className="organization-picker__check"><Check weight="bold" /></span>
                 </label>
               ))}
-              {!filteredOrganizations.length ? <p className="picker-empty">검색한 교회를 찾지 못했어요.</p> : null}
+              {!presbytery ? <p className="picker-empty">노회를 선택하면 소속 교회가 표시됩니다.</p> : null}
+              {presbytery && !filteredOrganizations.length ? <p className="picker-empty">선택한 노회에서 교회를 찾지 못했어요.</p> : null}
             </div>
             {filteredOrganizations.length > 12 ? <p className="field-hint">검색어를 입력하면 나머지 교회도 찾을 수 있어요.</p> : null}
           </fieldset>
 
           <fieldset>
-            <legend><span>2</span> 신청할 역할을 선택해 주세요</legend>
+            <legend><span>3</span> 신청할 역할을 선택해 주세요</legend>
             <div className="role-picker">
               {ROLE_OPTIONS.map((option) => {
                 const Icon = option.icon;
@@ -606,7 +713,7 @@ export function OnboardingPage() {
 
           {role === "executive" ? (
             <fieldset className="executive-office-fieldset">
-              <legend><span>3</span> 맡은 임원 직책을 선택해 주세요</legend>
+              <legend><span>4</span> 맡은 임원 직책을 선택해 주세요</legend>
               <p className="field-hint">{serviceYear}년도 기준이며 여러 직책을 함께 맡을 수 있어요. 최종 직책은 플랫폼 관리자 승인 후 적용됩니다.</p>
               <ExecutiveOfficeToggles value={executiveOfficeCodes} onChange={setExecutiveOfficeCodes} />
             </fieldset>
@@ -634,7 +741,7 @@ export function OnboardingPage() {
                 {role === "executive" && executiveOfficeCodes.length ? ` · ${executiveOfficeCodes.map((code) => EXECUTIVE_OFFICE_LABELS[code]).join("·")}` : ""}
               </strong>
             </div>
-            <button className="button button--primary" type="submit" disabled={!organizationId || submitting}>
+            <button className="button button--primary" type="submit" disabled={!selectedOrganization || submitting}>
               {submitting ? <CircleNotch className="spin" /> : null} 가입 승인 요청
             </button>
           </div>

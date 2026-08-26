@@ -3,7 +3,25 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_catalog;
 
-select plan(36);
+select plan(47);
+
+create function pg_temp.clear_office_and_check_deferred_guard(
+  p_scope_id uuid,
+  p_service_year integer,
+  p_office_code text
+)
+returns void
+language plpgsql
+as $$
+begin
+  perform public.clear_governance_office(
+    p_scope_id,
+    p_service_year,
+    p_office_code
+  );
+  set constraints governance_scope_authority_guard immediate;
+end;
+$$;
 
 select is(
   (select count(*) from public.governance_scopes where scope_type = 'general_assembly'),
@@ -50,7 +68,8 @@ values
   ('c0000000-0000-4000-8000-000000000001', 'governance-pastor@example.com', '{"display_name":"목사"}'),
   ('d0000000-0000-4000-8000-000000000001', 'governance-delegate@example.com', '{"display_name":"위임회원"}'),
   ('e0000000-0000-4000-8000-000000000001', 'governance-member@example.com', '{"display_name":"일반회원"}'),
-  ('f0000000-0000-4000-8000-000000000001', 'governance-executive@example.com', '{"display_name":"다른교회임원"}');
+  ('f0000000-0000-4000-8000-000000000001', 'governance-executive@example.com', '{"display_name":"다른교회임원"}'),
+  ('a1000000-0000-4000-8000-000000000001', 'governance-assistant-pastor@example.com', '{"display_name":"보조목사"}');
 
 insert into public.platform_admins (user_id, note)
 values ('a0000000-0000-4000-8000-000000000001', 'hierarchical governance test');
@@ -85,6 +104,11 @@ values
     'f0000000-0000-4000-8000-000000000001',
     (select id from public.organizations where slug = 'jaegun-namseoul'),
     'executive'
+  ),
+  (
+    'a1000000-0000-4000-8000-000000000001',
+    (select id from public.organizations where slug = 'jaegun-bupyeong'),
+    'minister'
   );
 
 select set_config(
@@ -113,6 +137,38 @@ select lives_ok(
     'c0000000-0000-4000-8000-000000000001'
   ),
   'platform admin assigns the presbytery pastor authority'
+);
+select lives_ok(
+  format(
+    'select public.assign_governance_office(%L, %s, ''pastor'', %L)',
+    (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+    current_setting('test.governance_service_year')::integer,
+    'c0000000-0000-4000-8000-000000000001'
+  ),
+  'platform admin explicitly assigns the annual church pastor'
+);
+select lives_ok(
+  format(
+    'select public.assign_governance_office(%L, %s, ''treasurer'', %L)',
+    (select id from public.governance_scopes where scope_type = 'general_assembly'),
+    current_setting('test.governance_service_year')::integer,
+    'b0000000-0000-4000-8000-000000000001'
+  ),
+  'platform admin assigns an eligible general-assembly officer'
+);
+select ok(
+  (
+    select candidate.membership_role = 'minister'::public.app_role
+    from public.list_governance_office_candidates(
+      (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+      current_setting('test.governance_service_year')::integer,
+      'pastor',
+      null,
+      1,
+      0
+    ) as candidate
+  ),
+  'office candidates are role-filtered before the page limit is applied'
 );
 
 reset role;
@@ -178,9 +234,10 @@ select ok(
     select 1
     from jsonb_array_elements(public.get_my_governance_access()) as access(item)
     where item ->> 'scope_type' = 'church'
-      and item ->> 'authority_source' = 'church_pastor'
+      and (access.item -> 'office_codes') ? 'pastor'
+      and (item ->> 'can_manage_officers')::boolean
   ),
-  'active church minister receives derived church pastor authority'
+  'explicitly assigned church pastor receives exact-scope authority'
 );
 select lives_ok(
   format(
@@ -190,6 +247,37 @@ select lives_ok(
     'b0000000-0000-4000-8000-000000000001'
   ),
   'church pastor can assign an eligible church executive'
+);
+select throws_ok(
+  format(
+    'select pg_temp.clear_office_and_check_deferred_guard(%L, %s, ''pastor'')',
+    (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+    current_setting('test.governance_service_year')::integer
+  ),
+  '42501',
+  'governance_scope_authority_cannot_be_orphaned',
+  'current native authority cannot leave an active scope without a president or pastor'
+);
+
+reset role;
+select set_config('request.jwt.claim.sub', 'a1000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+
+select is(
+  jsonb_array_length(public.get_my_governance_access()),
+  0,
+  'an unassigned church minister receives no governance officer authority'
+);
+select throws_ok(
+  format(
+    'select public.assign_governance_office(%L, %s, ''secretary'', %L)',
+    (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+    current_setting('test.governance_service_year')::integer,
+    'b0000000-0000-4000-8000-000000000001'
+  ),
+  '42501',
+  'governance_office_management_forbidden',
+  'an unassigned minister cannot manage church officers'
 );
 
 reset role;
@@ -207,6 +295,54 @@ select ok(
       and assignment.ended_at is null
   ),
   'church governance offices mirror into legacy executive operations'
+);
+
+reset role;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+
+select lives_ok(
+  format(
+    'select public.assign_governance_office(%L, %s, ''treasurer'', %L)',
+    (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+    current_setting('test.governance_service_year')::integer,
+    'b0000000-0000-4000-8000-000000000001'
+  ),
+  'single-office assignment preserves another office on the same person'
+);
+select ok(
+  (
+    select assignment.office_codes @> array['secretary', 'treasurer']::text[]
+    from public.list_governance_roster(
+      (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+      current_setting('test.governance_service_year')::integer,
+      '노회장',
+      10,
+      0
+    ) as assignment
+  ),
+  'the target retains both independently assigned church offices'
+);
+select lives_ok(
+  format(
+    'select public.clear_governance_office(%L, %s, ''treasurer'')',
+    (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+    current_setting('test.governance_service_year')::integer
+  ),
+  'single-office clear does not replace the holder complete office set'
+);
+select ok(
+  (
+    select assignment.office_codes = array['secretary']::text[]
+    from public.list_governance_roster(
+      (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+      current_setting('test.governance_service_year')::integer,
+      '노회장',
+      10,
+      0
+    ) as assignment
+  ),
+  'clearing one church office preserves the holder remaining office'
 );
 
 reset role;
@@ -307,6 +443,16 @@ select throws_ok(
   '42501',
   'governance_roster_forbidden',
   'ordinary member cannot enumerate a governance roster'
+);
+select throws_ok(
+  format(
+    'select public.clear_governance_office(%L, %s, ''vice_president'')',
+    (select id from public.governance_scopes where scope_type = 'church' and organization_id = (select id from public.organizations where slug = 'jaegun-bupyeong')),
+    current_setting('test.governance_service_year')::integer
+  ),
+  '42501',
+  'governance_office_management_forbidden',
+  'ordinary member cannot clear even an already vacant office'
 );
 
 reset role;

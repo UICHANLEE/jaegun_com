@@ -75,7 +75,7 @@ describe("hierarchy governance access", () => {
     expect(screen.queryByRole("tab", { name: "권한 위임" })).not.toBeInTheDocument();
   });
 
-  it("shows the current church pastor as membership-role managed", async () => {
+  it("shows the current church pastor as an explicit annual assignment", async () => {
     window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({
       ...createDemoState(),
       viewer: { profile: DEMO_VIEWER },
@@ -85,8 +85,43 @@ describe("hierarchy governance access", () => {
 
     const scopeGroup = await screen.findByRole("group", { name: "조직 범위 선택" });
     fireEvent.click(within(scopeGroup).getByRole("button", { name: /교회/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "조직" }), {
+      target: { value: "demo-scope-church-org-19" },
+    });
 
-    expect(await screen.findByRole("button", { name: "담임목사는 사역자 역할과 자동 연동됩니다" })).toBeDisabled();
+    const pastorCard = (await screen.findByText("담임목사")).closest("article")!;
+    expect(await within(pastorCard).findByRole("button", { name: "변경" })).toBeEnabled();
+  });
+
+  it("opens an explicit officer selector at assembly, presbytery, and church scope", async () => {
+    window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({
+      ...createDemoState(),
+      viewer: { profile: DEMO_VIEWER },
+    }));
+
+    renderApp("/manage/organization");
+
+    const openAndCloseEditor = async (label: string) => {
+      const card = (await screen.findByText(label)).closest("article")!;
+      fireEvent.click(within(card).getByRole("button", { name: /설정|변경/ }));
+      expect(await screen.findByRole("combobox", { name: "담당자 선택" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    };
+
+    await openAndCloseEditor("총회장");
+
+    const scopeGroup = screen.getByRole("group", { name: "조직 범위 선택" });
+    fireEvent.click(within(scopeGroup).getByRole("button", { name: /노회/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "조직" }), {
+      target: { value: "demo-scope-presbytery-4" },
+    });
+    await openAndCloseEditor("노회장");
+
+    fireEvent.click(within(scopeGroup).getByRole("button", { name: /교회/ }));
+    fireEvent.change(screen.getByRole("combobox", { name: "조직" }), {
+      target: { value: "demo-scope-church-org-19" },
+    });
+    await openAndCloseEditor("담임목사");
   });
 
   it("keeps an ordinary delegated member inside the exact governance-only branch", async () => {
@@ -236,7 +271,7 @@ describe("hierarchy governance access", () => {
     renderApp("/manage/organization");
 
     expect(await screen.findByRole("button", { name: "회장 지정은 원 권한자만 할 수 있습니다" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "담임목사는 사역자 역할과 자동 연동됩니다" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "담임목사 지정은 원 권한자만 할 수 있습니다" })).toBeDisabled();
     expect(screen.queryByRole("tab", { name: "권한 위임" })).not.toBeInTheDocument();
   });
 });

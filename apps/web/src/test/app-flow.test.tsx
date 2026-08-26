@@ -48,6 +48,23 @@ describe("primary service journeys", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 서로 일치하지 않습니다");
   });
 
+  it("filters signup churches by presbytery and clears an invalid church selection", async () => {
+    renderApp(["/auth"]);
+    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+
+    const presbyterySelect = screen.getByLabelText("소속 노회");
+    const churchSelect = screen.getByLabelText("소속 교회");
+    fireEvent.change(presbyterySelect, { target: { value: "서울노회" } });
+
+    expect(within(churchSelect).getByRole("option", { name: "재건부평교회" })).toBeInTheDocument();
+    fireEvent.change(churchSelect, { target: { value: "org-19" } });
+    expect(churchSelect).toHaveValue("org-19");
+
+    fireEvent.change(presbyterySelect, { target: { value: "부산노회" } });
+    expect(churchSelect).toHaveValue("");
+    expect(within(churchSelect).queryByRole("option", { name: "재건부평교회" })).not.toBeInTheDocument();
+  });
+
   it("offers password recovery and rejects a reset page without a valid recovery session", async () => {
     const forgotView = renderApp(["/forgot-password"]);
     expect(await screen.findByRole("heading", { name: "비밀번호를 잊으셨나요?" })).toBeInTheDocument();
@@ -104,11 +121,20 @@ describe("primary service journeys", () => {
     const newUserLabel = await screen.findByText("신규 가입자");
     fireEvent.click(newUserLabel.closest("button")!);
     expect(await screen.findByRole("heading", { name: /어느 공동체와 함께하시나요/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "소속 노회" }), {
+      target: { value: "서울노회" },
+    });
     expect(screen.getByRole("radiogroup", { name: "소속 교회" })).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText("교회 이름 또는 노회 검색"), {
+    fireEvent.change(screen.getByPlaceholderText("교회 이름 검색"), {
       target: { value: "부평" },
     });
     expect(screen.getAllByText("재건부평교회")).not.toHaveLength(0);
+    fireEvent.click(screen.getAllByText("재건부평교회")[0].closest("label")!);
+    expect(screen.getByRole("button", { name: "가입 승인 요청" })).toBeEnabled();
+    fireEvent.change(screen.getByRole("combobox", { name: "소속 노회" }), {
+      target: { value: "부산노회" },
+    });
+    expect(screen.getByRole("button", { name: "가입 승인 요청" })).toBeDisabled();
   });
 
   it("lets an executive choose multiple offices and projects office-specific operations", async () => {
@@ -398,6 +424,8 @@ describe("primary service journeys", () => {
 
     expect(await screen.findByRole("heading", { name: /어느 공동체와 함께하시나요/ })).toBeInTheDocument();
     expect(screen.getByText(/소속 교회를 다시 확인해 주세요/)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "소속 노회" })).toHaveValue("서울노회");
+    expect(screen.getByRole("radio", { name: /재건부평교회/ })).toBeChecked();
     expect(screen.getByRole("button", { name: "가입 승인 요청" })).toBeInTheDocument();
   });
 });

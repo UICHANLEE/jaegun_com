@@ -29,6 +29,7 @@ import type {
   MembershipRole,
   Message,
   Notification,
+  Organization,
   Post,
   PostDraft,
   Profile,
@@ -265,6 +266,31 @@ function createEmptyState(mode: AppDataState["mode"], loading = false): AppDataS
     notifications: [],
     meetingMinutes: [],
     ledgerEntries: [],
+  };
+}
+
+const ORGANIZATION_DIRECTORY_FIELDS = "id, source_name, display_name, slug, presbytery, description, location_text, contact_phone, website_url, worship_schedule, hero_path, status, claimed_at";
+
+function mapOrganizationDirectory(value: unknown): Organization[] {
+  return rowsOf(value).map((row) => ({
+    id: String(row.id),
+    sourceName: String(row.source_name),
+    name: String(row.display_name),
+    slug: String(row.slug),
+    presbytery: String(row.presbytery),
+    description: row.description ? String(row.description) : undefined,
+    address: row.location_text ? String(row.location_text) : undefined,
+    contact: row.contact_phone ? String(row.contact_phone) : undefined,
+    worshipSchedule: Array.isArray(row.worship_schedule) ? row.worship_schedule.map(String) : undefined,
+    status: row.status === "active" ? "active" : row.status === "archived" ? "archived" : "seeded",
+    claimStatus: row.claimed_at ? "claimed" : "unclaimed",
+  }));
+}
+
+function createAuthState(previous: AppDataState, mode: AppDataState["mode"], loading = false): AppDataState {
+  return {
+    ...createEmptyState(mode, loading),
+    organizations: previous.organizations,
   };
 }
 
@@ -1106,11 +1132,20 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         requestUserId = nextUserId;
         inFlightEntry.sessionEpoch = sessionEpoch;
         inFlightEntry.userId = requestUserId;
-        replaceState(createEmptyState("supabase", Boolean(user)));
+        replaceState(createAuthState(stateRef.current, "supabase", Boolean(user)));
       }
       if (!user) {
+        const organizationsResult = await supabase
+          .from("organizations")
+          .select(ORGANIZATION_DIRECTORY_FIELDS)
+          .order("display_name")
+          .abortSignal(abortController.signal);
+        if (organizationsResult.error) throw organizationsResult.error;
         if (!isRequestCurrent()) return;
-        replaceState(createEmptyState("supabase", false));
+        replaceState({
+          ...createEmptyState("supabase", false),
+          organizations: mapOrganizationDirectory(organizationsResult.data),
+        });
         setGovernanceRefreshDeadline(null);
         setError(null);
         return;
@@ -1124,7 +1159,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       supabase.rpc("get_my_context").abortSignal(abortController.signal),
       supabase
         .from("organizations")
-        .select("id, source_name, display_name, slug, presbytery, description, location_text, contact_phone, website_url, worship_schedule, hero_path, status, claimed_at")
+        .select(ORGANIZATION_DIRECTORY_FIELDS)
         .order("display_name")
         .abortSignal(abortController.signal),
       supabase.rpc("get_service_clock").abortSignal(abortController.signal),
@@ -1310,6 +1345,11 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       ? applications.find((item) => item.id === String(latestApplicationRow.id)) ?? applicationMap(latestApplicationRow)
       : undefined;
     const governanceAccess = normalizeGovernanceAccess(contextRow.governance_access);
+    const organizationDirectory = mapOrganizationDirectory(organizationsResult.data);
+    // Auth metadata is user-controlled: use it only to prefill onboarding, never as membership authority.
+    const requestedOrganizationId = typeof user.user_metadata.signup_organization_id === "string"
+      ? user.user_metadata.signup_organization_id
+      : undefined;
 
     const nextState: AppDataState = {
       mode: "supabase",
@@ -1328,20 +1368,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         } : undefined,
         application: viewerApplication,
         governanceAccess,
+        signupOrganizationId: requestedOrganizationId
+          && organizationDirectory.some((organization) => organization.id === requestedOrganizationId)
+          ? requestedOrganizationId
+          : undefined,
       },
-      organizations: rowsOf(organizationsResult.data).map((row) => ({
-        id: String(row.id),
-        sourceName: String(row.source_name),
-        name: String(row.display_name),
-        slug: String(row.slug),
-        presbytery: String(row.presbytery),
-        description: row.description ? String(row.description) : undefined,
-        address: row.location_text ? String(row.location_text) : undefined,
-        contact: row.contact_phone ? String(row.contact_phone) : undefined,
-        worshipSchedule: Array.isArray(row.worship_schedule) ? row.worship_schedule.map(String) : undefined,
-        status: row.status === "active" ? "active" : row.status === "archived" ? "archived" : "seeded",
-        claimStatus: row.claimed_at ? "claimed" : "unclaimed",
-      })),
+      organizations: organizationDirectory,
       posts: postRows.map((row) => {
         const board = boardMap.get(String(row.board_id));
         const authorId = row.author_id ? String(row.author_id) : "operations";
@@ -1543,7 +1575,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       if (remoteLoadsBlockedRef.current || stateRef.current.mode === "demo") return;
       if (nextUserId !== activeRemoteUserIdRef.current) {
         invalidateRemoteWork(nextUserId);
-        replaceState(createEmptyState("supabase", Boolean(nextUserId)));
+        replaceState(createAuthState(stateRef.current, "supabase", Boolean(nextUserId)));
       }
       scheduleRemoteLoad();
     });
@@ -1697,40 +1729,51 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     // Keep signed-out routes mounted while Supabase validates credentials.
     // The auth page owns its submitting state; toggling the global loader here
     // unmounts the form and drops the provider error returned to its caller.
-    replaceState(createEmptyState("supabase", false));
+    replaceState(createAuthState(stateRef.current, "supabase", false));
     setError(null);
     const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
     if (authError) {
-      replaceState(createEmptyState("supabase", false));
+      replaceState(createAuthState(stateRef.current, "supabase", false));
       throw authError;
     }
     // onAuthStateChange owns the remote refresh so a successful login is not
     // reported as failed merely because the following data refresh is slow.
   }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
 
-  const signUp = useCallback(async ({ displayName, email, password }: SignUpInput) => {
+  const signUp = useCallback(async ({ displayName, email, password, organizationId }: SignUpInput) => {
     if (!supabase) {
       throw new Error("실서비스 회원가입이 아직 연결되지 않았습니다. 아래에서 신규 가입자 흐름을 미리볼 수 있어요.");
     }
     if (signOutPromiseRef.current) await signOutPromiseRef.current;
+    const selectedOrganization = stateRef.current.organizations.find((organization) => (
+      organization.id === organizationId && organization.status !== "archived"
+    ));
+    if (!selectedOrganization) {
+      throw new Error("선택한 교회를 확인하지 못했습니다. 노회와 교회를 다시 선택해 주세요.");
+    }
     clearPasswordRecovery();
     remoteLoadsBlockedRef.current = false;
     invalidateRemoteWork(null);
     // Keep the signup form mounted so delivery/provider failures remain visible.
     // A session-bearing signup is moved into the global loading state by the
     // onAuthStateChange handler below.
-    replaceState(createEmptyState("supabase", false));
+    replaceState(createAuthState(stateRef.current, "supabase", false));
     setError(null);
     const { data, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName } },
+      options: {
+        data: {
+          display_name: displayName,
+          signup_organization_id: selectedOrganization.id,
+        },
+      },
     });
     if (authError) {
-      replaceState(createEmptyState("supabase", false));
+      replaceState(createAuthState(stateRef.current, "supabase", false));
       throw authError;
     }
-    if (!data.session) replaceState(createEmptyState("supabase", false));
+    if (!data.session) replaceState(createAuthState(stateRef.current, "supabase", false));
     // A session-bearing signup is refreshed by onAuthStateChange.
   }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
 
@@ -1766,7 +1809,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
 
     clearPasswordRecovery();
     invalidateRemoteWork(null);
-    replaceState(createEmptyState("supabase", false));
+    replaceState(createAuthState(stateRef.current, "supabase", false));
     setError(null);
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) {
@@ -1782,7 +1825,11 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     clearPasswordRecovery();
     remoteLoadsBlockedRef.current = true;
     invalidateRemoteWork(null);
-    replaceState(createEmptyState(isSupabaseConfigured ? "supabase" : "demo", false));
+    replaceState(createAuthState(
+      stateRef.current,
+      isSupabaseConfigured ? "supabase" : "demo",
+      false,
+    ));
     setError(null);
     const operation = (async () => {
       if (!supabase) return;

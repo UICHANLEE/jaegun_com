@@ -784,6 +784,29 @@ fieldset {
   margin-top: 3px;
 }
 
+.auth-organization-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border: 1px solid #dfe8e2;
+  border-radius: 14px;
+  padding: 13px;
+  background: #f7faf7;
+}
+
+.auth-organization-fields > p {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.auth-organization-fields select:disabled {
+  color: #8a918d;
+  background: #f0f1ee;
+  cursor: not-allowed;
+}
+
 .auth-form__link {
   width: fit-content;
   justify-self: end;
@@ -1178,6 +1201,15 @@ fieldset {
   color: white;
   background: var(--forest-800);
   font-size: 0.74rem;
+}
+
+.onboarding-presbytery-field {
+  max-width: 520px;
+}
+
+.search-field input:disabled {
+  color: #8a918d;
+  cursor: not-allowed;
 }
 
 .organization-picker {
@@ -2631,6 +2663,8 @@ fieldset {
 }
 
 @media (max-width: 520px) {
+  .auth-organization-fields { grid-template-columns: 1fr; }
+  .auth-organization-fields > p { grid-column: 1; }
   .service-error-notice { grid-template-columns: 22px minmax(0, 1fr); }
   .service-error-notice button { grid-column: 1 / -1; width: 100%; }
 }

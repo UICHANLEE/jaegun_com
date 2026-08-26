@@ -14,6 +14,15 @@ const remote = vi.hoisted(() => ({
   signOut: vi.fn(async (): Promise<{ error: Error | null }> => ({ error: null })),
   updateUser: vi.fn(async () => ({ data: {}, error: null })),
   unsubscribe: vi.fn(),
+  organizations: [{
+    id: "org-19",
+    source_name: "재건부평교회",
+    display_name: "재건부평교회",
+    slug: "jaegun-bupyeong",
+    presbytery: "서울노회",
+    status: "active",
+    claimed_at: null,
+  }],
 }));
 
 vi.mock("../data/supabase", () => ({
@@ -31,8 +40,14 @@ vi.mock("../data/supabase", () => ({
         return { data: { subscription: { unsubscribe: remote.unsubscribe } } };
       }),
     },
-    from: vi.fn(() => {
-      throw new Error("test intentionally stops before private table loading");
+    from: vi.fn((table: string) => {
+      if (table !== "organizations") throw new Error("test intentionally stops before private table loading");
+      const request = {
+        select: vi.fn(() => request),
+        order: vi.fn(() => request),
+        abortSignal: vi.fn(async () => ({ data: remote.organizations, error: null })),
+      };
+      return request;
     }),
     rpc: vi.fn(() => {
       throw new Error("test intentionally stops before private RPC loading");
@@ -177,7 +192,12 @@ describe("AppDataProvider password recovery trust boundary", () => {
 
     let signupAttempt!: Promise<void>;
     act(() => {
-      signupAttempt = latestData!.signUp({ displayName: "가입자", email: "new@example.com", password: "password123" });
+      signupAttempt = latestData!.signUp({
+        displayName: "가입자",
+        email: "new@example.com",
+        password: "password123",
+        organizationId: "org-19",
+      });
     });
     expect(screen.getByTestId("loading")).toHaveTextContent("false");
 
@@ -222,6 +242,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
+    fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
+    fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
     const emailInput = screen.getByLabelText("이메일");
     fireEvent.change(emailInput, { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
@@ -229,6 +251,16 @@ describe("AppDataProvider password recovery trust boundary", () => {
     fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("가입 확인 메일을 보낼 수 없습니다");
+    expect(remote.signUp).toHaveBeenCalledWith({
+      email: "new@example.com",
+      password: "password123",
+      options: {
+        data: {
+          display_name: "가입자",
+          signup_organization_id: "org-19",
+        },
+      },
+    });
     expect(emailInput).toHaveValue("new@example.com");
   });
 
@@ -245,6 +277,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
 
     fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
+    fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
+    fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
     const emailInput = screen.getByLabelText("이메일");
     fireEvent.change(emailInput, { target: { value: "member@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });

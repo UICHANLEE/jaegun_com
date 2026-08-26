@@ -289,6 +289,7 @@ export interface ViewerContext {
   membership?: Membership;
   application?: MembershipApplication;
   governanceAccess?: GovernanceAccessEntry[];
+  signupOrganizationId?: string;
 }
 
 export interface PostDraft {
@@ -303,6 +304,7 @@ export interface SignUpInput {
   displayName: string;
   email: string;
   password: string;
+  organizationId: string;
 }
 
 export interface MembershipRequestInput {
