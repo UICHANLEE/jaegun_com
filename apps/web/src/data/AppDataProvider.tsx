@@ -40,6 +40,7 @@ import { isSupabaseConfigured, supabase } from "./supabase";
 import { uploadCommunityFile, validateMediaFile } from "./mediaUpload";
 import { getServiceYear, millisecondsUntilNextServiceYear } from "../serviceTime";
 import { executiveApprovalErrorMessage, getExecutiveApprovalIssue } from "../executiveApprovalPolicy";
+import { normalizeGovernanceAccess } from "./governance";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
 
@@ -83,6 +84,7 @@ interface AppDataContextValue extends AppDataState {
   error: string | null;
   hasMorePosts: boolean;
   serviceYear: number;
+  getServerNow: () => number;
   passwordRecoveryReady: boolean;
   enterDemo: (persona?: DemoPersona, executiveOfficeCodes?: ExecutiveOfficeCode[]) => void;
   signIn: (input: LoginInput) => Promise<void>;
@@ -727,7 +729,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const [hasMorePosts, setHasMorePosts] = useState(false);
   const [serviceYear, setServiceYear] = useState(currentServiceYear);
   const [serverRolloverDeadline, setServerRolloverDeadline] = useState<number | null>(null);
+  const [governanceRefreshDeadline, setGovernanceRefreshDeadline] = useState<number | null>(null);
   const [passwordRecoveryReady, setPasswordRecoveryReady] = useState(false);
+  const serverClockRef = useRef({
+    unixMs: Date.now(),
+    monotonicMs: performance.now(),
+  });
   const postLimitRef = useRef(30);
   const stateRef = useRef(state);
   const remoteLoadGenerationRef = useRef(0);
@@ -757,6 +764,11 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     userId: string | null;
     promise: Promise<void>;
   } | null>(null);
+
+  const getServerNow = useCallback(() => {
+    const snapshot = serverClockRef.current;
+    return snapshot.unixMs + Math.max(performance.now() - snapshot.monotonicMs, 0);
+  }, []);
   const remoteRefreshQueuedRef = useRef(false);
   const loadRemoteRef = useRef<() => Promise<void>>(async () => undefined);
 
@@ -1099,6 +1111,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       if (!user) {
         if (!isRequestCurrent()) return;
         replaceState(createEmptyState("supabase", false));
+        setGovernanceRefreshDeadline(null);
         setError(null);
         return;
       }
@@ -1296,6 +1309,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     const viewerApplication = latestApplicationRow
       ? applications.find((item) => item.id === String(latestApplicationRow.id)) ?? applicationMap(latestApplicationRow)
       : undefined;
+    const governanceAccess = normalizeGovernanceAccess(contextRow.governance_access);
 
     const nextState: AppDataState = {
       mode: "supabase",
@@ -1313,6 +1327,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           approvedAt: membershipRow.joined_at ? String(membershipRow.joined_at) : undefined,
         } : undefined,
         application: viewerApplication,
+        governanceAccess,
       },
       organizations: rowsOf(organizationsResult.data).map((row) => ({
         id: String(row.id),
@@ -1426,7 +1441,22 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           }
         : conversation;
     });
-    setServerRolloverDeadline(performance.now() + millisecondsUntilServerRollover);
+    const serverClockCapturedAt = performance.now();
+    const serverNow = Date.UTC(serverServiceYear, 11, 31, 15, 0, 0, 0) - millisecondsUntilServerRollover;
+    serverClockRef.current = {
+      unixMs: serverNow,
+      monotonicMs: serverClockCapturedAt,
+    };
+    setServerRolloverDeadline(serverClockCapturedAt + millisecondsUntilServerRollover);
+    const nearestGovernanceExpiry = governanceAccess.reduce<number | null>((nearest, access) => {
+      if (!access.expiresAt) return nearest;
+      const expiry = Date.parse(access.expiresAt);
+      if (!Number.isFinite(expiry)) return nearest;
+      return nearest === null ? expiry : Math.min(nearest, expiry);
+    }, null);
+    setGovernanceRefreshDeadline(nearestGovernanceExpiry === null
+      ? null
+      : serverClockCapturedAt + Math.max(nearestGovernanceExpiry - serverNow, 1));
     setServiceYear(serverServiceYear);
     setHasMorePosts(postRows.length === postLimit);
     setError(null);
@@ -1587,8 +1617,11 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       const serverDelay = serverRolloverDeadline === null
         ? sixHours
         : Math.max(serverRolloverDeadline - performance.now(), 1);
+      const governanceDelay = governanceRefreshDeadline === null
+        ? sixHours
+        : Math.max(governanceRefreshDeadline - performance.now(), 1);
       const delay = stateRef.current.mode === "supabase"
-        ? Math.min(serverDelay, sixHours)
+        ? Math.min(serverDelay, governanceDelay, sixHours)
         : Math.min(millisecondsUntilNextServiceYear(), sixHours);
       timer = window.setTimeout(() => {
         void refreshServiceYear().finally(() => {
@@ -1613,7 +1646,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       window.removeEventListener("focus", refreshAfterResume);
       document.removeEventListener("visibilitychange", refreshAfterResume);
     };
-  }, [loadRemote, serverRolloverDeadline, updateState]);
+  }, [governanceRefreshDeadline, loadRemote, serverRolloverDeadline, updateState]);
 
   const enterDemo = useCallback((
     persona: DemoPersona = "owner",
@@ -2825,7 +2858,13 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "conversation_reads" }, () => scheduleConversationRefresh())
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => scheduleConversationRefresh())
-      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, scheduleNotificationRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, (payload) => {
+        scheduleNotificationRefresh();
+        const changed = rowOf(payload.new) ?? rowOf(payload.old);
+        if (changed?.entity_type === "governance_scope" || changed?.entity_type === "governance_delegation") {
+          scheduleAggregateRefresh();
+        }
+      })
       .on("postgres_changes", { event: "*", schema: "public", table: "membership_applications" }, scheduleAggregateRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "organization_memberships" }, scheduleAggregateRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "executive_office_assignments" }, scheduleAggregateRefresh)
@@ -3259,6 +3298,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     error,
     hasMorePosts,
     serviceYear,
+    getServerNow,
     passwordRecoveryReady,
     enterDemo,
     signIn,
@@ -3292,6 +3332,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     enterDemo,
     ensurePost,
     error,
+    getServerNow,
     hasMorePosts,
     loadRemote,
     loadConversationMessages,

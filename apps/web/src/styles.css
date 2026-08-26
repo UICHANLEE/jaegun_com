@@ -640,7 +640,7 @@ fieldset {
 }
 
 .search-field > svg { width: 20px; height: 20px; color: #7c837f; flex: 0 0 auto; }
-.search-field input { width: 100%; height: 42px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 0.9rem; }
+.search-field input { width: 100%; height: 44px; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 0.9rem; }
 .search-field button { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: #757b78; cursor: pointer; }
 .search-field button svg { width: 18px; height: 18px; }
 .search-field--large { min-height: 52px; border-radius: 14px; }
@@ -2450,6 +2450,172 @@ fieldset {
 .executive-ops__ledger-actions { grid-column: 2; justify-content: flex-start; }
 .executive-ops__ledger-actions .executive-ops__delete { color: var(--danger); }
 
+/* Hierarchy governance */
+.governance-page { max-width: 1120px; background: #f4f6f3; }
+.governance-toolbar { background: rgba(255, 253, 249, .98); }
+.governance-content { display: grid; gap: 22px; padding: 18px 14px 48px; }
+.governance-loading { min-height: 70vh; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); }
+.governance-loading svg { width: 30px; height: 30px; color: var(--forest-700); }
+.governance-hero { display: grid; gap: 18px; overflow: hidden; border-radius: 22px; padding: 22px 18px; color: white; background: linear-gradient(145deg, #173b4f, #2d6b78 58%, #28634c); box-shadow: var(--shadow-md); }
+.governance-hero .eyebrow { color: #c7e1e5; }
+.governance-authority { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; border-radius: 999px; padding: 0 10px; color: #1d563d; background: #dff1e5; font-size: .72rem; font-weight: 800; }
+.governance-authority svg { width: 16px; height: 16px; }
+.governance-hero h1 { max-width: 660px; margin-top: 10px; font-size: clamp(1.48rem, 6vw, 2.18rem); line-height: 1.3; letter-spacing: -.05em; }
+.governance-hero > div:first-child > p:last-child { max-width: 690px; margin-top: 10px; color: #d6e6e7; font-size: .84rem; line-height: 1.65; }
+.governance-hero__path { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; border: 1px solid rgba(255,255,255,.2); border-radius: 14px; padding: 10px 11px; background: rgba(255,255,255,.09); }
+.governance-hero__path > span { min-width: 0; display: inline-flex; align-items: center; gap: 5px; color: #e5f0f0; font-size: .72rem; }
+.governance-hero__path strong { overflow: hidden; max-width: 190px; text-overflow: ellipsis; white-space: nowrap; }
+.governance-hero__path svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.governance-scope-panel,
+.governance-section { min-width: 0; display: grid; gap: 14px; border: 1px solid var(--line); border-radius: 18px; padding: 15px; background: white; box-shadow: var(--shadow-sm); }
+.governance-section-heading { min-width: 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; }
+.governance-section-heading > div { min-width: 0; }
+.governance-section-heading .eyebrow { margin-bottom: 3px; }
+.governance-section-heading h2 { overflow: hidden; color: var(--forest-950); font-size: 1.07rem; letter-spacing: -.035em; text-overflow: ellipsis; white-space: nowrap; }
+.governance-section-heading > span { flex: 0 0 auto; color: var(--muted); font-size: .7rem; }
+.governance-section-heading--action { align-items: center; }
+.governance-scope-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.governance-scope-tabs > button { min-width: 0; min-height: 72px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 13px; padding: 9px; color: #626c67; background: #faf9f5; text-align: left; cursor: pointer; }
+.governance-scope-tabs > button > svg { width: 20px; height: 20px; }
+.governance-scope-tabs > button > span { min-width: 0; display: grid; gap: 1px; }
+.governance-scope-tabs strong { font-size: .76rem; }
+.governance-scope-tabs small { color: var(--muted); font-size: .68rem; }
+.governance-scope-tabs > button[aria-pressed="true"] { color: #255e48; border-color: #9fc6af; background: var(--forest-50); box-shadow: inset 0 0 0 1px #c6decf; }
+.governance-scope-tabs > button:disabled { cursor: not-allowed; opacity: .42; }
+.governance-selectors { display: grid; gap: 10px; }
+.governance-selectors > label,
+.governance-editor > label,
+.governance-delegation-form > label { min-width: 0; display: grid; gap: 6px; }
+.governance-selectors label > span,
+.governance-editor label > span,
+.governance-delegation-form label > span,
+.governance-delegation-form legend,
+.governance-revoke-form label > span { color: #4d5852; font-size: .7rem; font-weight: 750; }
+.governance-selectors select,
+.governance-editor select,
+.governance-delegation-form select,
+.governance-delegation-form input[type="date"] { width: 100%; min-height: 46px; border: 1px solid var(--line); border-radius: 11px; padding: 0 30px 0 11px; color: var(--forest-950); background: white; outline: 0; font-size: .77rem; font-weight: 700; }
+.governance-selectors select:focus,
+.governance-editor select:focus,
+.governance-delegation-form select:focus,
+.governance-delegation-form input:focus,
+.governance-delegation-form textarea:focus,
+.governance-revoke-form textarea:focus { border-color: var(--forest-700); box-shadow: 0 0 0 3px rgba(40,99,76,.1); }
+.governance-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.governance-summary-card { min-width: 0; min-height: 115px; display: grid; align-content: start; gap: 8px; border: 1px solid var(--line); border-radius: 15px; padding: 11px; background: white; box-shadow: var(--shadow-sm); }
+.governance-summary-card > span { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; color: #2f6d8c; background: var(--sky-100); }
+.governance-summary-card:nth-child(2) > span { color: var(--forest-700); background: var(--forest-50); }
+.governance-summary-card:nth-child(3) > span { color: #a15120; background: var(--orange-100); }
+.governance-summary-card svg { width: 19px; height: 19px; }
+.governance-summary-card > div { min-width: 0; display: grid; gap: 1px; }
+.governance-summary-card small,
+.governance-summary-card em { overflow: hidden; color: var(--muted); font-size: .68rem; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.governance-summary-card strong { color: var(--forest-950); font-size: 1.2rem; }
+.governance-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; padding: 3px; background: #ebece8; }
+.governance-tabs > button { min-width: 0; min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 10px; color: #66706b; background: transparent; font-size: .7rem; font-weight: 750; cursor: pointer; }
+.governance-tabs > button svg { width: 17px; height: 17px; }
+.governance-tabs > button[aria-selected="true"] { color: var(--forest-900); background: white; box-shadow: var(--shadow-sm); }
+.governance-tabs > button:disabled { cursor: not-allowed; opacity: .42; }
+.governance-notice { top: 70px; align-items: center; }
+.governance-notice > button { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; margin: -9px -10px -9px auto; border: 0; color: #286044; background: transparent; cursor: pointer; }
+.governance-readonly { color: #765020; background: #fff2df; }
+.governance-inline-loading { min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; color: var(--muted); background: #f7f7f3; font-size: .74rem; }
+.governance-inline-loading svg { width: 19px; height: 19px; }
+.governance-office-grid { display: grid; gap: 9px; }
+.governance-office-card { min-width: 0; min-height: 92px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 14px; padding: 11px; background: #fffdf9; }
+.governance-office-card.is-empty { border-style: dashed; background: #faf9f5; }
+.governance-office-card__icon { width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; color: #a15120; background: var(--orange-100); }
+.governance-office-card__icon svg { width: 22px; height: 22px; }
+.governance-office-card > div { min-width: 0; display: grid; gap: 3px; }
+.governance-office-card small { color: var(--muted); font-size: .69rem; }
+.governance-office-card strong { overflow: hidden; font-size: .82rem; text-overflow: ellipsis; white-space: nowrap; }
+.governance-office-card > div > span { overflow: hidden; display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: .69rem; text-overflow: ellipsis; white-space: nowrap; }
+.governance-office-card > button,
+.governance-delegation-card > button { min-height: 44px; border: 1px solid #b9d2c2; border-radius: 10px; padding: 0 11px; color: var(--forest-700); background: white; font-size: .7rem; font-weight: 750; cursor: pointer; }
+.governance-office-card > button:disabled { cursor: default; color: var(--muted); border-color: var(--line); background: #f5f5f1; opacity: 1; }
+.governance-editor,
+.governance-delegation-form,
+.governance-revoke-form { display: grid; gap: 13px; border: 1px solid #b8d2c1; border-radius: 15px; padding: 14px; background: #f5faf6; }
+.governance-editor__heading { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
+.governance-editor__heading > span { width: 38px; height: 38px; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: 11px; color: var(--forest-700); background: var(--forest-100); }
+.governance-editor__heading svg { width: 21px; height: 21px; }
+.governance-editor__heading > div { min-width: 0; display: grid; gap: 2px; }
+.governance-editor__heading strong { font-size: .8rem; }
+.governance-editor__heading small { color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.governance-editor__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; border-top: 1px solid #dce7df; padding-top: 12px; }
+.governance-editor__actions .button { min-width: 92px; }
+.governance-roster-grid { display: grid; gap: 8px; }
+.governance-roster-back { min-height: 44px; display: inline-flex; align-items: center; justify-self: start; gap: 5px; border: 0; padding: 0 4px; color: var(--forest-700); background: transparent; font-size: .7rem; font-weight: 750; cursor: pointer; }
+.governance-roster-back svg { width: 17px; height: 17px; }
+.governance-roster-group { min-width: 0; min-height: 72px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 20px; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 13px; padding: 9px 10px; color: var(--ink); background: white; text-align: left; cursor: pointer; }
+.governance-roster-group > span { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 11px; color: #2f6d8c; background: var(--sky-100); }
+.governance-roster-group > span svg { width: 21px; height: 21px; }
+.governance-roster-group > div { min-width: 0; display: grid; gap: 3px; }
+.governance-roster-group strong,
+.governance-roster-group small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.governance-roster-group strong { font-size: .79rem; }
+.governance-roster-group small { color: var(--muted); font-size: .69rem; }
+.governance-roster-group > svg { width: 18px; height: 18px; color: var(--muted); }
+.governance-roster-group:disabled { cursor: not-allowed; opacity: .5; }
+.governance-roster-search { margin-top: 2px; }
+.governance-member-list { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: white; }
+.governance-member-list__head { display: none; }
+.governance-member-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; border-bottom: 1px solid #ebe7df; padding: 11px; }
+.governance-member-row:last-child { border-bottom: 0; }
+.governance-member-row > span { min-width: 0; }
+.governance-member-row > span:first-child { display: flex; align-items: center; gap: 8px; }
+.governance-member-row > span:first-child > span:last-child,
+.governance-member-row > span:nth-child(2),
+.governance-member-row > span:nth-child(3) { min-width: 0; display: grid; gap: 2px; }
+.governance-member-row > span:nth-child(2) { grid-column: 1; padding-left: 42px; }
+.governance-member-row > span:nth-child(3) { grid-column: 2; grid-row: 1 / span 2; justify-items: end; align-content: center; }
+.governance-member-row strong,
+.governance-member-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.governance-member-row strong { font-size: .75rem; }
+.governance-member-row small { color: var(--muted); font-size: .68rem; }
+.governance-pagination { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.governance-pagination button { min-height: 44px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; color: var(--forest-700); background: white; font-size: .72rem; font-weight: 750; cursor: pointer; }
+.governance-pagination button:disabled { cursor: not-allowed; opacity: .45; }
+.governance-pagination span { color: var(--muted); font-size: .7rem; }
+.governance-add-button { min-width: 104px; }
+.governance-delegation-rule { margin-top: 0; }
+.governance-delegation-form fieldset { min-width: 0; display: grid; gap: 8px; border: 0; padding: 0; }
+.governance-delegation-form legend { margin-bottom: 8px; }
+.governance-delegation-form em,
+.governance-revoke-form em { color: var(--danger); font-size: .68rem; font-style: normal; }
+.governance-capability-grid { display: grid; gap: 7px; }
+.governance-capability-grid > label { position: relative; min-height: 70px; display: grid; grid-template-columns: minmax(0, 1fr) 20px; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: white; cursor: pointer; }
+.governance-capability-grid input { position: absolute; opacity: 0; pointer-events: none; }
+.governance-capability-grid label > span { min-width: 0; display: grid; gap: 3px; }
+.governance-capability-grid strong { font-size: .75rem; }
+.governance-capability-grid small { color: var(--muted); font-size: .69rem; line-height: 1.45; }
+.governance-capability-grid label > svg { width: 20px; height: 20px; color: #a6ada9; }
+.governance-capability-grid label:has(input:checked) { border-color: #9fc6af; background: var(--forest-50); }
+.governance-capability-grid input:checked ~ svg { color: var(--forest-700); }
+.governance-capability-grid input:focus-visible ~ span { outline: 3px solid rgba(40,99,76,.18); outline-offset: 4px; }
+.governance-delegation-form textarea,
+.governance-revoke-form textarea { width: 100%; min-height: 78px; resize: vertical; border: 1px solid var(--line); border-radius: 11px; padding: 10px 11px; outline: 0; background: white; font-size: .74rem; line-height: 1.5; }
+.governance-delegation-list { display: grid; gap: 8px; }
+.governance-delegation-card { min-width: 0; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 9px; border: 1px solid var(--line); border-radius: 14px; padding: 11px; background: white; }
+.governance-delegation-card__icon { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 11px; color: #a15120; background: var(--orange-100); }
+.governance-delegation-card__icon svg { width: 21px; height: 21px; }
+.governance-delegation-card > div { min-width: 0; display: grid; gap: 4px; }
+.governance-delegation-card > div > span { display: flex; align-items: center; gap: 6px; }
+.governance-delegation-card strong { overflow: hidden; font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+.governance-delegation-card em { border-radius: 999px; padding: 3px 6px; color: #2b6a45; background: #e4f1e7; font-size: .65rem; font-style: normal; font-weight: 800; }
+.governance-delegation-card p { color: #46524c; font-size: .69rem; }
+.governance-delegation-card small { color: var(--muted); font-size: .68rem; line-height: 1.5; }
+.governance-delegation-card > button { grid-column: 1 / -1; justify-self: end; color: var(--danger); border-color: #e4c4c0; }
+.governance-revoke-form { grid-template-columns: 24px minmax(0, 1fr); border-color: #e4c4c0; background: #fff8f7; }
+.governance-revoke-form > svg { width: 22px; height: 22px; color: var(--danger); }
+.governance-revoke-form > label { display: grid; gap: 6px; }
+.governance-revoke-form > div { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 7px; }
+.governance-security-note { display: flex; align-items: flex-start; gap: 9px; border-radius: 14px; padding: 13px; color: #496056; background: #e8eeea; }
+.governance-security-note > svg { width: 22px; height: 22px; flex: 0 0 auto; color: var(--forest-700); }
+.governance-security-note p { display: grid; gap: 3px; }
+.governance-security-note strong { font-size: .72rem; }
+.governance-security-note span { color: #66726c; font-size: .69rem; line-height: 1.5; }
+
 @media (max-width: 359px) {
   .mobile-global-header .brand__name { display: none; }
   .church-switcher { max-width: 145px; }
@@ -2610,6 +2776,33 @@ fieldset {
   .auth-panel__mobile-brand { display: none; }
   .auth-panel .eyebrow { margin-top: 0; }
   .system-card__actions:not(.system-card__actions--single) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 620px) {
+  .governance-content { gap: 26px; padding: 26px 24px 58px; }
+  .governance-hero { padding: 28px; }
+  .governance-selectors { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .governance-summary-grid { gap: 11px; }
+  .governance-summary-card { min-height: 128px; padding: 14px; }
+  .governance-office-grid,
+  .governance-roster-grid,
+  .governance-capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .governance-member-list__head,
+  .governance-member-row { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(160px, .8fr) minmax(120px, .55fr); gap: 12px; align-items: center; }
+  .governance-member-list__head { border-bottom: 1px solid var(--line); padding: 9px 12px; color: var(--muted); background: #f3f1eb; font-size: .65rem; font-weight: 750; }
+  .governance-member-row > span:nth-child(2),
+  .governance-member-row > span:nth-child(3) { grid-column: auto; grid-row: auto; padding-left: 0; justify-items: start; }
+  .governance-delegation-card { grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; }
+  .governance-delegation-card > button { grid-column: 3; grid-row: 1; }
+}
+
+@media (min-width: 900px) {
+  .manager-shell .governance-page { width: min(100% - 48px, 1120px); max-width: 1120px; }
+  .governance-content { padding: 34px 34px 64px; }
+  .governance-hero { grid-template-columns: minmax(0, 1fr) minmax(260px, .42fr); align-items: end; }
+  .governance-hero__path { align-content: center; }
+  .governance-scope-panel,
+  .governance-section { padding: 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -49,6 +49,75 @@ export type MembershipStatus = "pending" | "active" | "rejected" | "suspended" |
 export type ApplicationStatus = "pending" | "approved" | "rejected" | "cancelled";
 export type PostCategory = "notice" | "sharing" | "prayer" | "photo_video";
 
+export const GOVERNANCE_SCOPE_CODES = ["general_assembly", "presbytery", "church"] as const;
+export type GovernanceScopeCode = (typeof GOVERNANCE_SCOPE_CODES)[number];
+export type GovernanceCapability = "manage_officers" | "view_roster";
+export type GovernanceOfficeCode = ExecutiveOfficeCode | "pastor";
+export type GovernanceAuthoritySource = "platform_admin" | "office" | "church_pastor" | "delegation";
+
+export interface GovernanceAccessEntry {
+  scopeId: string;
+  scopeType: GovernanceScopeCode;
+  scopeName: string;
+  authoritySource: GovernanceAuthoritySource;
+  officeCodes: GovernanceOfficeCode[];
+  canManageOfficers: boolean;
+  canManageDelegations: boolean;
+  canViewRoster: boolean;
+  expiresAt: string | null;
+}
+
+export interface GovernanceTreeNode {
+  scopeId: string;
+  scopeType: GovernanceScopeCode;
+  slug: string;
+  displayName: string;
+  parentScopeId: string | null;
+  organizationId: string | null;
+  isActive: boolean;
+  churchCount: number;
+  activeMemberCount: number;
+}
+
+export interface GovernanceRosterEntry {
+  userId: string;
+  displayName: string;
+  churchTitleCode?: ChurchTitleCode;
+  churchTitleName?: string;
+  membershipRole: MembershipRole;
+  organizationId: string;
+  organizationName: string;
+  presbyteryName: string;
+  officeCodes: GovernanceOfficeCode[];
+  totalCount: number;
+}
+
+export interface GovernanceAppointment {
+  id: string;
+  scopeType: GovernanceScopeCode;
+  scopeId: string;
+  serviceYear: number;
+  officeCode: GovernanceOfficeCode;
+  membershipId: string;
+  appointedBy: string;
+  appointedAt: string;
+}
+
+export interface GovernanceDelegation {
+  id: string;
+  scopeId: string;
+  grantorUserId: string;
+  grantorName: string;
+  delegateUserId: string;
+  delegateName: string;
+  capabilities: GovernanceCapability[];
+  startsAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  status: "active" | "scheduled" | "revoked" | "expired";
+  reason: string;
+}
+
 export interface Profile {
   id: string;
   displayName: string;
@@ -219,6 +288,7 @@ export interface ViewerContext {
   profile: Profile;
   membership?: Membership;
   application?: MembershipApplication;
+  governanceAccess?: GovernanceAccessEntry[];
 }
 
 export interface PostDraft {

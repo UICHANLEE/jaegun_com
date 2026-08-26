@@ -14,6 +14,9 @@
 - The spreadsheet source is used only to pre-create church organizations. Never import attendee names, ages, gender, phone numbers, or inferred roles.
 - Authorization is enforced in the backend: the platform administrator approves ministers and executives; active ministers or executives approve members only within their own church. UI capability checks are supplementary, never the security boundary.
 - Annual executive assignments, meeting minutes, and accounting use the backend-authoritative `Asia/Seoul` service year. Signed-in clients must consume the server clock and schedule from its rollover delay so current/next-year controls and database authorization switch on the same Korean midnight boundary even when a device clock is wrong.
+- Governance is hierarchical: one general assembly (`총회`) contains presbyteries (`노회`), and each presbytery contains church organizations (`교회`). Executive office assignments are year-scoped at the exact hierarchy level and must not silently grant a role at parent or child scopes.
+- The current-year president and authorized pastor at a governance scope may manage that scope's executive assignments. They may grant a bounded delegation for an explicit scope, capability, and expiry; delegation never creates a platform administrator, executive membership, or implicit authority outside that scope.
+- Presbyteries and churches expose scoped rosters to authorized signed-in users. Roster access and private profile fields are enforced by backend RLS/RPCs; the UI must not infer broader visibility from a presbytery label alone.
 
 ## Production Service
 

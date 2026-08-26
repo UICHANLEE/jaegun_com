@@ -74,6 +74,9 @@ commit;
 - `organization_memberships`: `id`, `user_id`, `organization_id`, `role`, `church_title_code`, `status`, `approved_from_application_id`, `approved_by`, `joined_at`, `ended_at`, `updated_at`
 - `membership_applications`: `id`, `user_id`, `organization_id`, `requested_role`, `requested_church_title_code`, `requested_executive_office_codes`, `requested_service_year`, `status`, `applicant_note`, `evidence_path`, `review_reason`, `reviewed_by`, `reviewed_at`, timestamps
 - `executive_office_assignments`: `id`, `membership_id`, `service_year`, `office_code`, `assigned_from_application_id`, `assigned_by`, `created_at`, `ended_at`
+- `governance_scopes`: 총회·노회·교회의 `scope_type`, 부모 범위, 연결 교회와 활성 상태
+- `governance_office_assignments`: 범위·연도별 회장·목사·부회장·총무·서기·회계 담당자와 임기
+- `governance_authority_delegations`: 동일 범위에서만 유효한 기간·기능 제한형 위임과 회수 기록
 - `meeting_minutes`: `id`, `organization_id`, `meeting_year`, `meeting_date`, `title`, `body`, `status`, `author_id`, `author_name`, timestamps
 - `ledger_entries`: `id`, `organization_id`, `fiscal_year`, `entry_date`, `entry_type`, `category`, `description`, `amount`, `memo`, `author_id`, `author_name`, timestamps
 - `boards`: `id`, `organization_id`, `slug`, `name`, `description`, `sort_order`, `is_global`, `is_read_only`, `staff_only_posting`, timestamps
@@ -114,6 +117,14 @@ delete_meeting_minute(p_id uuid) -> void
 save_ledger_entry(p_id uuid, p_create boolean, p_organization_id uuid, p_fiscal_year integer, p_entry_date date, p_entry_type text, p_category text, p_description text, p_amount numeric, p_memo text) -> uuid
 delete_ledger_entry(p_id uuid) -> void
 set_executive_offices(p_membership_id uuid, p_service_year integer, p_office_codes text[]) -> jsonb
+get_governance_tree() -> table(...)
+list_scope_organizations(p_scope_id uuid) -> table(...)
+list_governance_roster(p_scope_id uuid, p_service_year integer = null, p_search text = null, p_limit integer = 100, p_offset integer = 0) -> table(...)
+get_my_governance_access() -> jsonb
+list_governance_delegations(p_scope_id uuid) -> table(...)
+set_governance_offices(p_scope_id uuid, p_service_year integer, p_user_id uuid, p_office_codes text[]) -> jsonb
+grant_governance_delegation(p_scope_id uuid, p_delegate_user_id uuid, p_capabilities text[], p_expires_at timestamptz, p_reason text) -> uuid
+revoke_governance_delegation(p_delegation_id uuid, p_reason text) -> void
 ```
 
 새 회의록·회계 항목은 폼을 열 때 만든 UUID를 `p_id`로 보내고 `p_create=true`를 사용합니다. 네트워크 응답이 유실되어도 같은 작업 UUID를 재사용하면 같은 행만 갱신됩니다. 기존 기록 편집은 `p_create=false`로 보내며, 그 사이 삭제된 기록은 다시 생성되지 않고 `not_found`로 실패합니다.
@@ -121,6 +132,8 @@ set_executive_offices(p_membership_id uuid, p_service_year integer, p_office_cod
 게시글 작성·게시·재조정·실패 미디어 정리와 채팅 전송·재조정은 요청을 시작한 사용자 ID를 함께 받는 전용 RPC를 사용합니다. 이 ID와 실제 `auth.uid()`가 다르면 계정 전환으로 간주해 즉시 거부합니다. 댓글은 RLS를 거쳐 직접 기록하고, 승인·회원 상태·조직 수정·알림 읽음도 지정 RPC를 사용합니다. 승인 대기 목록은 `membership_applications`를 `profiles(id=user_id)` 및 `organizations(id=organization_id)`와 조인합니다. 게시물 목록은 `posts`를 `boards`와 `post_media`에 조인합니다. 채팅 목록은 `get_conversation_summaries()`를 호출해 대화별 참가자 배열, 마지막 메시지 객체(`id`, `sender_id`, `kind`, `body`, `created_at`), `conversation_reads.last_read_at` 이후 상대방이 보낸 메시지의 `unread_count`만 받습니다. 목록 화면에서 `messages` 전체를 먼저 읽지 마세요. RLS가 승인 전·타 교회 데이터를 자동으로 숨깁니다.
 
 임원 직책은 회원 역할과 분리된 연도별 메타데이터입니다. `executive_office_assignments`를 클라이언트에서 직접 수정하지 말고 최고 관리자의 승인 흐름 또는 최고 관리자 전용 `set_executive_offices` RPC로 배정합니다. 같은 교회의 활성 임원만 회의록과 회계장부를 열람할 수 있습니다. 회의록 쓰기는 회장·부회장·총무·서기, 회계장부 쓰기는 회장·회계에게만 허용되며 과거 연도는 보존 기록으로 읽기 전용입니다. 서비스 연도는 데이터베이스가 `Asia/Seoul` 기준으로 계산하고, 로그인한 클라이언트는 `get_service_year()`로 동일한 값을 받아 사용합니다. 플랫폼 최고 관리자도 해당 교회의 활성 임원 자격 없이는 운영 기록에 접근할 수 없고, 사역자와 일반 회원 역시 접근할 수 없습니다.
+
+총회 → 노회 → 교회 조직 권한은 범위별로 분리됩니다. 해당 범위의 회장과 목사 권한자가 임원 구성을 관리하고, 필요한 경우 `manage_officers` 또는 `view_roster` 기능만 최대 90일 동안 같은 범위에 위임할 수 있습니다. 위임받은 사용자는 재위임할 수 없고 회장·목사 권한 자체를 지정하거나 해제할 수 없습니다. 상위 범위 명단 권한은 하위 노회·교회 명단의 검색·열람만 허용하며 하위 범위 임원 변경 권한으로 승격되지 않습니다. 모든 조회·변경은 공개 테이블 직접 쓰기가 아니라 RLS와 전용 RPC에서 다시 검증됩니다.
 
 ## 미디어 경로
 

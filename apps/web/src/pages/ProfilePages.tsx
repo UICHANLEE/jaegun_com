@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Article,
   Bell,
+  Buildings,
   CaretRight,
   ChatCircleDots,
   Check,
@@ -23,7 +24,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
-import { canManageChurch, reviewableApplications } from "../components/access";
+import { canManageChurch, resolveAppBranch, reviewableApplications } from "../components/access";
 import {
   ApplicationStatusBadge,
   Avatar,
@@ -55,6 +56,10 @@ export function ProfilePage() {
   const organization = organizations.find((item) => item.id === membership?.organizationId);
   const pendingCount = reviewableApplications(viewer, applications).length;
   const canManage = canManageChurch(viewer);
+  const isGovernanceDelegate = resolveAppBranch(viewer) === "governance_delegate";
+  const hasGovernanceAccess = Boolean(viewer?.governanceAccess?.some((access) => (
+    access.canManageOfficers || access.canManageDelegations || access.canViewRoster
+  )));
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -95,18 +100,29 @@ export function ProfilePage() {
         <section className="profile-section">
           <div className="profile-section__heading"><h2>공동체 관리</h2><Link to="/manage/home">관리 홈</Link></div>
           <div className="profile-menu-group">
-            <Link className="profile-menu" to="/manage/approvals">
+            {!isGovernanceDelegate ? <Link className="profile-menu" to="/manage/approvals">
               <span className="profile-menu__icon profile-menu__icon--orange"><CheckCircle weight="fill" /></span>
               <span><strong>가입 승인</strong><small>역할과 소속에 따라 안전하게 승인해요.</small></span>
               {pendingCount ? <em className="profile-menu__count">{pendingCount}</em> : null}<CaretRight />
-            </Link>
-            {membership || viewer?.profile.globalRole === "platform_admin" ? (
+            </Link> : null}
+            {!isGovernanceDelegate && (membership || viewer?.profile.globalRole === "platform_admin") ? (
               <Link className="profile-menu" to="/manage/members">
                 <span className="profile-menu__icon profile-menu__icon--blue"><UsersThree weight="fill" /></span>
                 <span>
                   <strong>{viewer?.profile.globalRole === "platform_admin" ? "임원직 설정" : "회원 관리"}</strong>
                   <small>{viewer?.profile.globalRole === "platform_admin" ? "교회별 임원의 연간 직책을 배정해요." : "우리 교회 구성원과 역할을 확인해요."}</small>
                 </span>
+                <CaretRight />
+              </Link>
+            ) : null}
+            {isGovernanceDelegate
+              || viewer?.profile.globalRole === "platform_admin"
+              || membership?.role === "minister"
+              || hasGovernanceAccess
+              || (membership?.role === "executive" && membership.executiveOfficeCodes.includes("president")) ? (
+              <Link className="profile-menu" to="/manage/organization">
+                <span className="profile-menu__icon profile-menu__icon--blue"><Buildings weight="fill" /></span>
+                <span><strong>조직 관리</strong><small>총회·노회·교회 임원과 위임 권한을 확인해요.</small></span>
                 <CaretRight />
               </Link>
             ) : null}

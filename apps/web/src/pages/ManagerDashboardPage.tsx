@@ -143,6 +143,9 @@ export function ManagerDashboardPage() {
     () => isExecutive ? [...new Set(membership?.executiveOfficeCodes ?? [])] : [],
     [isExecutive, membership?.executiveOfficeCodes],
   );
+  const hasGovernanceAccess = Boolean(viewer?.governanceAccess?.some((access) => (
+    access.canManageOfficers || access.canManageDelegations || access.canViewRoster
+  )));
   const pendingApplications = useMemo(
     () => reviewableApplications(viewer, applications),
     [applications, viewer],
@@ -295,7 +298,7 @@ export function ManagerDashboardPage() {
     if (isPlatformAdmin) {
       return [
         { key: "approvals", href: "/manage/approvals", icon: <UserCheck weight="fill" />, title: "리더 승인", description: "사역자·임원 신청 확인" },
-        { key: "executive-offices", href: "/manage/members", icon: <Briefcase weight="fill" />, title: "임원직 설정", description: "교회별 연간 직책 배정" },
+        { key: "organization", href: "/manage/organization", icon: <Briefcase weight="fill" />, title: "조직 설정", description: "총회·노회·교회 임원 구성" },
         { key: "churches", href: "/app/churches", icon: <Church weight="fill" />, title: "교회 목록", description: "전체 조직 현황 보기" },
         { key: "notifications", href: "/app/notifications", icon: <Bell weight="fill" />, title: "알림 확인", description: "처리 결과와 새 소식" },
       ];
@@ -304,8 +307,8 @@ export function ManagerDashboardPage() {
       return [
         { key: "approvals", href: "/manage/approvals", icon: <UserCheck weight="fill" />, title: "새 가족 승인", description: pendingApplications.length ? `${pendingApplications.length}건 확인 필요` : "대기 신청 없음" },
         { key: "members", href: "/manage/members", icon: <UsersThree weight="fill" />, title: "성도 관리", description: "구성원 상태 관리" },
+        { key: "organization", href: "/manage/organization", icon: <Briefcase weight="fill" />, title: "조직·권한", description: "교회 임원과 위임 확인" },
         { key: "notice", href: "/app/posts/new", icon: <Megaphone weight="fill" />, title: "공지 작성", description: "교회 소식 빠르게 알리기" },
-        { key: "notifications", href: "/app/notifications", icon: <Bell weight="fill" />, title: "알림 확인", description: "돌봄과 승인 새 소식" },
       ];
     }
 
@@ -313,8 +316,8 @@ export function ManagerDashboardPage() {
     const canWriteMinutes = executiveOfficeCodes.some((office) => MINUTE_WRITER_OFFICES.has(office));
     const canWriteLedger = executiveOfficeCodes.some((office) => LEDGER_WRITER_OFFICES.has(office));
     const canManageSchedule = executiveOfficeCodes.some((office) => SCHEDULE_MANAGER_OFFICES.has(office));
-    if (executiveOfficeCodes.includes("president")) {
-      actions.push({ key: "operations", href: scopeHref, icon: <Briefcase weight="fill" />, title: "전체 운영", description: "교회 운영 정보와 현황 점검" });
+    if (hasGovernanceAccess || executiveOfficeCodes.includes("president")) {
+      actions.push({ key: "operations", href: "/manage/organization", icon: <Briefcase weight="fill" />, title: "조직·권한", description: "교회 임원과 위임 권한 관리" });
     }
     if (canWriteMinutes) {
       const minutesPresentation = executiveOfficeCodes.includes("secretary")
@@ -349,7 +352,7 @@ export function ManagerDashboardPage() {
       },
     );
     return actions;
-  }, [executiveOfficeCodes, executiveYearSummary.draftMeetingCount, isMinister, isPlatformAdmin, pendingApplications.length, scopeHref]);
+  }, [executiveOfficeCodes, executiveYearSummary.draftMeetingCount, hasGovernanceAccess, isMinister, isPlatformAdmin, pendingApplications.length, scopeHref]);
 
   const activities = useMemo<ManagerActivity[]>(() => {
     const scopedPosts = posts.filter((post) => (

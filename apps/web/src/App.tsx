@@ -28,10 +28,18 @@ const MembersPage = lazy(() => import("./pages/ProfilePages").then((module) => (
 const NotificationsPage = lazy(() => import("./pages/ProfilePages").then((module) => ({ default: module.NotificationsPage })));
 const MeetingMinutesPage = lazy(() => import("./pages/ExecutiveOperationsPages").then((module) => ({ default: module.MeetingMinutesPage })));
 const AccountingLedgerPage = lazy(() => import("./pages/ExecutiveOperationsPages").then((module) => ({ default: module.AccountingLedgerPage })));
+const OrganizationAdministrationPage = lazy(() => import("./pages/OrganizationAdministrationPage").then((module) => ({ default: module.OrganizationAdministrationPage })));
 
 function ManagerOnly({ children }: { children: ReactNode }) {
   const { viewer } = useAppData();
   return canManageChurch(viewer) ? children : <Navigate to="/app/profile" replace />;
+}
+
+function OperationsManagerOnly({ children }: { children: ReactNode }) {
+  const { viewer } = useAppData();
+  return resolveAppBranch(viewer) === "governance_delegate"
+    ? <Navigate to="/manage/organization" replace />
+    : children;
 }
 
 function MemberOnly({ children }: { children: ReactNode }) {
@@ -47,7 +55,15 @@ function ExecutiveOnly({ children }: { children: ReactNode }) {
 
 function RoleLandingRedirect() {
   const { viewer } = useAppData();
-  return <Navigate to={resolveAppBranch(viewer) === "member" ? "/app/home" : "/manage/home"} replace />;
+  const branch = resolveAppBranch(viewer);
+  return <Navigate to={branch === "member" ? "/app/home" : branch === "governance_delegate" ? "/manage/organization" : "/manage/home"} replace />;
+}
+
+function ManagementHomeRoute() {
+  const { viewer } = useAppData();
+  return resolveAppBranch(viewer) === "governance_delegate"
+    ? <Navigate to="/manage/organization" replace />
+    : <ManagerDashboardPage />;
 }
 
 function ScrollToTop() {
@@ -146,10 +162,11 @@ function AuthenticatedRoutes() {
       </Route>
       <Route path="/manage" element={<ManagerOnly><ManagerShell /></ManagerOnly>}>
         <Route index element={<Navigate to="/manage/home" replace />} />
-        <Route path="home" element={<ManagerDashboardPage />} />
-        <Route path="approvals" element={<ApprovalsPage />} />
-        <Route path="members" element={<MembersPage />} />
-        <Route path="posts" element={<FeedPage />} />
+        <Route path="home" element={<ManagementHomeRoute />} />
+        <Route path="approvals" element={<OperationsManagerOnly><ApprovalsPage /></OperationsManagerOnly>} />
+        <Route path="members" element={<OperationsManagerOnly><MembersPage /></OperationsManagerOnly>} />
+        <Route path="organization" element={<OrganizationAdministrationPage />} />
+        <Route path="posts" element={<OperationsManagerOnly><FeedPage /></OperationsManagerOnly>} />
         <Route path="minutes" element={<ExecutiveOnly><MeetingMinutesPage /></ExecutiveOnly>} />
         <Route path="ledger" element={<ExecutiveOnly><AccountingLedgerPage /></ExecutiveOnly>} />
         <Route path="profile" element={<ProfilePage />} />

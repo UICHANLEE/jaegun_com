@@ -1,11 +1,14 @@
 import type { MembershipApplication, ViewerContext } from "../types/domain";
 
-export type AppBranch = "platform_admin" | "minister" | "executive" | "member";
+export type AppBranch = "platform_admin" | "minister" | "executive" | "governance_delegate" | "member";
 
 export function resolveAppBranch(viewer: ViewerContext | null): AppBranch {
   if (viewer?.profile.globalRole === "platform_admin") return "platform_admin";
   if (viewer?.membership?.role === "minister") return "minister";
   if (viewer?.membership?.role === "executive") return "executive";
+  if (viewer?.governanceAccess?.some((access) => (
+    access.canManageOfficers || access.canManageDelegations || access.canViewRoster
+  ))) return "governance_delegate";
   return "member";
 }
 

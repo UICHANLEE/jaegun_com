@@ -3,15 +3,18 @@ import {
   Bank,
   Bell,
   Briefcase,
+  Buildings,
   CaretRight,
   Church,
   Gauge,
   House,
+  Key,
   Notebook,
   ShieldCheck,
   UserCheck,
   UserCircle,
   UsersThree,
+  type Icon,
 } from "@phosphor-icons/react";
 import { NavLink, Outlet } from "react-router-dom";
 import { resolveAppBranch, type AppBranch } from "./access";
@@ -19,15 +22,22 @@ import { Brand } from "./Brand";
 import { useAppData } from "../data/AppDataProvider";
 import { ServiceErrorNotice } from "./ServiceErrorNotice";
 
-const PLATFORM_NAV_ITEMS = [
+interface ManagerNavItem {
+  to: string;
+  label: string;
+  icon: Icon;
+  end?: boolean;
+}
+
+const PLATFORM_NAV_ITEMS: ManagerNavItem[] = [
   { to: "/manage/home", label: "관리 홈", icon: Gauge, end: true },
   { to: "/manage/approvals", label: "승인", icon: UserCheck },
-  { to: "/manage/members", label: "임원직 설정", icon: Briefcase },
+  { to: "/manage/organization", label: "조직 관리", icon: Buildings },
   { to: "/app/churches", label: "교회", icon: Church },
   { to: "/manage/profile", label: "내 정보", icon: UserCircle },
 ];
 
-const MINISTER_NAV_ITEMS = [
+const MINISTER_NAV_ITEMS: ManagerNavItem[] = [
   { to: "/manage/home", label: "사역 홈", icon: Gauge, end: true },
   { to: "/manage/approvals", label: "승인", icon: UserCheck },
   { to: "/manage/members", label: "회원", icon: UsersThree },
@@ -35,7 +45,7 @@ const MINISTER_NAV_ITEMS = [
   { to: "/manage/profile", label: "내 정보", icon: UserCircle },
 ];
 
-const EXECUTIVE_NAV_ITEMS = [
+const EXECUTIVE_NAV_ITEMS: ManagerNavItem[] = [
   { to: "/manage/home", label: "운영 홈", icon: Gauge, end: true },
   { to: "/manage/minutes", label: "회의록", icon: Notebook },
   { to: "/manage/ledger", label: "회계장부", icon: Bank },
@@ -43,14 +53,30 @@ const EXECUTIVE_NAV_ITEMS = [
   { to: "/manage/profile", label: "내 정보", icon: UserCircle },
 ];
 
-function navigationItemsFor(branch: AppBranch) {
+const GOVERNANCE_DELEGATE_NAV_ITEMS: ManagerNavItem[] = [
+  { to: "/manage/organization", label: "조직 관리", icon: Buildings, end: true },
+  { to: "/manage/profile", label: "내 정보", icon: UserCircle },
+];
+
+function navigationItemsFor(branch: AppBranch, hasGovernanceAccess: boolean, compact: boolean) {
   if (branch === "platform_admin") return PLATFORM_NAV_ITEMS;
-  if (branch === "executive") return EXECUTIVE_NAV_ITEMS;
-  return MINISTER_NAV_ITEMS;
+  if (branch === "executive") {
+    if (!hasGovernanceAccess) return EXECUTIVE_NAV_ITEMS;
+    const organizationItem: ManagerNavItem = { to: "/manage/organization", label: "조직 관리", icon: Buildings };
+    return compact
+      ? [EXECUTIVE_NAV_ITEMS[0], organizationItem, EXECUTIVE_NAV_ITEMS[1], EXECUTIVE_NAV_ITEMS[2], EXECUTIVE_NAV_ITEMS[4]]
+      : [EXECUTIVE_NAV_ITEMS[0], organizationItem, ...EXECUTIVE_NAV_ITEMS.slice(1)];
+  }
+  if (branch === "governance_delegate") return GOVERNANCE_DELEGATE_NAV_ITEMS;
+  if (!hasGovernanceAccess) return MINISTER_NAV_ITEMS;
+  const organizationItem: ManagerNavItem = { to: "/manage/organization", label: "조직 관리", icon: Buildings };
+  return compact
+    ? [MINISTER_NAV_ITEMS[0], organizationItem, MINISTER_NAV_ITEMS[1], MINISTER_NAV_ITEMS[2], MINISTER_NAV_ITEMS[4]]
+    : [MINISTER_NAV_ITEMS[0], organizationItem, ...MINISTER_NAV_ITEMS.slice(1)];
 }
 
-function ManagerNavigation({ className, label, branch }: { className: string; label: string; branch: AppBranch }) {
-  const items = navigationItemsFor(branch);
+function ManagerNavigation({ className, label, branch, hasGovernanceAccess, compact = false }: { className: string; label: string; branch: AppBranch; hasGovernanceAccess: boolean; compact?: boolean }) {
+  const items = navigationItemsFor(branch, hasGovernanceAccess, compact);
   return (
     <nav className={className} aria-label={label}>
       {items.map((item) => {
@@ -75,11 +101,19 @@ export function ManagerShell() {
   const isPlatformAdmin = branch === "platform_admin";
   const isMinister = branch === "minister";
   const isExecutive = branch === "executive";
-  const roleLabel = isPlatformAdmin ? "플랫폼 관리자" : isMinister ? "사역자" : isExecutive ? "임원" : "관리자";
-  const modeLabel = isPlatformAdmin ? "플랫폼" : isMinister ? "사역" : isExecutive ? "운영" : "관리";
-  const scopeLabel = isPlatformAdmin ? "전체 재건 공동체" : church?.name ?? "소속 교회";
-  const churchHref = isPlatformAdmin || !church ? "/app/churches" : `/app/churches/${church.id}`;
-  const ModeIcon = isExecutive ? Briefcase : ShieldCheck;
+  const isGovernanceDelegate = branch === "governance_delegate";
+  const delegatedScope = viewer?.governanceAccess?.find((access) => access.canManageOfficers || access.canManageDelegations || access.canViewRoster);
+  const hasGovernanceAccess = Boolean(
+    isPlatformAdmin
+    || delegatedScope
+    || (mode === "demo" && (isMinister || (isExecutive && membership?.executiveOfficeCodes.includes("president")))),
+  );
+  const governanceRoleLabel = delegatedScope?.authoritySource === "delegation" ? "위임 관리자" : "조직 관리자";
+  const roleLabel = isPlatformAdmin ? "플랫폼 관리자" : isMinister ? "사역자" : isExecutive ? "임원" : isGovernanceDelegate ? governanceRoleLabel : "관리자";
+  const modeLabel = isPlatformAdmin ? "플랫폼" : isMinister ? "사역" : isExecutive ? "운영" : isGovernanceDelegate ? "조직" : "관리";
+  const scopeLabel = isPlatformAdmin ? "전체 재건 공동체" : isGovernanceDelegate ? delegatedScope?.scopeName ?? "위임 조직" : church?.name ?? "소속 교회";
+  const churchHref = isGovernanceDelegate ? "/manage/organization" : isPlatformAdmin || !church ? "/app/churches" : `/app/churches/${church.id}`;
+  const ModeIcon = isExecutive ? Briefcase : isGovernanceDelegate ? Key : ShieldCheck;
 
   return (
     <div className={`app-shell manager-shell manager-shell--${branch}`}>
@@ -90,7 +124,7 @@ export function ManagerShell() {
           <strong>{scopeLabel}</strong>
           <small>{roleLabel}</small>
         </div>
-        <ManagerNavigation className="desktop-nav manager-desktop-nav" label={`${roleLabel} 주요 메뉴`} branch={branch} />
+        <ManagerNavigation className="desktop-nav manager-desktop-nav" label={`${roleLabel} 주요 메뉴`} branch={branch} hasGovernanceAccess={hasGovernanceAccess} />
         <NavLink className="manager-community-switch manager-community-switch--sidebar" to="/app/home">
           <House weight="fill" />
           <span><strong>성도 화면</strong><small>공동체 홈으로 전환</small></span>
@@ -138,7 +172,7 @@ export function ManagerShell() {
         <main className="app-main manager-main">
           <Outlet />
         </main>
-        <ManagerNavigation className="bottom-nav manager-bottom-nav" label={`${roleLabel} 주요 메뉴`} branch={branch} />
+        <ManagerNavigation className="bottom-nav manager-bottom-nav" label={`${roleLabel} 주요 메뉴`} branch={branch} hasGovernanceAccess={hasGovernanceAccess} compact />
       </div>
     </div>
   );
