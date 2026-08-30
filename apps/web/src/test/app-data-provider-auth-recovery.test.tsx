@@ -14,6 +14,8 @@ const remote = vi.hoisted(() => ({
   signOut: vi.fn(async (): Promise<{ error: Error | null }> => ({ error: null })),
   updateUser: vi.fn(async () => ({ data: {}, error: null })),
   unsubscribe: vi.fn(),
+  directoryError: null as Error | null,
+  from: vi.fn(),
   organizations: [{
     id: "org-19",
     source_name: "재건부평교회",
@@ -22,6 +24,19 @@ const remote = vi.hoisted(() => ({
     presbytery: "서울노회",
     status: "active",
     claimed_at: null,
+  }],
+  publicOrganizations: [{
+    id: "org-19",
+    display_name: "재건부평교회",
+    slug: "jaegun-bupyeong",
+    presbytery: "서울노회",
+    status: "active",
+  }, {
+    id: "org-20",
+    display_name: "재건새가족교회",
+    slug: "jaegun-new-family",
+    presbytery: "경기노회",
+    status: "seeded_unclaimed",
   }],
 }));
 
@@ -41,7 +56,18 @@ vi.mock("../data/supabase", () => ({
         return { data: { subscription: { unsubscribe: remote.unsubscribe } } };
       }),
     },
-    from: vi.fn((table: string) => {
+    from: remote.from.mockImplementation((table: string) => {
+      if (table === "public_organization_directory") {
+        const request = {
+          select: vi.fn(() => request),
+          order: vi.fn(() => request),
+          abortSignal: vi.fn(async () => ({
+            data: remote.directoryError ? null : remote.publicOrganizations,
+            error: remote.directoryError,
+          })),
+        };
+        return request;
+      }
       if (table !== "organizations") throw new Error("test intentionally stops before private table loading");
       const request = {
         select: vi.fn(() => request),
@@ -71,6 +97,8 @@ function AuthProbe() {
       <button type="button" onClick={() => void data.signIn({ email: "user@example.com", password: "password123" })}>sign in</button>
       <output data-testid="recovery-ready">{String(data.passwordRecoveryReady)}</output>
       <output data-testid="loading">{String(data.loading)}</output>
+      <output data-testid="organizations">{JSON.stringify(data.organizations)}</output>
+      <output data-testid="provider-error">{data.error ?? ""}</output>
     </>
   );
 }
@@ -87,6 +115,8 @@ beforeEach(() => {
   remote.signOut.mockReset();
   remote.signOut.mockResolvedValue({ error: null });
   remote.updateUser.mockClear();
+  remote.directoryError = null;
+  remote.from.mockClear();
   latestData = null;
 });
 
@@ -95,6 +125,44 @@ afterEach(() => {
 });
 
 describe("AppDataProvider password recovery trust boundary", () => {
+  it("loads the signed-out signup directory through the anonymous-safe view", async () => {
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+
+    await waitFor(() => expect(latestData?.organizations).toHaveLength(2));
+    expect(latestData?.organizations).toEqual([
+      expect.objectContaining({
+        id: "org-19",
+        sourceName: "재건부평교회",
+        name: "재건부평교회",
+        status: "active",
+        claimStatus: "claimed",
+      }),
+      expect.objectContaining({
+        id: "org-20",
+        sourceName: "재건새가족교회",
+        name: "재건새가족교회",
+        status: "seeded",
+        claimStatus: "unclaimed",
+      }),
+    ]);
+    expect(remote.from).toHaveBeenCalledWith("public_organization_directory");
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+    expect(screen.getByTestId("provider-error")).toHaveTextContent("");
+  });
+
+  it("fails closed without falling back to the private organizations table when the public view fails", async () => {
+    remote.directoryError = new Error("directory unavailable");
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+
+    await waitFor(() => expect(screen.getByTestId("provider-error")).toHaveTextContent(
+      "서비스 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    ));
+    expect(latestData?.organizations).toEqual([]);
+    expect(latestData?.loading).toBe(false);
+    expect(remote.from).toHaveBeenCalledWith("public_organization_directory");
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+  });
+
   it("rejects a normal signed-in session and accepts only a verified PASSWORD_RECOVERY event", async () => {
     render(<AppDataProvider><AuthProbe /></AppDataProvider>);
     await waitFor(() => expect(remote.authCallback).not.toBeNull());

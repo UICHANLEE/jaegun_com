@@ -288,21 +288,28 @@ function createEmptyState(mode: AppDataState["mode"], loading = false): AppDataS
 }
 
 const ORGANIZATION_DIRECTORY_FIELDS = "id, source_name, display_name, slug, presbytery, description, location_text, contact_phone, website_url, worship_schedule, hero_path, status, claimed_at";
+const PUBLIC_ORGANIZATION_DIRECTORY_FIELDS = "id, slug, display_name, presbytery, status";
 
 function mapOrganizationDirectory(value: unknown): Organization[] {
-  return rowsOf(value).map((row) => ({
-    id: String(row.id),
-    sourceName: String(row.source_name),
-    name: String(row.display_name),
-    slug: String(row.slug),
-    presbytery: String(row.presbytery),
-    description: row.description ? String(row.description) : undefined,
-    address: row.location_text ? String(row.location_text) : undefined,
-    contact: row.contact_phone ? String(row.contact_phone) : undefined,
-    worshipSchedule: Array.isArray(row.worship_schedule) ? row.worship_schedule.map(String) : undefined,
-    status: row.status === "active" ? "active" : row.status === "archived" ? "archived" : "seeded",
-    claimStatus: row.claimed_at ? "claimed" : "unclaimed",
-  }));
+  return rowsOf(value).map((row) => {
+    const displayName = String(row.display_name ?? "");
+    const includesClaimedAt = Object.prototype.hasOwnProperty.call(row, "claimed_at");
+    return {
+      id: String(row.id),
+      sourceName: String(row.source_name ?? displayName),
+      name: displayName,
+      slug: String(row.slug),
+      presbytery: String(row.presbytery),
+      description: row.description ? String(row.description) : undefined,
+      address: row.location_text ? String(row.location_text) : undefined,
+      contact: row.contact_phone ? String(row.contact_phone) : undefined,
+      worshipSchedule: Array.isArray(row.worship_schedule) ? row.worship_schedule.map(String) : undefined,
+      status: row.status === "active" ? "active" : row.status === "archived" ? "archived" : "seeded",
+      claimStatus: includesClaimedAt
+        ? row.claimed_at ? "claimed" : "unclaimed"
+        : row.status === "active" ? "claimed" : "unclaimed",
+    };
+  });
 }
 
 function createAuthState(previous: AppDataState, mode: AppDataState["mode"], loading = false): AppDataState {
@@ -1202,8 +1209,8 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       }
       if (!user) {
         const organizationsResult = await supabase
-          .from("organizations")
-          .select(ORGANIZATION_DIRECTORY_FIELDS)
+          .from("public_organization_directory")
+          .select(PUBLIC_ORGANIZATION_DIRECTORY_FIELDS)
           .order("display_name")
           .abortSignal(abortController.signal);
         if (organizationsResult.error) throw organizationsResult.error;
