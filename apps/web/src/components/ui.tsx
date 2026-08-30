@@ -195,7 +195,12 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("The application UI failed to render.", error, info.componentStack);
+    // Production exceptions may contain provider details or identifiers. Keep
+    // the browser console quiet there and route sanitized telemetry through a
+    // reviewed server-side observability integration instead.
+    if (import.meta.env.DEV) {
+      console.error("The application UI failed to render.", error, info.componentStack);
+    }
   }
 
   render() {

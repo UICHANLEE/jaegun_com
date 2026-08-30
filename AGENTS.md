@@ -19,6 +19,8 @@
 - Every governance office at general-assembly, presbytery, and church scope—including the church `pastor` office—is an explicit year-scoped assignment. A minister role may still approve members under the membership policy, but it does not implicitly grant governance officer-management authority.
 - The current-year president and authorized pastor at a governance scope may manage that scope's executive assignments. They may grant a bounded delegation for an explicit scope, capability, and expiry; delegation never creates a platform administrator, executive membership, or implicit authority outside that scope.
 - Presbyteries and churches expose scoped rosters to authorized signed-in users. Roster access and private profile fields are enforced by backend RLS/RPCs; the UI must not infer broader visibility from a presbytery label alone.
+- Each church has four fixed ministry departments—`adult` (장년부), `young_adult` (청년부), `teen` (청소년부), and `elementary` (초등부). Their annual offices (`회장`, `부회장`, `총무`, `서기`, `회계`) are department-scoped metadata only and never grant the authorization-bearing `executive` role, member approval, meeting-minutes, accounting, or governance authority.
+- Department officers are selected only from active members of the exact church without inferring department, age, gender, or role from the seed spreadsheet or profile data. The platform administrator or the church's explicit current-year `pastor` governance assignee manages these records; an ordinary minister role alone is not sufficient.
 
 ## Production Service
 

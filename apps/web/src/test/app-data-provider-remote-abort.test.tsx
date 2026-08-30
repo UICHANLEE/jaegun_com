@@ -22,6 +22,7 @@ const remote = vi.hoisted(() => {
 });
 
 vi.mock("../data/supabase", () => ({
+  canPersistSensitiveClientState: () => true,
   isSupabaseConfigured: true,
   supabase: {
     auth: {

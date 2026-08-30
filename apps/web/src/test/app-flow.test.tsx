@@ -43,9 +43,29 @@ describe("primary service journeys", () => {
     fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "different123" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ }));
     fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 서로 일치하지 않습니다");
+  });
+
+  it("requires separate sensitive-affiliation and community-policy consent before signup", async () => {
+    renderApp(["/auth"]);
+    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
+    fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
+    fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
+    fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
+    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password1234" } });
+    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
+
+    const submit = screen.getByRole("button", { name: "계정 만들기" });
+    fireEvent.submit(submit.closest("form")!);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("필수 개인정보 처리와 공동체 이용규칙에 동의해 주세요");
+    expect(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ })).toBeRequired();
+    expect(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ })).toBeRequired();
   });
 
   it("filters signup churches by presbytery and clears an invalid church selection", async () => {

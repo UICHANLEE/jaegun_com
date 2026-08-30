@@ -37,8 +37,14 @@ import type {
   ViewerContext,
 } from "../types/domain";
 import { createDemoState, DEMO_VIEWER } from "./seed";
-import { isSupabaseConfigured, supabase } from "./supabase";
+import {
+  canPersistSensitiveClientState,
+  isSupabaseConfigured,
+  supabase,
+} from "./supabase";
 import { uploadCommunityFile, validateMediaFile } from "./mediaUpload";
+import { validateNewPassword } from "./authPolicy";
+import { detachCurrentNativePushDevice, nativePushRegistrationAvailable } from "./nativePush";
 import { getServiceYear, millisecondsUntilNextServiceYear } from "../serviceTime";
 import { executiveApprovalErrorMessage, getExecutiveApprovalIssue } from "../executiveApprovalPolicy";
 import { normalizeGovernanceAccess } from "./governance";
@@ -54,12 +60,16 @@ interface PendingMessageBatch {
   textNonce?: string;
   mediaNonces: string[];
   uploads?: Array<{
+    intentId: string;
+    bucket: "community-media" | "avatars";
     path: string;
     url: string;
-    name: string;
     mimeType: string;
     byteSize: number;
     kind: "image" | "video";
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
   }>;
 }
 
@@ -132,6 +142,7 @@ function mediaFileFingerprint(file: File) {
 }
 
 function readMessageReconciliations(): PendingMessageReconciliation[] {
+  if (!canPersistSensitiveClientState()) return [];
   try {
     const parsed = JSON.parse(window.localStorage.getItem(MESSAGE_RECONCILIATION_STORAGE_KEY) ?? "[]") as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -153,6 +164,7 @@ function readMessageReconciliations(): PendingMessageReconciliation[] {
 }
 
 function writeMessageReconciliations(records: PendingMessageReconciliation[]) {
+  if (!canPersistSensitiveClientState()) return;
   try {
     window.localStorage.setItem(MESSAGE_RECONCILIATION_STORAGE_KEY, JSON.stringify(records));
   } catch {
@@ -162,6 +174,7 @@ function writeMessageReconciliations(records: PendingMessageReconciliation[]) {
 
 function readStorageCleanupQueue() {
   const queue = new Map<string, Set<string>>();
+  if (!canPersistSensitiveClientState()) return queue;
   try {
     const parsed = JSON.parse(window.localStorage.getItem(STORAGE_CLEANUP_STORAGE_KEY) ?? "[]") as unknown;
     if (!Array.isArray(parsed)) return queue;
@@ -179,6 +192,7 @@ function readStorageCleanupQueue() {
 }
 
 function writeStorageCleanupQueue(queue: Map<string, Set<string>>) {
+  if (!canPersistSensitiveClientState()) return;
   try {
     window.localStorage.setItem(STORAGE_CLEANUP_STORAGE_KEY, JSON.stringify(
       Array.from(queue, ([userId, paths]) => ({ userId, paths: Array.from(paths) })),
@@ -190,6 +204,7 @@ function writeStorageCleanupQueue(queue: Map<string, Set<string>>) {
 
 function readDraftCleanupQueue() {
   const queue = new Map<string, Set<string>>();
+  if (!canPersistSensitiveClientState()) return queue;
   try {
     const parsed = JSON.parse(window.localStorage.getItem(DRAFT_CLEANUP_STORAGE_KEY) ?? "[]") as unknown;
     if (!Array.isArray(parsed)) return queue;
@@ -207,6 +222,7 @@ function readDraftCleanupQueue() {
 }
 
 function writeDraftCleanupQueue(queue: Map<string, Set<string>>) {
+  if (!canPersistSensitiveClientState()) return;
   try {
     window.localStorage.setItem(DRAFT_CLEANUP_STORAGE_KEY, JSON.stringify(
       Array.from(queue, ([userId, postIds]) => ({ userId, postIds: Array.from(postIds) })),
@@ -217,6 +233,7 @@ function writeDraftCleanupQueue(queue: Map<string, Set<string>>) {
 }
 
 function readRecoverySession(userId: string) {
+  if (!canPersistSensitiveClientState()) return null;
   try {
     const raw = window.sessionStorage.getItem(RECOVERY_SESSION_KEY);
     if (!raw) return null;
@@ -233,6 +250,7 @@ function readRecoverySession(userId: string) {
 
 function writeRecoverySession(userId: string) {
   const expiresAt = Date.now() + RECOVERY_SESSION_TTL_MS;
+  if (!canPersistSensitiveClientState()) return expiresAt;
   try {
     window.sessionStorage.setItem(RECOVERY_SESSION_KEY, JSON.stringify({
       userId,
@@ -245,6 +263,7 @@ function writeRecoverySession(userId: string) {
 }
 
 function removeRecoverySession() {
+  if (!canPersistSensitiveClientState()) return;
   try {
     window.sessionStorage.removeItem(RECOVERY_SESSION_KEY);
   } catch {
@@ -853,22 +872,29 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       queueStorageCleanup(userId, uniquePaths);
       return false;
     }
+    const remainingPaths = new Set(uniquePaths);
     try {
-      const result = await supabase.storage.from("community-media").remove(uniquePaths);
-      if (result.error) throw result.error;
-      if (!isCleanupActorCurrent()) {
-        queueStorageCleanup(userId, uniquePaths);
-        return false;
-      }
-      const pending = storageCleanupQueueRef.current.get(userId);
-      if (pending) {
-        for (const path of uniquePaths) pending.delete(path);
-        if (pending.size === 0) storageCleanupQueueRef.current.delete(userId);
-        writeStorageCleanupQueue(storageCleanupQueueRef.current);
+      for (let offset = 0; offset < uniquePaths.length; offset += 20) {
+        const chunk = uniquePaths.slice(offset, offset + 20);
+        const result = await supabase.rpc("abandon_media_upload_intents", {
+          p_approved_paths: chunk,
+        });
+        if (result.error) throw result.error;
+        if (!isCleanupActorCurrent()) {
+          queueStorageCleanup(userId, Array.from(remainingPaths));
+          return false;
+        }
+        const pending = storageCleanupQueueRef.current.get(userId);
+        if (pending) {
+          for (const path of chunk) pending.delete(path);
+          if (pending.size === 0) storageCleanupQueueRef.current.delete(userId);
+          writeStorageCleanupQueue(storageCleanupQueueRef.current);
+        }
+        for (const path of chunk) remainingPaths.delete(path);
       }
       return true;
     } catch {
-      queueStorageCleanup(userId, uniquePaths);
+      queueStorageCleanup(userId, Array.from(remainingPaths));
       return false;
     }
   }, [queueStorageCleanup]);
@@ -949,18 +975,24 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         clearDraftCleanup(userId, postId);
         return true;
       }
-      const removed = removablePaths.length
-        ? await removeOrQueueStoragePaths(userId, removablePaths, sessionEpoch)
-        : true;
-      if (removed) clearDraftCleanup(userId, postId);
-      else queueDraftCleanup(userId, postId);
-      return removed;
+      // Migration 202608270011 makes this RPC the authoritative draft cleanup:
+      // it detaches media intents and queues both quarantine and approved bytes
+      // for the service worker. Clients cannot delete approved Storage objects.
+      const cleanupQueued = removablePaths.length === 0 || payload.cleanup_queued === true;
+      if (cleanupQueued) {
+        clearStorageCleanupPaths(userId, removablePaths);
+        clearDraftCleanup(userId, postId);
+      } else {
+        queueStorageCleanup(userId, removablePaths);
+        queueDraftCleanup(userId, postId);
+      }
+      return cleanupQueued;
     } catch {
       queueStorageCleanup(userId, uniquePaths);
       queueDraftCleanup(userId, postId);
       return false;
     }
-  }, [clearDraftCleanup, clearStorageCleanupPaths, queueDraftCleanup, queueStorageCleanup, removeOrQueueStoragePaths]);
+  }, [clearDraftCleanup, clearStorageCleanupPaths, queueDraftCleanup, queueStorageCleanup]);
 
   const flushPostCleanupQueues = useCallback(async (userId: string) => {
     const sessionEpoch = remoteSessionEpochRef.current;
@@ -972,9 +1004,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       await cleanupOrQueueDraftPost(userId, postId, postPaths, sessionEpoch);
     }
     const remainingPaths = Array.from(storageCleanupQueueRef.current.get(userId) ?? []);
-    for (const path of remainingPaths) {
-      if (path.includes("/posts/")) continue;
-      await removeOrQueueStoragePaths(userId, [path], sessionEpoch);
+    const unattachedPaths = remainingPaths.filter((path) => !path.includes("/posts/"));
+    if (unattachedPaths.length) {
+      await removeOrQueueStoragePaths(userId, unattachedPaths, sessionEpoch);
     }
   }, [cleanupOrQueueDraftPost, removeOrQueueStoragePaths]);
 
@@ -1740,10 +1772,19 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     // reported as failed merely because the following data refresh is slow.
   }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
 
-  const signUp = useCallback(async ({ displayName, email, password, organizationId }: SignUpInput) => {
+  const signUp = useCallback(async ({
+    displayName,
+    email,
+    password,
+    organizationId,
+    acceptedPrivacyVersion,
+    acceptedCommunityVersion,
+  }: SignUpInput) => {
     if (!supabase) {
       throw new Error("실서비스 회원가입이 아직 연결되지 않았습니다. 아래에서 신규 가입자 흐름을 미리볼 수 있어요.");
     }
+    const passwordError = validateNewPassword(password);
+    if (passwordError) throw new Error(passwordError);
     if (signOutPromiseRef.current) await signOutPromiseRef.current;
     const selectedOrganization = stateRef.current.organizations.find((organization) => (
       organization.id === organizationId && organization.status !== "archived"
@@ -1766,6 +1807,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         data: {
           display_name: displayName,
           signup_organization_id: selectedOrganization.id,
+          accepted_privacy: true,
+          accepted_privacy_version: acceptedPrivacyVersion,
+          accepted_community: true,
+          accepted_community_version: acceptedCommunityVersion,
         },
       },
     });
@@ -1791,7 +1836,8 @@ export function AppDataProvider({ children }: PropsWithChildren) {
 
   const updatePassword = useCallback(async (password: string) => {
     if (!supabase) throw new Error("비밀번호 변경 서비스가 아직 연결되지 않았습니다.");
-    if (password.length < 8) throw new Error("비밀번호는 8자 이상 입력해 주세요.");
+    const passwordError = validateNewPassword(password);
+    if (passwordError) throw new Error(passwordError);
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     if (sessionError) throw sessionError;
     if (!sessionData.session?.user) throw new Error("비밀번호 재설정 링크가 만료되었습니다. 다시 요청해 주세요.");
@@ -1811,6 +1857,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     invalidateRemoteWork(null);
     replaceState(createAuthState(stateRef.current, "supabase", false));
     setError(null);
+    if (nativePushRegistrationAvailable()) await detachCurrentNativePushDevice();
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) {
       const { error: localSignOutError } = await supabase.auth.signOut({ scope: "local" });
@@ -1833,6 +1880,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     setError(null);
     const operation = (async () => {
       if (!supabase) return;
+      if (nativePushRegistrationAvailable()) await detachCurrentNativePushDevice();
       const { error: signOutError } = await supabase.auth.signOut();
       if (signOutError) {
         const { error: localSignOutError } = await supabase.auth.signOut({ scope: "local" });
@@ -2137,35 +2185,36 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         const media = [];
         for (let index = 0; index < draft.files.length; index += 1) {
           const file = draft.files[index];
-          const extension = file.name.split(".").pop()?.toLowerCase() || (file.type.startsWith("video/") ? "mp4" : "jpg");
-          const objectPath = `${membership.organizationId}/posts/${postRow.id}/${crypto.randomUUID()}.${extension}`;
-          // Record the intended path before upload: the object can exist even if
-          // signing its URL fails after the bytes have already been stored.
-          attemptedObjectPaths.push(objectPath);
           const uploaded = await uploadCommunityFile(
             file,
-            objectPath,
+            {
+              purpose: "post",
+              targetId: String(postRow.id),
+              onIntentCreated: (approvedPath) => attemptedObjectPaths.push(approvedPath),
+            },
             (fileProgress) => onProgress?.((index + fileProgress) / draft.files.length),
           );
-          const kind = file.type.startsWith("video/") ? "video" as const : "image" as const;
           const { data: mediaRow, error: mediaError } = await supabase.from("post_media").insert({
             post_id: postRow.id,
             uploader_id: viewer.profile.id,
             storage_path: uploaded.path,
-            kind,
-            mime_type: file.type,
-            byte_size: file.size,
+            kind: uploaded.kind,
+            mime_type: uploaded.mimeType,
+            byte_size: uploaded.byteSize,
+            width: uploaded.width ?? null,
+            height: uploaded.height ?? null,
+            duration_seconds: uploaded.durationSeconds ?? null,
             alt_text: file.name,
             sort_order: index,
           }).select("id").single();
           if (mediaError) throw mediaError;
           media.push({
             id: String(mediaRow.id),
-            kind: file.type.startsWith("video/") ? "video" as const : "image" as const,
+            kind: uploaded.kind,
             url: uploaded.url,
             name: file.name,
-            mimeType: file.type,
-            byteSize: file.size,
+            mimeType: uploaded.mimeType,
+            byteSize: uploaded.byteSize,
           });
         }
         const pendingPost: PendingPostPublish = {
@@ -2629,27 +2678,21 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         if (files.length && !organizationId) throw new Error("대화의 교회 정보를 확인할 수 없습니다.");
         let uploadedFiles = pendingBatch.uploads?.map((upload, index) => ({
           file: files[index],
-          uploaded: { path: upload.path, url: upload.url },
+          uploaded: upload,
           nonce: pendingBatch.mediaNonces[index],
         })) ?? [];
         if (uploadedFiles.length !== files.length) {
           uploadedFiles = [];
           for (let index = 0; index < files.length; index += 1) {
             const file = files[index];
-            const extension = file.name.split(".").pop()?.toLowerCase() || (file.type.startsWith("video/") ? "mp4" : "jpg");
-            const objectPath = `${organizationId}/messages/${conversationId}/${crypto.randomUUID()}.${extension}`;
-            attemptedObjectPaths.push(objectPath);
-            const uploaded = await uploadCommunityFile(file, objectPath, () => undefined);
+            const uploaded = await uploadCommunityFile(file, {
+              purpose: "message",
+              targetId: conversationId,
+              onIntentCreated: (approvedPath) => attemptedObjectPaths.push(approvedPath),
+            }, () => undefined);
             uploadedFiles.push({ file, uploaded, nonce: pendingBatch.mediaNonces[index] });
           }
-          pendingBatch.uploads = uploadedFiles.map(({ file, uploaded }) => ({
-            path: uploaded.path,
-            url: uploaded.url,
-            name: file.name,
-            mimeType: file.type,
-            byteSize: file.size,
-            kind: file.type.startsWith("video/") ? "video" : "image",
-          }));
+          pendingBatch.uploads = uploadedFiles.map(({ uploaded }) => ({ ...uploaded }));
         } else {
           attemptedObjectPaths.push(...uploadedFiles.map(({ uploaded }) => uploaded.path));
         }
@@ -2661,11 +2704,19 @@ export function AppDataProvider({ children }: PropsWithChildren) {
             media_metadata: {},
             client_nonce: pendingBatch.textNonce,
           }] : []),
-          ...uploadedFiles.map(({ file, uploaded, nonce }) => ({
-            kind: file.type.startsWith("video/") ? "video" : "image",
+          ...uploadedFiles.map(({ uploaded, nonce }) => ({
+            kind: uploaded.kind,
             body: null,
             media_path: uploaded.path,
-            media_metadata: { name: file.name, mime_type: file.type, byte_size: file.size },
+            media_metadata: {
+              mime_type: uploaded.mimeType,
+              byte_size: uploaded.byteSize,
+              width: uploaded.width ?? null,
+              height: uploaded.height ?? null,
+              duration_seconds: uploaded.durationSeconds ?? null,
+              scan_approved: true,
+              upload_intent_id: uploaded.intentId,
+            },
             client_nonce: nonce,
           })),
         ];

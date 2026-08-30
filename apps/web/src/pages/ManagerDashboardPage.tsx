@@ -20,6 +20,7 @@ import { Link } from "react-router-dom";
 import { resolveAppBranch, reviewableApplications, type AppBranch } from "../components/access";
 import { CategoryBadge, EmptyState, formatRelativeKorean } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
+import { canManageDepartmentOfficers } from "../data/departmentGovernance";
 import {
   EXECUTIVE_OFFICE_LABELS,
   type ExecutiveOfficeCode,
@@ -116,6 +117,7 @@ function presentationFor(branch: AppBranch, scopeLabel: string) {
 export function ManagerDashboardPage() {
   const {
     viewer,
+    mode,
     organizations,
     applications,
     members,
@@ -139,6 +141,7 @@ export function ManagerDashboardPage() {
   const scopeLabel = isPlatformAdmin ? "전체 재건 공동체" : organization?.name ?? "소속 교회";
   const scopeHref = isPlatformAdmin || !organization ? "/app/churches" : `/app/churches/${organization.id}`;
   const presentation = presentationFor(branch, scopeLabel);
+  const canManageDepartments = canManageDepartmentOfficers(viewer, mode, organization?.name);
   const executiveOfficeCodes = useMemo(
     () => isExecutive ? [...new Set(membership?.executiveOfficeCodes ?? [])] : [],
     [isExecutive, membership?.executiveOfficeCodes],
@@ -299,6 +302,8 @@ export function ManagerDashboardPage() {
       return [
         { key: "approvals", href: "/manage/approvals", icon: <UserCheck weight="fill" />, title: "리더 승인", description: "사역자·임원 신청 확인" },
         { key: "organization", href: "/manage/organization", icon: <Briefcase weight="fill" />, title: "조직 설정", description: "총회·노회·교회 임원 구성" },
+        ...(canManageDepartments ? [{ key: "departments", href: "/manage/departments", icon: <UsersThree weight="fill" />, title: "부서 임원", description: "교회별 세대 부서 구성" }] : []),
+        { key: "events", href: "/app/events", icon: <CalendarDots weight="fill" />, title: "일정 관리", description: "범위별 일정과 참석 현황" },
         { key: "churches", href: "/app/churches", icon: <Church weight="fill" />, title: "교회 목록", description: "전체 조직 현황 보기" },
         { key: "notifications", href: "/app/notifications", icon: <Bell weight="fill" />, title: "알림 확인", description: "처리 결과와 새 소식" },
       ];
@@ -308,6 +313,8 @@ export function ManagerDashboardPage() {
         { key: "approvals", href: "/manage/approvals", icon: <UserCheck weight="fill" />, title: "새 가족 승인", description: pendingApplications.length ? `${pendingApplications.length}건 확인 필요` : "대기 신청 없음" },
         { key: "members", href: "/manage/members", icon: <UsersThree weight="fill" />, title: "성도 관리", description: "구성원 상태 관리" },
         { key: "organization", href: "/manage/organization", icon: <Briefcase weight="fill" />, title: "조직·권한", description: "교회 임원과 위임 확인" },
+        ...(canManageDepartments ? [{ key: "departments", href: "/manage/departments", icon: <UsersThree weight="fill" />, title: "부서 임원", description: "세대별 회장·총무·회계 설정" }] : []),
+        { key: "events", href: "/app/events", icon: <CalendarDots weight="fill" />, title: "공동체 일정", description: "일정과 참석 응답 확인" },
         { key: "notice", href: "/app/posts/new", icon: <Megaphone weight="fill" />, title: "공지 작성", description: "교회 소식 빠르게 알리기" },
       ];
     }
@@ -344,6 +351,13 @@ export function ManagerDashboardPage() {
         description: pendingApplications.length ? `${pendingApplications.length}건 확인 필요` : "대기 신청 없음",
       },
       {
+        key: "events",
+        href: "/app/events",
+        icon: <CalendarDots weight="fill" />,
+        title: "공동체 일정",
+        description: "일정과 참석 응답 확인",
+      },
+      {
         key: "posts",
         href: "/manage/posts",
         icon: <Article weight="fill" />,
@@ -352,7 +366,7 @@ export function ManagerDashboardPage() {
       },
     );
     return actions;
-  }, [executiveOfficeCodes, executiveYearSummary.draftMeetingCount, hasGovernanceAccess, isMinister, isPlatformAdmin, pendingApplications.length, scopeHref]);
+  }, [canManageDepartments, executiveOfficeCodes, executiveYearSummary.draftMeetingCount, hasGovernanceAccess, isMinister, isPlatformAdmin, pendingApplications.length, scopeHref]);
 
   const activities = useMemo<ManagerActivity[]>(() => {
     const scopedPosts = posts.filter((post) => (

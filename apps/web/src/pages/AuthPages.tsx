@@ -21,6 +21,11 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
 import { ApplicationStatusBadge, ErrorBanner, ROLE_LABELS } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
+import { MAX_PASSWORD_LENGTH, MIN_NEW_PASSWORD_LENGTH, validateNewPassword } from "../data/authPolicy";
+import {
+  COMMUNITY_POLICY_CONSENT_VERSION,
+  SENSITIVE_AFFILIATION_CONSENT_VERSION,
+} from "../data/safetyPrivacy";
 import {
   CHURCH_TITLE_CODES,
   CHURCH_TITLE_LABELS,
@@ -54,7 +59,7 @@ function authSubmitError(reason: unknown, view: AuthView) {
     return "네트워크에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
   }
   if (message.includes("password") && (message.includes("weak") || message.includes("least") || message.includes("short"))) {
-    return "비밀번호는 8자 이상으로 입력해 주세요.";
+    return `새 비밀번호는 ${MIN_NEW_PASSWORD_LENGTH}자 이상으로 입력해 주세요.`;
   }
   if (message.includes("invalid email") || message.includes("email address")) {
     return "올바른 이메일 주소를 입력해 주세요.";
@@ -133,6 +138,8 @@ export function LoginPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [presbytery, setPresbytery] = useState("");
   const [organizationId, setOrganizationId] = useState("");
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [communityPolicyAccepted, setCommunityPolicyAccepted] = useState(false);
   const submittingRef = useRef(false);
   const retryingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -168,8 +175,19 @@ export function LoginPage() {
       setLocalError("비밀번호가 서로 일치하지 않습니다.");
       return;
     }
+    if (view === "signup") {
+      const passwordError = validateNewPassword(password);
+      if (passwordError) {
+        setLocalError(passwordError);
+        return;
+      }
+    }
     if (view === "signup" && !presbytery) {
       setLocalError("소속 노회를 선택해 주세요.");
+      return;
+    }
+    if (view === "signup" && (!privacyAccepted || !communityPolicyAccepted)) {
+      setLocalError("필수 개인정보 처리와 공동체 이용규칙에 동의해 주세요.");
       return;
     }
     submittingRef.current = true;
@@ -185,6 +203,8 @@ export function LoginPage() {
           email: email.trim(),
           password,
           organizationId: selectedSignupOrganization.id,
+          acceptedPrivacyVersion: SENSITIVE_AFFILIATION_CONSENT_VERSION,
+          acceptedCommunityVersion: COMMUNITY_POLICY_CONSENT_VERSION,
         });
         setLocalSuccess("가입 요청을 처리했습니다. 확인 메일의 링크를 연 뒤 로그인해 주세요. 메일이 도착하지 않으면 관리자에게 문의해 주세요.");
       } else {
@@ -203,6 +223,10 @@ export function LoginPage() {
     setLocalError(null);
     setLocalSuccess(null);
     setConfirmPassword("");
+    if (nextView === "login") {
+      setPrivacyAccepted(false);
+      setCommunityPolicyAccepted(false);
+    }
   }
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
@@ -311,13 +335,38 @@ export function LoginPage() {
               </label>
               <label className="field">
                 <span>비밀번호</span>
-                <span className="field__control"><LockKey /><input required minLength={8} maxLength={128} type="password" autoComplete={view === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8자 이상 입력" /></span>
+                <span className="field__control"><LockKey /><input required minLength={view === "login" ? 1 : MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete={view === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={view === "login" ? "비밀번호 입력" : `${MIN_NEW_PASSWORD_LENGTH}자 이상 입력`} /></span>
               </label>
               {view === "signup" ? (
-                <label className="field">
-                  <span>비밀번호 확인</span>
-                  <span className="field__control"><LockKey /><input required minLength={8} maxLength={128} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="비밀번호 다시 입력" /></span>
-                </label>
+                <>
+                  <label className="field">
+                    <span>비밀번호 확인</span>
+                    <span className="field__control"><LockKey /><input required minLength={MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="비밀번호 다시 입력" /></span>
+                  </label>
+                  <fieldset className="auth-consent" aria-describedby="auth-consent-help">
+                    <legend>필수 동의</legend>
+                    <label>
+                      <input required type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} />
+                      <span>
+                        <strong>[필수] 개인정보·민감정보 처리 동의</strong>
+                        <small>가입 교회와 노회 정보는 종교적 신념을 드러낼 수 있어 별도로 동의받습니다.</small>
+                      </span>
+                    </label>
+                    <Link target="_blank" rel="noopener noreferrer" to={`/legal/privacy/${SENSITIVE_AFFILIATION_CONSENT_VERSION}`}>개인정보 처리방침 전문 보기</Link>
+                    <label>
+                      <input required type="checkbox" checked={communityPolicyAccepted} onChange={(event) => setCommunityPolicyAccepted(event.target.checked)} />
+                      <span>
+                        <strong>[필수] 이용약관·공동체 이용규칙 동의</strong>
+                        <small>신고, 차단, 콘텐츠 조치와 공동체 내 존중 기준을 확인했습니다.</small>
+                      </span>
+                    </label>
+                    <span className="auth-consent__links">
+                      <Link target="_blank" rel="noopener noreferrer" to="/legal/terms">이용약관</Link>
+                      <Link target="_blank" rel="noopener noreferrer" to={`/legal/community/${COMMUNITY_POLICY_CONSENT_VERSION}`}>공동체 이용규칙</Link>
+                    </span>
+                    <p id="auth-consent-help">선택 동의나 마케팅 수신 동의는 계정 생성 조건이 아닙니다.</p>
+                  </fieldset>
+                </>
               ) : null}
               {view === "login" ? <Link className="auth-form__link" to="/forgot-password">비밀번호를 잊으셨나요?</Link> : null}
               <button className="button button--primary button--full" disabled={submitting} type="submit">
@@ -494,7 +543,7 @@ export function ResetPasswordPage() {
     <AuthRecoveryLayout titleId="reset-password-title">
       <p className="eyebrow">계정 복구</p>
       <h1 id="reset-password-title">새 비밀번호 설정</h1>
-      <p className="auth-panel__lead">다른 서비스에서 사용하지 않는 8자 이상의 새 비밀번호를 입력해 주세요.</p>
+      <p className="auth-panel__lead">다른 서비스에서 사용하지 않는 {MIN_NEW_PASSWORD_LENGTH}자 이상의 새 비밀번호를 입력해 주세요.</p>
 
       {updated ? (
         <div className="recovery-result" role="status">
@@ -515,11 +564,11 @@ export function ResetPasswordPage() {
           <form className="auth-form auth-form--recovery" aria-busy={submitting} onSubmit={handleSubmit}>
             <label className="field">
               <span>새 비밀번호</span>
-              <span className="field__control"><LockKey /><input required minLength={8} maxLength={128} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8자 이상 입력" /></span>
+              <span className="field__control"><LockKey /><input required minLength={MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={`${MIN_NEW_PASSWORD_LENGTH}자 이상 입력`} /></span>
             </label>
             <label className="field">
               <span>새 비밀번호 확인</span>
-              <span className="field__control"><LockKey /><input required minLength={8} maxLength={128} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="새 비밀번호 다시 입력" /></span>
+              <span className="field__control"><LockKey /><input required minLength={MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="새 비밀번호 다시 입력" /></span>
             </label>
             <button className="button button--primary button--full" disabled={submitting} type="submit">
               {submitting ? <CircleNotch className="spin" /> : null} 비밀번호 변경

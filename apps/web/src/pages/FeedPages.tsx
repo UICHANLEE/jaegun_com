@@ -18,6 +18,7 @@ import {
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PostCard } from "../components/PostCard";
+import { ReportActionLink } from "../components/SafetyControls";
 import {
   Avatar,
   CATEGORY_LABELS,
@@ -30,6 +31,7 @@ import {
   ResilientImage,
 } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
+import { canPersistSensitiveClientState } from "../data/supabase";
 import type { PostCategory } from "../types/domain";
 import { confirmDiscardChanges, useUnsavedChangesWarning } from "../unsavedChanges";
 
@@ -45,7 +47,7 @@ const MEDIA_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,image/heic,imag
 const POST_OPERATION_KEY_PREFIX = "jaegun-post-operation-v1:";
 
 function clearPostOperation(key: string | null) {
-  if (!key) return;
+  if (!key || !canPersistSensitiveClientState()) return;
   try {
     window.sessionStorage.removeItem(key);
   } catch {
@@ -160,7 +162,7 @@ export function ComposerPage() {
   }, [files]);
 
   useEffect(() => {
-    if (!operationStorageKey) return;
+    if (!operationStorageKey || !canPersistSensitiveClientState()) return;
     try {
       const pending = JSON.parse(window.sessionStorage.getItem(operationStorageKey) ?? "null") as unknown;
       if (!pending || typeof pending !== "object") return;
@@ -182,7 +184,7 @@ export function ComposerPage() {
   }, [operationStorageKey]);
 
   useEffect(() => {
-    if (!operationStorageKey || !isDirty) return;
+    if (!operationStorageKey || !isDirty || !canPersistSensitiveClientState()) return;
     try {
       window.sessionStorage.setItem(operationStorageKey, JSON.stringify({
         operationId: clientOperationId,
@@ -443,6 +445,15 @@ export function PostDetailPage() {
         <div className="post-detail__actions">
           <span aria-label={`공감 ${post.reactionCount}개`}><Heart weight="regular" /> 공감 {post.reactionCount}</span>
           <span><ChatCircle /> 댓글 {post.comments.length}</span>
+          {post.authorId !== viewer?.profile.id ? (
+            <ReportActionLink
+              targetType="post"
+              targetId={post.id}
+              targetLabel={post.title}
+              returnTo={`/app/posts/${post.id}`}
+              className="safety-action-link"
+            />
+          ) : null}
         </div>
       </article>
 
@@ -453,7 +464,22 @@ export function PostDetailPage() {
             {post.comments.map((item) => (
               <article className="comment" key={item.id}>
                 <Avatar name={item.authorName} size="small" tone="blue" />
-                <div><div><strong>{item.authorName}</strong><span>{formatRelativeKorean(item.createdAt)}</span></div><p>{item.body}</p></div>
+                <div>
+                  <div>
+                    <strong>{item.authorName}</strong>
+                    <span>{formatRelativeKorean(item.createdAt)}</span>
+                    {item.authorId !== viewer?.profile.id ? (
+                      <ReportActionLink
+                        targetType="comment"
+                        targetId={item.id}
+                        targetLabel={`${item.authorName}님의 댓글`}
+                        returnTo={`/app/posts/${post.id}`}
+                        className="comment__report"
+                      />
+                    ) : null}
+                  </div>
+                  <p>{item.body}</p>
+                </div>
               </article>
             ))}
           </div>

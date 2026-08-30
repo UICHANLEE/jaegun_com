@@ -33,3 +33,11 @@ export function reviewableApplications(
 export function canManageChurch(viewer: ViewerContext | null) {
   return resolveAppBranch(viewer) !== "member";
 }
+
+export function canModerateCommunity(viewer: ViewerContext | null) {
+  return viewer?.profile.globalRole === "platform_admin"
+    || Boolean(
+      viewer?.membership?.status === "active"
+      && (viewer.membership.role === "minister" || viewer.membership.role === "executive"),
+    );
+}

@@ -15,7 +15,13 @@ import {
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Avatar, EmptyState, ErrorBanner, formatRelativeKorean, PageIntro, ResilientImage } from "../components/ui";
+import {
+  BlockUserControl,
+  ConversationMuteControl,
+  ReportActionLink,
+} from "../components/SafetyControls";
 import { useAppData } from "../data/AppDataProvider";
+import { loadSafetyPrivacyState } from "../data/safetyPrivacy";
 
 const MEDIA_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,video/mp4,video/quicktime,video/webm";
 const MESSAGE_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-CA", {
@@ -172,7 +178,7 @@ export function ChatListPage() {
 export function ConversationPage() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
-  const { viewer, organizations, members, conversations, messagesByConversation, loadConversationMessages, markConversationRead, sendMessage } = useAppData();
+  const { mode, viewer, organizations, members, conversations, messagesByConversation, loadConversationMessages, markConversationRead, sendMessage } = useAppData();
   const conversation = conversations.find((item) => item.id === conversationId);
   const messages = conversationId ? messagesByConversation[conversationId] ?? [] : [];
   const organizationName = organizations?.find((item) => item.id === conversation?.organizationId)?.name ?? "소속 교회";
@@ -188,6 +194,11 @@ export function ConversationPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [safetyState, setSafetyState] = useState<{
+    blocked: boolean;
+    muted: boolean;
+  } | null>(null);
+  const [safetyStateError, setSafetyStateError] = useState<string | null>(null);
   const bodyRevisionRef = useRef(0);
   const filesRevisionRef = useRef(0);
   const endRef = useRef<HTMLDivElement>(null);
@@ -199,6 +210,26 @@ export function ConversationPage() {
       setLocalError(reason instanceof Error ? reason.message : "대화 내용을 불러오지 못했습니다.");
     });
   }, [conversationId, loadConversationMessages]);
+
+  useEffect(() => {
+    const userId = viewer?.profile.id;
+    const targetUserId = conversation?.participant.id;
+    if (!conversationId || !userId || !targetUserId) return;
+    let active = true;
+    setSafetyStateError(null);
+    void loadSafetyPrivacyState(mode, userId).then((next) => {
+      if (!active) return;
+      setSafetyState({
+        blocked: next.blockedProfiles.some((profile) => profile.userId === targetUserId),
+        muted: next.mutedConversationIds.includes(conversationId),
+      });
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      setSafetyState(null);
+      setSafetyStateError(reason instanceof Error ? reason.message : "대화 안전 설정을 불러오지 못했습니다.");
+    });
+    return () => { active = false; };
+  }, [conversation?.participant.id, conversationId, mode, viewer?.profile.id]);
 
   const latestMessageId = messages[messages.length - 1]?.id;
   useEffect(() => {
@@ -213,7 +244,7 @@ export function ConversationPage() {
   }, [conversationId, latestMessageId, markConversationRead]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
+    endRef.current?.scrollIntoView?.({ block: "end" });
   }, [messages.length]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -258,6 +289,37 @@ export function ConversationPage() {
         <Avatar name={conversation.participant.displayName} src={conversation.participant.avatarUrl} size="small" />
         <div><h1>{conversation.participant.displayName}</h1><span>{organizationName} · {participantRole}</span></div>
       </header>
+      <section className="conversation-safety-actions" aria-label="대화 안전 설정">
+        {safetyState ? (
+          <>
+            <ConversationMuteControl
+              mode={mode}
+              userId={viewer?.profile.id ?? ""}
+              conversationId={conversation.id}
+              initiallyMuted={safetyState.muted}
+            />
+            <BlockUserControl
+              mode={mode}
+              userId={viewer?.profile.id ?? ""}
+              targetUserId={conversation.participant.id}
+              targetDisplayName={conversation.participant.displayName}
+              initiallyBlocked={safetyState.blocked}
+              onChanged={(blocked) => {
+                setSafetyState((current) => current ? { ...current, blocked } : current);
+                if (blocked) navigate("/app/chats", { replace: true });
+              }}
+            />
+          </>
+        ) : null}
+        <ReportActionLink
+          targetType="profile"
+          targetId={conversation.participant.id}
+          targetLabel={`${conversation.participant.displayName} 사용자`}
+          returnTo={`/app/chats/${conversation.id}`}
+          className="button button--quiet"
+        />
+        {safetyStateError ? <ErrorBanner message={safetyStateError} /> : null}
+      </section>
       <div className="message-stream" aria-live="polite">
         {messages.map((message, index) => {
           const mine = message.senderId === viewer?.profile.id;
@@ -294,7 +356,19 @@ export function ConversationPage() {
                     </span>
                   ) : null}
                 </div>
-                <span className="message__meta">{formatRelativeKorean(message.createdAt)}{mine && message.status === "sending" ? <CircleNotch className="spin" /> : null}</span>
+                <span className="message__meta">
+                  {formatRelativeKorean(message.createdAt)}
+                  {mine && message.status === "sending" ? <CircleNotch className="spin" /> : null}
+                  {!mine && message.status !== "sending" ? (
+                    <ReportActionLink
+                      targetType="message"
+                      targetId={message.id}
+                      targetLabel={`${conversation.participant.displayName}님의 메시지`}
+                      returnTo={`/app/chats/${conversation.id}`}
+                      className="message__report"
+                    />
+                  ) : null}
+                </span>
               </div>
             </Fragment>
           );

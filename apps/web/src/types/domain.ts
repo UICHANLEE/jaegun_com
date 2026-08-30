@@ -305,6 +305,8 @@ export interface SignUpInput {
   email: string;
   password: string;
   organizationId: string;
+  acceptedPrivacyVersion: string;
+  acceptedCommunityVersion: string;
 }
 
 export interface MembershipRequestInput {

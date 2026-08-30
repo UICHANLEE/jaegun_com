@@ -4,6 +4,7 @@ import {
   Article,
   Bell,
   Buildings,
+  CalendarDots,
   CaretRight,
   ChatCircleDots,
   Check,
@@ -14,17 +15,23 @@ import {
   Coins,
   Crown,
   Envelope,
+  Eye,
+  Fingerprint,
+  Flag,
+  LockKey,
   MagnifyingGlass,
   NotePencil,
   ShieldCheck,
   SignOut,
+  Trash,
   User,
+  UserMinus,
   UsersThree,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
-import { canManageChurch, resolveAppBranch, reviewableApplications } from "../components/access";
+import { canManageChurch, canModerateCommunity, resolveAppBranch, reviewableApplications } from "../components/access";
 import {
   ApplicationStatusBadge,
   Avatar,
@@ -56,6 +63,7 @@ export function ProfilePage() {
   const organization = organizations.find((item) => item.id === membership?.organizationId);
   const pendingCount = reviewableApplications(viewer, applications).length;
   const canManage = canManageChurch(viewer);
+  const canModerate = canModerateCommunity(viewer);
   const isGovernanceDelegate = resolveAppBranch(viewer) === "governance_delegate";
   const hasGovernanceAccess = Boolean(viewer?.governanceAccess?.some((access) => (
     access.canManageOfficers || access.canManageDelegations || access.canViewRoster
@@ -115,6 +123,13 @@ export function ProfilePage() {
                 <CaretRight />
               </Link>
             ) : null}
+            {canModerate ? (
+              <Link className="profile-menu" to="/manage/moderation">
+                <span className="profile-menu__icon profile-menu__icon--orange"><Flag weight="fill" /></span>
+                <span><strong>신고 검토</strong><small>공동체 신고와 안전 조치를 검토해요.</small></span>
+                <CaretRight />
+              </Link>
+            ) : null}
             {isGovernanceDelegate
               || viewer?.profile.globalRole === "platform_admin"
               || membership?.role === "minister"
@@ -147,9 +162,21 @@ export function ProfilePage() {
       <section className="profile-section">
         <h2>내 활동</h2>
         <div className="profile-menu-group">
+          <Link className="profile-menu" to="/app/events"><span className="profile-menu__icon profile-menu__icon--orange"><CalendarDots weight="fill" /></span><span><strong>공동체 일정</strong><small>총회·노회·교회 일정과 참석 응답</small></span><CaretRight /></Link>
           <Link className="profile-menu" to="/app/posts"><span className="profile-menu__icon"><Article weight="fill" /></span><span><strong>게시글</strong><small>공동체의 소식과 나눔 보기</small></span><CaretRight /></Link>
           <Link className="profile-menu" to="/app/chats"><span className="profile-menu__icon"><ChatCircleDots weight="fill" /></span><span><strong>채팅</strong><small>개인 대화 이어가기</small></span><CaretRight /></Link>
           <Link className="profile-menu" to="/app/notifications"><span className="profile-menu__icon"><Bell weight="fill" /></span><span><strong>알림</strong><small>새 소식과 승인 결과 확인</small></span><CaretRight /></Link>
+        </div>
+      </section>
+
+      <section className="profile-section">
+        <h2>보안과 개인정보</h2>
+        <div className="profile-menu-group">
+          <Link className="profile-menu" to="/app/security"><span className="profile-menu__icon"><Fingerprint weight="fill" /></span><span><strong>보안센터</strong><small>MFA, 세션과 보안 활동 확인</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/privacy"><span className="profile-menu__icon profile-menu__icon--blue"><Eye weight="fill" /></span><span><strong>개인정보와 동의</strong><small>필수 동의와 명단 공개 범위 관리</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/notification-preferences"><span className="profile-menu__icon profile-menu__icon--orange"><Bell weight="fill" /></span><span><strong>알림 설정</strong><small>종류, 방해금지와 잠금화면 보호</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/blocked-users"><span className="profile-menu__icon"><UserMinus weight="fill" /></span><span><strong>차단한 사용자</strong><small>차단 목록 확인과 해제</small></span><CaretRight /></Link>
+          <Link className="profile-menu profile-menu--danger" to="/app/account"><span className="profile-menu__icon"><Trash weight="fill" /></span><span><strong>계정 삭제</strong><small>삭제 예약, 유예기간과 취소 상태</small></span><CaretRight /></Link>
         </div>
       </section>
 
@@ -157,7 +184,7 @@ export function ProfilePage() {
       <button className="button button--danger button--full profile-signout" type="button" disabled={signingOut} onClick={() => void handleSignOut()}>
         {signingOut ? <CircleNotch className="spin" /> : <SignOut />} 로그아웃
       </button>
-      <footer className="profile-footer"><strong>재건 공동체</strong><span>안전하게 연결되는 교회 커뮤니티 · v1.0</span></footer>
+      <footer className="profile-footer"><strong>재건 공동체</strong><span>안전하게 연결되는 교회 커뮤니티 · v1.0</span><nav aria-label="법적 문서"><Link to="/legal/privacy">개인정보</Link><Link to="/legal/terms">이용약관</Link><Link to="/legal/community">운영정책</Link></nav></footer>
     </div>
   );
 }
@@ -699,6 +726,7 @@ export function NotificationsPage() {
           })}
         </div>
         {!notifications.length ? <EmptyState icon={<Bell />} title="도착한 알림이 없어요" description="공동체의 새로운 소식이 오면 알려드릴게요." /> : null}
+        <div className="notification-settings"><LockKey weight="fill" /><p><strong>알림과 잠금화면 보호</strong><span>종류별 알림, 방해금지와 미리보기를 관리하세요.</span></p><Link className="button button--secondary" to="/app/notification-preferences">설정</Link></div>
       </div>
     </div>
   );

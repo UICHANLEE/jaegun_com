@@ -3,10 +3,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const remote = vi.hoisted(() => {
   type Result = { data: unknown; error: Error | null };
+  type UploadResult = {
+    path: string;
+    url: string;
+    kind?: "image" | "video";
+    mimeType?: string;
+    byteSize?: number;
+    width?: number;
+    height?: number;
+    durationSeconds?: number;
+  };
   type AuthCallback = (event: string, session: { user: Record<string, unknown> } | null) => void;
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const storageRemove = vi.fn(async (): Promise<Result> => ({ data: null, error: null }));
-  const upload = vi.fn(async (_file: File, path: string) => ({ path, url: `https://media.test/${path}` }));
+  const upload = vi.fn(async (_file: File, path: string): Promise<UploadResult> => ({
+    path,
+    url: `https://media.test/${path}`,
+  }));
   let currentUserId = "user-a";
   let authCallback: AuthCallback | null = null;
   let sendHandler: (args: Record<string, unknown>) => Promise<Result> = async () => ({ data: [], error: null });
@@ -17,7 +30,7 @@ const remote = vi.hoisted(() => {
   });
   let saveHandler: ((args: Record<string, unknown>) => Promise<Result>) | null = null;
   let prepareCleanupHandler: (args: Record<string, unknown>) => Promise<Result> = async (args) => ({
-    data: { status: "draft", removable_paths: args.p_storage_paths, protected_paths: [] },
+    data: { status: "draft", removable_paths: args.p_storage_paths, protected_paths: [], cleanup_queued: true },
     error: null,
   });
 
@@ -155,7 +168,7 @@ const remote = vi.hoisted(() => {
       });
       saveHandler = null;
       prepareCleanupHandler = async (args) => ({
-        data: { status: "draft", removable_paths: args.p_storage_paths, protected_paths: [] },
+        data: { status: "draft", removable_paths: args.p_storage_paths, protected_paths: [], cleanup_queued: true },
         error: null,
       });
     },
@@ -173,6 +186,10 @@ const remote = vi.hoisted(() => {
     },
     from(table: string) {
       const builder = resultBuilder(() => tableResult(table));
+      builder.insert = vi.fn((values: Record<string, unknown>) => {
+        calls.push({ name: `insert:${table}`, args: values });
+        return builder;
+      });
       if (table === "boards") {
         builder.single = vi.fn(async () => ({ data: { id: "board-sharing" }, error: null }));
       }
@@ -209,6 +226,7 @@ const remote = vi.hoisted(() => {
 });
 
 vi.mock("../data/supabase", () => ({
+  canPersistSensitiveClientState: () => true,
   isSupabaseConfigured: true,
   supabase: {
     auth: remote.auth,
@@ -233,7 +251,28 @@ vi.mock("../data/supabase", () => ({
 
 vi.mock("../data/mediaUpload", () => ({
   validateMediaFile: vi.fn(() => null),
-  uploadCommunityFile: (file: File, path: string) => remote.upload(file, path),
+  uploadCommunityFile: async (file: File, request: {
+    purpose: "post" | "message";
+    targetId: string;
+    onIntentCreated?: (approvedPath: string) => void;
+  }) => {
+    const directory = request.purpose === "post" ? "posts" : "messages";
+    const intendedPath = `org-1/${directory}/${request.targetId}/${file.name}`;
+    request.onIntentCreated?.(intendedPath);
+    const uploaded = await remote.upload(file, intendedPath);
+    return {
+      intentId: `intent-${file.name}`,
+      bucket: "community-media" as const,
+      path: uploaded.path,
+      url: uploaded.url,
+      kind: uploaded.kind ?? (file.type.startsWith("video/") ? "video" as const : "image" as const),
+      mimeType: uploaded.mimeType ?? file.type,
+      byteSize: uploaded.byteSize ?? file.size,
+      width: uploaded.width,
+      height: uploaded.height,
+      durationSeconds: uploaded.durationSeconds,
+    };
+  },
 }));
 
 import { AppDataProvider, useAppData } from "../data/AppDataProvider";
@@ -305,7 +344,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
       expect(JSON.parse(window.localStorage.getItem("jaegun-storage-cleanup-v1") ?? "[]")).toEqual([]);
       expect(JSON.parse(window.localStorage.getItem("jaegun-draft-cleanup-v1") ?? "[]")).toEqual([]);
     });
-    expect(remote.storageRemove).not.toHaveBeenCalled();
+    expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
   });
 
   it("preserves A reconciliation and never cleans attachments when B receives an empty result", async () => {
@@ -324,7 +363,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
       const records = JSON.parse(window.localStorage.getItem("jaegun-message-reconciliation-v1") ?? "[]") as Array<{ userId: string }>;
       expect(records).toEqual([expect.objectContaining({ userId: "user-a" })]);
     });
-    expect(remote.storageRemove).not.toHaveBeenCalled();
+    expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
   });
 
   it("does not call the batch RPC after a long upload finishes under another account", async () => {
@@ -346,7 +385,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
       expect(queue).toEqual([expect.objectContaining({ userId: "user-a" })]);
     });
     expect(remote.calls.filter((call) => call.name === "send_message_batch")).toHaveLength(0);
-    expect(remote.storageRemove).not.toHaveBeenCalled();
+    expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
   });
 
   it("keeps A's pending publish after account switch and retries without reuploading", async () => {
@@ -359,7 +398,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: "switch b" }));
     await waitFor(() => expect(screen.getByTestId("viewer")).toHaveTextContent("user-b"));
     await act(async () => firstPublish.resolve({ data: null, error: new Error("response lost") }));
-    await waitFor(() => expect(remote.storageRemove).not.toHaveBeenCalled());
+    await waitFor(() => expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0));
 
     remote.publishHandler = async () => ({
       data: { status: "published", published_at: "2026-08-05T01:00:00.000Z" },
@@ -372,7 +411,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     await waitFor(() => expect(remote.calls.filter((call) => call.name === "publish_owned_post")).toHaveLength(2));
     expect(remote.upload).toHaveBeenCalledTimes(1);
     expect(remote.calls.filter((call) => call.name === "reconcile_post_operation")).toHaveLength(0);
-    expect(remote.storageRemove).not.toHaveBeenCalled();
+    expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
     expect(remote.calls.filter((call) => call.name === "publish_owned_post")[1]?.args).toEqual(expect.objectContaining({
       p_expected_author_id: "user-a",
     }));
@@ -414,7 +453,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     await waitFor(() => expect(remote.calls.filter((call) => call.name === "publish_owned_post")).toHaveLength(2));
     expect(saveCalls).toBe(3);
     expect(remote.calls.filter((call) => call.name === "prepare_post_media_cleanup")).toHaveLength(1);
-    expect(remote.storageRemove).toHaveBeenCalledTimes(1);
+    expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
     expect(remote.upload).toHaveBeenCalledTimes(2);
   });
 
@@ -443,8 +482,64 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     expect(replacementPaths[0]).not.toBe(firstPaths[0]);
     expect(remote.calls.filter((call) => call.name === "prepare_post_media_cleanup")[0]?.args.p_storage_paths)
       .toEqual(firstPaths);
-    expect(remote.storageRemove).toHaveBeenCalledWith(firstPaths);
+    expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
     expect(remote.upload).toHaveBeenCalledTimes(2);
     expect((remote.upload.mock.calls[1]?.[0] as File).name).toBe("replacement.jpg");
+  });
+
+  it("inserts post media with scanner-authoritative metadata", async () => {
+    remote.upload.mockImplementation(async (_file: File, path: string) => ({
+      path,
+      url: `https://media.test/${path}`,
+      kind: "image",
+      mimeType: "image/webp",
+      byteSize: 321,
+      width: 640,
+      height: 480,
+    }));
+    await renderLoadedProvider();
+
+    fireEvent.click(screen.getByRole("button", { name: "publish" }));
+
+    await waitFor(() => expect(remote.calls.some((call) => call.name === "insert:post_media")).toBe(true));
+    expect(remote.calls.find((call) => call.name === "insert:post_media")?.args).toEqual(expect.objectContaining({
+      kind: "image",
+      mime_type: "image/webp",
+      byte_size: 321,
+      width: 640,
+      height: 480,
+      duration_seconds: null,
+    }));
+  });
+
+  it("builds message media input from scanner-authoritative metadata", async () => {
+    remote.upload.mockImplementation(async (_file: File, path: string) => ({
+      path,
+      url: `https://media.test/${path}`,
+      kind: "image",
+      mimeType: "image/webp",
+      byteSize: 222,
+      width: 320,
+      height: 240,
+    }));
+    await renderLoadedProvider();
+
+    fireEvent.click(screen.getByRole("button", { name: "send" }));
+
+    await waitFor(() => expect(remote.calls.some((call) => call.name === "send_message_batch")).toBe(true));
+    const items = remote.calls.find((call) => call.name === "send_message_batch")?.args.p_messages as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual(expect.objectContaining({
+      kind: "image",
+      media_metadata: {
+        mime_type: "image/webp",
+        byte_size: 222,
+        width: 320,
+        height: 240,
+        duration_seconds: null,
+        scan_approved: true,
+        upload_intent_id: "intent-photo.jpg",
+      },
+    }));
   });
 });

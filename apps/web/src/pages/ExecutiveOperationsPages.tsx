@@ -24,6 +24,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { EmptyState, ErrorBanner } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
+import { canPersistSensitiveClientState } from "../data/supabase";
 import { getServiceDateValue } from "../serviceTime";
 import { EXECUTIVE_OFFICE_LABELS } from "../types/domain";
 import type {
@@ -73,6 +74,7 @@ const MINUTE_OPERATION_KEY_PREFIX = "jaegun-minute-operation-v1:";
 const LEDGER_OPERATION_KEY_PREFIX = "jaegun-ledger-operation-v1:";
 
 function readPendingOperation(key: string) {
+  if (!canPersistSensitiveClientState()) return null;
   try {
     const value = JSON.parse(window.sessionStorage.getItem(key) ?? "null") as unknown;
     return value && typeof value === "object" ? value as Record<string, unknown> : null;
@@ -82,6 +84,7 @@ function readPendingOperation(key: string) {
 }
 
 function writePendingOperation(key: string, value: Record<string, unknown>) {
+  if (!canPersistSensitiveClientState()) return;
   try {
     window.sessionStorage.setItem(key, JSON.stringify(value));
   } catch {
@@ -90,7 +93,7 @@ function writePendingOperation(key: string, value: Record<string, unknown>) {
 }
 
 function clearPendingOperation(key: string | null) {
-  if (!key) return;
+  if (!key || !canPersistSensitiveClientState()) return;
   try {
     window.sessionStorage.removeItem(key);
   } catch {

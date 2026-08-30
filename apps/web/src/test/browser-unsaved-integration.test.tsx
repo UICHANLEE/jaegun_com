@@ -7,6 +7,7 @@ import { createDemoState, DEMO_VIEWER } from "../data/seed";
 import { UNSAVED_CHANGES_MESSAGE } from "../unsavedChanges";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
+const LAZY_ROUTE_TIMEOUT_MS = 5_000;
 
 function storeExecutive() {
   window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({
@@ -44,11 +45,15 @@ describe("BrowserRouter unsaved traversal integration", () => {
       </BrowserRouter>,
     );
 
-    expect(await screen.findByRole("heading", { name: /올해 교회 운영 흐름을 살펴보세요/ })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: /올해 교회 운영 흐름을 살펴보세요/ },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("link", { name: "회의록" })[0]);
     expect(await screen.findByRole("heading", { name: "임원 회의 기록" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "회의록 작성" }));
-    const title = screen.getByLabelText(/회의 제목/);
+    const title = await screen.findByLabelText(/회의 제목/);
     fireEvent.change(title, { target: { value: "브라우저 뒤로 가기에도 남아야 할 초안" } });
     const historyLength = window.history.length;
 
@@ -63,10 +68,14 @@ describe("BrowserRouter unsaved traversal integration", () => {
 
     confirm.mockReturnValue(true);
     act(() => window.history.back());
-    expect(await screen.findByRole("heading", { name: /올해 교회 운영 흐름을 살펴보세요/ })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: /올해 교회 운영 흐름을 살펴보세요/ },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     expect(confirm).toHaveBeenCalledTimes(2);
     expect(window.history.length).toBe(historyLength);
 
     view.unmount();
-  });
+  }, 10_000);
 });

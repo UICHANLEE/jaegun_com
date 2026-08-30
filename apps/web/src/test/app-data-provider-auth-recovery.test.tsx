@@ -26,6 +26,7 @@ const remote = vi.hoisted(() => ({
 }));
 
 vi.mock("../data/supabase", () => ({
+  canPersistSensitiveClientState: () => true,
   isSupabaseConfigured: true,
   supabase: {
     auth: {
@@ -195,8 +196,10 @@ describe("AppDataProvider password recovery trust boundary", () => {
       signupAttempt = latestData!.signUp({
         displayName: "가입자",
         email: "new@example.com",
-        password: "password123",
+        password: "password1234",
         organizationId: "org-19",
+        acceptedPrivacyVersion: "2026-08-27",
+        acceptedCommunityVersion: "2026-08-27",
       });
     });
     expect(screen.getByTestId("loading")).toHaveTextContent("false");
@@ -246,18 +249,24 @@ describe("AppDataProvider password recovery trust boundary", () => {
     fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
     const emailInput = screen.getByLabelText("이메일");
     fireEvent.change(emailInput, { target: { value: "new@example.com" } });
-    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
-    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password1234" } });
+    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ }));
     fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("가입 확인 메일을 보낼 수 없습니다");
     expect(remote.signUp).toHaveBeenCalledWith({
       email: "new@example.com",
-      password: "password123",
+      password: "password1234",
       options: {
         data: {
           display_name: "가입자",
           signup_organization_id: "org-19",
+          accepted_privacy: true,
+          accepted_privacy_version: "2026-08-27",
+          accepted_community: true,
+          accepted_community_version: "2026-08-27",
         },
       },
     });
@@ -281,8 +290,10 @@ describe("AppDataProvider password recovery trust boundary", () => {
     fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
     const emailInput = screen.getByLabelText("이메일");
     fireEvent.change(emailInput, { target: { value: "member@example.com" } });
-    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
-    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password1234" } });
+    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ }));
     fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("올바른 이메일 주소를 입력해 주세요");
