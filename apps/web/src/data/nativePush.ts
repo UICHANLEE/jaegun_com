@@ -1,3 +1,4 @@
+import { FunctionRegion } from "@supabase/supabase-js";
 import type { AppMode } from "../types/domain";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
@@ -101,6 +102,7 @@ export async function registerCurrentNativePushDevice(mode: AppMode, userId: str
   );
   const { data, error } = await supabase.functions.invoke("register-push-device", {
     body: registration,
+    region: FunctionRegion.UsEast1,
   });
   const deviceId = data && typeof data === "object"
     ? (data as Record<string, unknown>).deviceId

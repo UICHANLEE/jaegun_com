@@ -10,6 +10,7 @@ import type {
   Profile,
 } from "../types/domain";
 import { getServiceYear } from "../serviceTime";
+import { bundledCurrentConsentDocuments } from "./legalConsentContract";
 
 const DEMO_SERVICE_YEAR = getServiceYear();
 
@@ -339,6 +340,13 @@ export function createDemoState(): AppDataState {
     mode: "demo",
     loading: false,
     viewer: null,
+    requiredConsentDocuments: bundledCurrentConsentDocuments().map((document) => ({
+      ...document,
+      locale: "ko-KR",
+      contentSha256: "bundled-demo-document",
+      effectiveAt: new Date(0).toISOString(),
+    })),
+    consentGateOpen: true,
     organizations: DEMO_ORGANIZATIONS,
     posts: DEMO_POSTS,
     applications: DEMO_APPLICATIONS,

@@ -110,6 +110,18 @@ values
   ('d4000000-0000-4000-8000-000000000009', 'department-revoked@example.com', '{"display_name":"종료 회원"}'),
   ('d4000000-0000-4000-8000-00000000000a', 'department-deactivated@example.com', '{"display_name":"비활성 회원"}');
 
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source
+)
+select profile.id, document.document_key, document.version, true, 'admin_migration'
+from public.profiles as profile
+cross join public.consent_documents as document
+where profile.id::text like 'd4000000-0000-4000-8000-0000000000%'
+  and document.required
+  and document.retired_at is null
+  and document.published_at <= pg_catalog.statement_timestamp()
+  and document.effective_at <= pg_catalog.statement_timestamp();
+
 update public.organizations
 set status = 'active'
 where slug in ('jaegun-bupyeong', 'jaegun-namseoul');

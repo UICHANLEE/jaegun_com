@@ -9,7 +9,8 @@ import {
   NotePencil,
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import { Avatar, EmptyState, formatDateTime, formatRelativeKorean, ResilientImage } from "../components/ui";
+import { ProtectedImage } from "../components/ProtectedImage";
+import { Avatar, EmptyState, formatDateTime, formatRelativeKorean } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 import { getChurchTitleLabel, type Membership, type MembershipRole } from "../types/domain";
 
@@ -51,7 +52,7 @@ function resolveOfficeTitle(membership?: Membership) {
 }
 
 export function MemberHomePage() {
-  const { viewer, organizations, posts } = useAppData();
+  const { viewer, organizations, posts, refreshProtectedMediaUrl } = useAppData();
   const membership = viewer?.membership;
   const church = organizations.find((item) => item.id === membership?.organizationId);
   const officialPost = posts.find(
@@ -142,11 +143,14 @@ export function MemberHomePage() {
                 {recentPosts.map((post, index) => (
                   <Link className="recent-post" key={post.id} to={`/app/posts/${post.id}`}>
                     {post.media[0]?.kind === "image" ? (
-                      <ResilientImage
+                      <ProtectedImage
                         className="recent-post__image"
                         src={post.media[0].url}
+                        storagePath={post.media[0].storagePath}
+                        refreshUrl={refreshProtectedMediaUrl}
                         alt={post.media[0].alt ?? ""}
                         fallbackLabel="게시글 이미지 없음"
+                        manualRetry={false}
                         loading="lazy"
                         decoding="async"
                       />

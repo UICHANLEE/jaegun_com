@@ -38,6 +38,27 @@ const remote = vi.hoisted(() => ({
     presbytery: "경기노회",
     status: "seeded_unclaimed",
   }],
+  consentDocuments: [{
+    document_key: "privacy_policy",
+    version: "2026-08-27",
+    locale: "ko-KR",
+    title: "개인정보 처리방침",
+    document_url: "/legal/privacy/2026-08-27",
+    content_sha256: "2eeac1f3dbaa45d8b2742aa9239aedf2507d67c02b397a6ac362ef20d9a2f829",
+    required: true,
+    effective_at: "2026-08-27T00:00:00+09:00",
+    retired_at: null,
+  }, {
+    document_key: "community_guidelines",
+    version: "2026-08-27",
+    locale: "ko-KR",
+    title: "공동체 이용규칙",
+    document_url: "/legal/community/2026-08-27",
+    content_sha256: "c587eae93255d82391ddd287a1737679f9a2823e598dd091fa4cb819eed3c59f",
+    required: true,
+    effective_at: "2026-08-27T00:00:00+09:00",
+    retired_at: null,
+  }],
 }));
 
 vi.mock("../data/supabase", () => ({
@@ -65,6 +86,20 @@ vi.mock("../data/supabase", () => ({
             data: remote.directoryError ? null : remote.publicOrganizations,
             error: remote.directoryError,
           })),
+        };
+        return request;
+      }
+      if (table === "consent_documents") {
+        const result = { data: remote.consentDocuments, error: null };
+        const request = {
+          select: vi.fn(() => request),
+          eq: vi.fn(() => request),
+          is: vi.fn(() => request),
+          order: vi.fn(() => request),
+          abortSignal: vi.fn(async () => result),
+          then: (onFulfilled: (value: typeof result) => unknown, onRejected?: (reason: unknown) => unknown) => (
+            Promise.resolve(result).then(onFulfilled, onRejected)
+          ),
         };
         return request;
       }
@@ -166,6 +201,7 @@ describe("AppDataProvider password recovery trust boundary", () => {
   it("rejects a normal signed-in session and accepts only a verified PASSWORD_RECOVERY event", async () => {
     render(<AppDataProvider><AuthProbe /></AppDataProvider>);
     await waitFor(() => expect(remote.authCallback).not.toBeNull());
+    await waitFor(() => expect(latestData?.requiredConsentDocuments).toHaveLength(2));
     remote.currentSession = session;
 
     await expect(latestData!.updatePassword("new-password-123")).rejects.toThrow("재설정 링크로 확인된 세션이 아닙니다");
@@ -266,8 +302,10 @@ describe("AppDataProvider password recovery trust boundary", () => {
         email: "new@example.com",
         password: "password1234",
         organizationId: "org-19",
-        acceptedPrivacyVersion: "2026-08-27",
-        acceptedCommunityVersion: "2026-08-27",
+        acceptedConsents: {
+          privacy_policy: "2026-08-27",
+          community_guidelines: "2026-08-27",
+        },
       });
     });
     expect(screen.getByTestId("loading")).toHaveTextContent("false");
@@ -319,8 +357,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
     fireEvent.change(emailInput, { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password1234" } });
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보 수집·이용 동의/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /공동체 운영정책 동의/ }));
     fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("가입 확인 메일을 보낼 수 없습니다");
@@ -335,6 +373,11 @@ describe("AppDataProvider password recovery trust boundary", () => {
           accepted_privacy_version: "2026-08-27",
           accepted_community: true,
           accepted_community_version: "2026-08-27",
+          accepted_required_consents: {
+            privacy_policy: { accepted: true, version: "2026-08-27" },
+            community_guidelines: { accepted: true, version: "2026-08-27" },
+          },
+          consent_contract: "required-consents-v1",
         },
       },
     });
@@ -360,8 +403,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
     fireEvent.change(emailInput, { target: { value: "member@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password1234" } });
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보 수집·이용 동의/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /공동체 운영정책 동의/ }));
     fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("올바른 이메일 주소를 입력해 주세요");

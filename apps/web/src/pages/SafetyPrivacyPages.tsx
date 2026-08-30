@@ -51,15 +51,14 @@ import {
   registerCurrentNativePushDevice,
 } from "../data/nativePush";
 import {
-  COMMUNITY_DOCUMENT,
-  PRIVACY_DOCUMENT,
-  TERMS_DOCUMENT,
+  findLegalDocument,
+  type ConsentDocumentKey,
   type LegalDocumentDefinition,
 } from "../data/legalDocuments";
+import type { AcceptedConsentVersions } from "../data/legalConsentContract";
 import {
   ACCOUNT_DELETION_CONFIRMATION,
   cancelAccountDeletion,
-  COMMUNITY_POLICY_CONSENT_VERSION,
   enrollTotp,
   getDemoSafetyPrivacyState,
   isReportTargetType,
@@ -74,11 +73,11 @@ import {
   REPORT_TARGET_LABELS,
   requestAccountDeletion,
   removePushDevice,
+  requiredConsentsAreCurrent,
   resolveModerationReport,
   saveNotificationPreferences,
   savePrivacyAndConsents,
   signOutEverywhere,
-  SENSITIVE_AFFILIATION_CONSENT_VERSION,
   submitContentReport,
   unblockUser,
   unenrollTotp,
@@ -124,24 +123,12 @@ const MfaGateContext = createContext<{ refresh: () => Promise<MfaStatus | null> 
 const GATE_ALLOWED_PATHS = new Set([
   "/account-deletion",
   "/app/privacy",
-  "/app/security",
   "/app/account",
-  "/app/profile",
-  "/manage/profile",
 ]);
 const MFA_GATE_ALLOWED_PATHS = new Set(["/account-deletion", "/app/mfa-challenge"]);
 
 function errorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
-}
-
-function requiredConsentsAreCurrent(state: SafetyPrivacyState | null) {
-  return Boolean(
-    state?.consents.sensitiveAffiliation.acceptedAt
-    && state.consents.sensitiveAffiliation.version === SENSITIVE_AFFILIATION_CONSENT_VERSION
-    && state.consents.communityPolicy.acceptedAt
-    && state.consents.communityPolicy.version === COMMUNITY_POLICY_CONSENT_VERSION,
-  );
 }
 
 function isGateAllowedPath(pathname: string) {
@@ -443,14 +430,44 @@ function SwitchRow({
   );
 }
 
+const CONSENT_SETTINGS_COPY: Readonly<Record<ConsentDocumentKey, { label: string; description: string }>> = {
+  privacy_policy: {
+    label: "개인정보 수집·이용 동의",
+    description: "계정과 공동체 기능 제공에 필요한 개인정보 항목·목적·보유기간을 확인합니다.",
+  },
+  sensitive_information: {
+    label: "종교 관련 민감정보 처리 동의",
+    description: "노회·교회·직분·역할과 공동체 활동 정보의 처리 목적을 확인합니다.",
+  },
+  overseas_transfer: {
+    label: "개인정보 국외 이전 동의",
+    description: "국외 처리 제공자, 이전 항목·목적·방법·보유기간과 거부 영향을 확인합니다.",
+  },
+  terms_of_service: {
+    label: "이용약관 동의 및 만 14세 이상 확인",
+    description: "현재 만 14세 미만은 가입할 수 없습니다. 약관에 동의하며 만 14세 이상임을 확인합니다.",
+  },
+  community_guidelines: {
+    label: "공동체 운영정책 동의",
+    description: "신고·차단·콘텐츠 조치와 공동체 안의 존중·안전 기준을 확인합니다.",
+  },
+};
+
 export function PrivacyConsentPage() {
-  const { mode, viewer } = useAppData();
+  const {
+    mode,
+    viewer,
+    consentGateOpen,
+    refresh: refreshAppData,
+    signOut,
+  } = useAppData();
   const location = useLocation();
   const { state, error, refresh } = useSafetyPrivacy();
   const userId = viewer?.profile.id ?? "";
-  const consentRequired = Boolean((location.state as { consentRequired?: boolean } | null)?.consentRequired);
-  const [sensitiveAccepted, setSensitiveAccepted] = useState(false);
-  const [policyAccepted, setPolicyAccepted] = useState(false);
+  const consentRequired = Boolean((location.state as { consentRequired?: boolean } | null)?.consentRequired)
+    || consentGateOpen === false
+    || (state !== null && !requiredConsentsAreCurrent(state));
+  const [acceptedConsents, setAcceptedConsents] = useState<AcceptedConsentVersions>({});
   const [visibility, setVisibility] = useState<DirectoryVisibility>({
     avatar: false,
     churchTitle: true,
@@ -458,19 +475,15 @@ export function PrivacyConsentPage() {
     bio: false,
   });
   const [saving, setSaving] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (!state) return;
-    setSensitiveAccepted(Boolean(
-      state.consents.sensitiveAffiliation.acceptedAt
-      && state.consents.sensitiveAffiliation.version === SENSITIVE_AFFILIATION_CONSENT_VERSION,
-    ));
-    setPolicyAccepted(Boolean(
-      state.consents.communityPolicy.acceptedAt
-      && state.consents.communityPolicy.version === COMMUNITY_POLICY_CONSENT_VERSION,
-    ));
+    setAcceptedConsents(Object.fromEntries(state.requiredConsents.flatMap((consent) => (
+      consent.acceptedAt ? [[consent.key, consent.version]] : []
+    ))));
     setVisibility({ ...state.directoryVisibility });
   }, [state]);
 
@@ -482,16 +495,29 @@ export function PrivacyConsentPage() {
     setSaveError(null);
     try {
       await savePrivacyAndConsents(mode, userId, {
-        acceptSensitiveAffiliation: sensitiveAccepted,
-        acceptCommunityPolicy: policyAccepted,
+        requiredDocuments: state?.requiredDocuments ?? [],
+        acceptedConsents,
         directoryVisibility: visibility,
       });
       await refresh();
+      await refreshAppData();
       setSaved(true);
     } catch (reason) {
       setSaveError(errorMessage(reason, "개인정보 설정을 저장하지 못했습니다."));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    setSaveError(null);
+    try {
+      await signOut();
+    } catch (reason) {
+      setSaveError(errorMessage(reason, "로그아웃하지 못했습니다. 다시 시도해 주세요."));
+      setSigningOut(false);
     }
   }
 
@@ -512,19 +538,28 @@ export function PrivacyConsentPage() {
               <span><ShieldCheck weight="fill" /></span>
               <div><h2 id="required-consent-title">필수 동의</h2><p>동의 내용이 바뀌면 새 버전을 다시 확인합니다.</p></div>
             </div>
-            <label className="safety-consent-check">
-              <input type="checkbox" checked={sensitiveAccepted} onChange={(event) => setSensitiveAccepted(event.target.checked)} />
-              <span><strong>교회 소속 정보 처리 동의 <em>필수</em></strong><small>노회·교회·직분·회원 역할은 종교적 신념과 연결될 수 있는 민감한 정보입니다. 가입 승인, 공동체 접근 제어와 명단 제공에 사용합니다.</small><i>버전 {SENSITIVE_AFFILIATION_CONSENT_VERSION}</i></span>
-            </label>
-            <label className="safety-consent-check">
-              <input type="checkbox" checked={policyAccepted} onChange={(event) => setPolicyAccepted(event.target.checked)} />
-              <span><strong>공동체 운영정책 동의 <em>필수</em></strong><small>게시글·댓글·채팅 신고, 차단, 콘텐츠 숨김과 이용 제한 기준을 확인했습니다.</small><i>버전 {COMMUNITY_POLICY_CONSENT_VERSION}</i></span>
-            </label>
-            <div className="safety-legal-links">
-              <Link to={`/legal/privacy/${SENSITIVE_AFFILIATION_CONSENT_VERSION}`}>개인정보 처리 안내</Link>
-              <Link to="/legal/terms">이용약관</Link>
-              <Link to={`/legal/community/${COMMUNITY_POLICY_CONSENT_VERSION}`}>공동체 운영정책</Link>
-            </div>
+            {state.requiredDocuments.map((document) => {
+              const copy = CONSENT_SETTINGS_COPY[document.key];
+              const checked = acceptedConsents[document.key] === document.version;
+              return (
+                <div className="safety-consent-item" key={`${document.key}@${document.version}`}>
+                  <label className="safety-consent-check">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => setAcceptedConsents((current) => {
+                        const next = { ...current };
+                        if (event.target.checked) next[document.key] = document.version;
+                        else delete next[document.key];
+                        return next;
+                      })}
+                    />
+                    <span><strong>{copy.label} <em>필수</em></strong><small>{copy.description}</small><i>버전 {document.version}</i></span>
+                  </label>
+                  <Link className="safety-consent-item__link" target="_blank" rel="noopener noreferrer" to={document.documentUrl}>{document.title} 전문 보기</Link>
+                </div>
+              );
+            })}
           </section>
 
           <section className="safety-card" aria-labelledby="directory-visibility-title">
@@ -542,9 +577,20 @@ export function PrivacyConsentPage() {
           </section>
           {saveError ? <ErrorBanner message={saveError} /> : null}
           {saved ? <div className="safety-success" role="status"><CheckCircle weight="fill" /> 개인정보 설정을 저장했습니다.</div> : null}
-          <button className="button button--primary button--full" type="submit" disabled={saving || !sensitiveAccepted || !policyAccepted}>
+          <button className="button button--primary button--full" type="submit" disabled={saving || state.requiredDocuments.some((document) => acceptedConsents[document.key] !== document.version)}>
             {saving ? <CircleNotch className="spin" /> : <Check />} 동의 및 공개 범위 저장
           </button>
+          {consentRequired ? (
+            <div className="safety-consent-alternatives" aria-label="필수 동의 외 선택">
+              <p>필수 동의에 동의하지 않으면 공동체 기능을 이용할 수 없습니다. 로그아웃하거나 계정 삭제를 요청할 수 있습니다.</p>
+              <div>
+                <button className="button button--secondary" type="button" disabled={signingOut} onClick={() => void handleSignOut()}>
+                  {signingOut ? <CircleNotch className="spin" /> : <SignOut />} 로그아웃
+                </button>
+                <Link className="button button--danger" to="/app/account"><Trash /> 계정 삭제</Link>
+              </div>
+            </div>
+          ) : null}
         </form>
       )}
     </div>
@@ -1221,7 +1267,7 @@ function LegalPage({ eyebrow, title, summary, children }: { eyebrow: string; tit
   return (
     <main className="legal-page">
       <header className="legal-header"><Link to="/" aria-label="재건 공동체 홈"><img src="/assets/brand-mark-tight.png" alt="" /><strong>재건 공동체</strong></Link><Link className="button button--secondary" to="/">돌아가기</Link></header>
-      <article className="legal-document"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="legal-document__summary">{summary}</p><div className="legal-document__notice"><Info weight="fill" /><span><strong>운영자 연락처</strong>{SUPPORT_EMAIL ? <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> : <small>VITE_SUPPORT_EMAIL이 설정되지 않았습니다. 정식 출시 전 운영자 문의 주소를 반드시 설정해야 합니다.</small>}</span></div>{children}<nav aria-label="법적 문서"><Link to="/legal/privacy">개인정보 처리 안내</Link><Link to="/legal/terms">이용약관</Link><Link to="/legal/community">공동체 운영정책</Link><Link to="/account-deletion">계정 삭제 안내</Link></nav></article>
+      <article className="legal-document"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="legal-document__summary">{summary}</p><div className="legal-document__notice"><Info weight="fill" /><span><strong>운영자 연락처</strong>{SUPPORT_EMAIL ? <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> : <small>VITE_SUPPORT_EMAIL이 설정되지 않았습니다. 정식 출시 전 운영자 문의 주소를 반드시 설정해야 합니다.</small>}</span></div>{children}<nav aria-label="법적 문서"><Link to="/legal/privacy">개인정보 수집·이용</Link><Link to="/legal/sensitive">민감정보 처리</Link><Link to="/legal/overseas">국외 이전</Link><Link to="/legal/terms">이용약관</Link><Link to="/legal/community">공동체 운영정책</Link><Link to="/account-deletion">계정 삭제 안내</Link></nav></article>
     </main>
   );
 }
@@ -1231,34 +1277,44 @@ function LegalDocumentSections({ document }: { document: LegalDocumentDefinition
 }
 
 function VersionedLegalDocument({
-  document,
-  requestedVersion,
+  documentKey,
   route,
   missingTitle,
 }: {
-  document: LegalDocumentDefinition;
-  requestedVersion?: string;
+  documentKey: ConsentDocumentKey;
   route: string;
   missingTitle: string;
 }) {
-  if (requestedVersion && requestedVersion !== document.version) {
-    return <LegalPage eyebrow={document.eyebrow} title={missingTitle} summary="동의 문서의 버전 URL은 내용을 바꿔 표시하지 않습니다."><section><h2>현재 공개 버전</h2><p>현재 공개된 문서는 {document.version} 버전입니다.</p><Link className="button button--primary" to={`${route}/${document.version}`}>현재 버전 열기</Link></section></LegalPage>;
+  const { version } = useParams();
+  const currentDocument = findLegalDocument(documentKey);
+  if (!currentDocument) {
+    return <LegalPage eyebrow="LEGAL DOCUMENT" title={missingTitle} summary="배포된 법적 문서 정보를 확인하지 못했습니다."><section><h2>문서를 열 수 없습니다</h2><p>앱을 새로고침한 뒤 다시 시도해 주세요.</p></section></LegalPage>;
+  }
+  const document = version ? findLegalDocument(documentKey, version) : currentDocument;
+  if (!document) {
+    return <LegalPage eyebrow={currentDocument.eyebrow} title={missingTitle} summary="동의 문서의 버전 URL은 내용을 바꿔 표시하지 않습니다."><section><h2>현재 공개 버전</h2><p>현재 공개된 문서는 {currentDocument.version} 버전입니다.</p><Link className="button button--primary" to={`${route}/${currentDocument.version}`}>현재 버전 열기</Link></section></LegalPage>;
   }
   return <LegalPage eyebrow={`${document.eyebrow} · ${document.version}`} title={document.title} summary={document.summary}><LegalDocumentSections document={document} /></LegalPage>;
 }
 
 export function LegalPrivacyPage() {
-  const { version } = useParams();
-  return <VersionedLegalDocument document={PRIVACY_DOCUMENT} requestedVersion={version} route="/legal/privacy" missingTitle="요청한 개인정보 문서 버전을 찾을 수 없습니다" />;
+  return <VersionedLegalDocument documentKey="privacy_policy" route="/legal/privacy" missingTitle="요청한 개인정보 문서 버전을 찾을 수 없습니다" />;
+}
+
+export function SensitiveInformationPage() {
+  return <VersionedLegalDocument documentKey="sensitive_information" route="/legal/sensitive" missingTitle="요청한 민감정보 문서 버전을 찾을 수 없습니다" />;
+}
+
+export function OverseasTransferPage() {
+  return <VersionedLegalDocument documentKey="overseas_transfer" route="/legal/overseas" missingTitle="요청한 국외 이전 문서 버전을 찾을 수 없습니다" />;
 }
 
 export function LegalTermsPage() {
-  return <LegalPage eyebrow={`${TERMS_DOCUMENT.eyebrow} · ${TERMS_DOCUMENT.version}`} title={TERMS_DOCUMENT.title} summary={TERMS_DOCUMENT.summary}><LegalDocumentSections document={TERMS_DOCUMENT} /></LegalPage>;
+  return <VersionedLegalDocument documentKey="terms_of_service" route="/legal/terms" missingTitle="요청한 이용약관 버전을 찾을 수 없습니다" />;
 }
 
 export function CommunityPolicyPage() {
-  const { version } = useParams();
-  return <VersionedLegalDocument document={COMMUNITY_DOCUMENT} requestedVersion={version} route="/legal/community" missingTitle="요청한 운영정책 버전을 찾을 수 없습니다" />;
+  return <VersionedLegalDocument documentKey="community_guidelines" route="/legal/community" missingTitle="요청한 운영정책 버전을 찾을 수 없습니다" />;
 }
 
 export function PublicAccountDeletionPage() {

@@ -46,6 +46,8 @@ const BlockedUsersPage = lazy(() => import("./pages/SafetyPrivacyPages").then((m
 const ReportContentPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.ReportContentPage })));
 const ModerationQueuePage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.ModerationQueuePage })));
 const LegalPrivacyPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.LegalPrivacyPage })));
+const SensitiveInformationPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.SensitiveInformationPage })));
+const OverseasTransferPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.OverseasTransferPage })));
 const LegalTermsPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.LegalTermsPage })));
 const CommunityPolicyPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.CommunityPolicyPage })));
 const PublicAccountDeletionPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.PublicAccountDeletionPage })));
@@ -150,7 +152,12 @@ function SignedOutRoutes() {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
       <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
+      <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
+      <Route path="/legal/sensitive/:version" element={<SensitiveInformationPage />} />
+      <Route path="/legal/overseas" element={<OverseasTransferPage />} />
+      <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
       <Route path="/legal/terms" element={<LegalTermsPage />} />
+      <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
       <Route path="/legal/community" element={<CommunityPolicyPage />} />
       <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
@@ -173,7 +180,12 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
       <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
+      <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
+      <Route path="/legal/sensitive/:version" element={<SensitiveInformationPage />} />
+      <Route path="/legal/overseas" element={<OverseasTransferPage />} />
+      <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
       <Route path="/legal/terms" element={<LegalTermsPage />} />
+      <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
       <Route path="/legal/community" element={<CommunityPolicyPage />} />
       <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
@@ -183,6 +195,29 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route path="/manage/*" element={accountStatePage} />
       <Route path="*" element={<NotFoundPage homePath="/" />} />
     </Routes>
+  );
+}
+
+function ConsentRequiredRoutes() {
+  return (
+    <SafetyPrivacyGate>
+      <Routes>
+        <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
+        <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
+        <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
+        <Route path="/legal/sensitive/:version" element={<SensitiveInformationPage />} />
+        <Route path="/legal/overseas" element={<OverseasTransferPage />} />
+        <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
+        <Route path="/legal/terms" element={<LegalTermsPage />} />
+        <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
+        <Route path="/legal/community" element={<CommunityPolicyPage />} />
+        <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
+        <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
+        <Route path="/app/privacy" element={<PrivacyConsentPage />} />
+        <Route path="/app/account" element={<AccountDeletionPage />} />
+        <Route path="*" element={<Navigate to="/app/privacy" replace state={{ consentRequired: true }} />} />
+      </Routes>
+    </SafetyPrivacyGate>
   );
 }
 
@@ -197,7 +232,12 @@ function AuthenticatedRoutes() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
           <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
+          <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
+          <Route path="/legal/sensitive/:version" element={<SensitiveInformationPage />} />
+          <Route path="/legal/overseas" element={<OverseasTransferPage />} />
+          <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
           <Route path="/legal/terms" element={<LegalTermsPage />} />
+          <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
           <Route path="/legal/community" element={<CommunityPolicyPage />} />
           <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
           <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
@@ -245,10 +285,11 @@ function AuthenticatedRoutes() {
 }
 
 function AppRoutes() {
-  const { viewer, loading } = useAppData();
+  const { viewer, loading, consentGateOpen } = useAppData();
 
   if (loading) return <LoadingScreen />;
   if (!viewer) return <SignedOutRoutes />;
+  if (consentGateOpen === false) return <ConsentRequiredRoutes />;
   if (!viewer.membership && viewer.profile.globalRole !== "platform_admin") {
     return <AccountSetupRoutes pending={viewer.application?.status === "pending"} />;
   }

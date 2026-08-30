@@ -10,11 +10,12 @@ import {
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import { reviewableApplications } from "../components/access";
-import { Avatar, formatDateTime, formatRelativeKorean, ResilientImage } from "../components/ui";
+import { ProtectedImage } from "../components/ProtectedImage";
+import { Avatar, formatDateTime, formatRelativeKorean } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 
 export function HomePage() {
-  const { viewer, organizations, posts, applications } = useAppData();
+  const { viewer, organizations, posts, applications, refreshProtectedMediaUrl } = useAppData();
   const membership = viewer?.membership;
   const church = organizations.find((item) => item.id === membership?.organizationId);
   const officialPost = posts.find((item) => item.isOfficial) ?? posts[0];
@@ -88,11 +89,14 @@ export function HomePage() {
               {recentPosts.map((post, index) => (
                 <Link className="recent-post" key={post.id} to={`/app/posts/${post.id}`}>
                   {post.media[0]?.kind === "image" ? (
-                    <ResilientImage
+                    <ProtectedImage
                       className="recent-post__image"
                       src={post.media[0].url}
+                      storagePath={post.media[0].storagePath}
+                      refreshUrl={refreshProtectedMediaUrl}
                       alt={post.media[0].alt ?? ""}
                       fallbackLabel="게시글 이미지 없음"
+                      manualRetry={false}
                       loading="lazy"
                       decoding="async"
                     />

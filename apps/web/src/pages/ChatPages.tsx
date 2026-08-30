@@ -14,7 +14,9 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Avatar, EmptyState, ErrorBanner, formatRelativeKorean, PageIntro, ResilientImage } from "../components/ui";
+import { Avatar, EmptyState, ErrorBanner, formatRelativeKorean, PageIntro } from "../components/ui";
+import { ProtectedImage } from "../components/ProtectedImage";
+import { ProtectedVideo } from "../components/ProtectedVideo";
 import {
   BlockUserControl,
   ConversationMuteControl,
@@ -178,7 +180,18 @@ export function ChatListPage() {
 export function ConversationPage() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
-  const { mode, viewer, organizations, members, conversations, messagesByConversation, loadConversationMessages, markConversationRead, sendMessage } = useAppData();
+  const {
+    mode,
+    viewer,
+    organizations,
+    members,
+    conversations,
+    messagesByConversation,
+    loadConversationMessages,
+    markConversationRead,
+    refreshProtectedMediaUrl,
+    sendMessage,
+  } = useAppData();
   const conversation = conversations.find((item) => item.id === conversationId);
   const messages = conversationId ? messagesByConversation[conversationId] ?? [] : [];
   const organizationName = organizations?.find((item) => item.id === conversation?.organizationId)?.name ?? "소속 교회";
@@ -339,13 +352,23 @@ export function ConversationPage() {
                   {message.media.length ? (
                     <div className="message__media">
                       {message.media.map((media) => media.kind === "image" ? (
-                        <ResilientImage
+                        <ProtectedImage
                           key={media.id}
                           src={media.url}
+                          storagePath={media.storagePath}
+                          refreshUrl={refreshProtectedMediaUrl}
                           alt={media.name ?? "첨부 이미지"}
                           fallbackLabel="첨부 이미지를 불러오지 못했어요"
                         />
-                      ) : <video key={media.id} src={media.url} controls />)}
+                      ) : (
+                        <ProtectedVideo
+                          key={media.id}
+                          src={media.url}
+                          storagePath={media.storagePath}
+                          refreshUrl={refreshProtectedMediaUrl}
+                          controls
+                        />
+                      ))}
                     </div>
                   ) : null}
                   {message.body ? <p>{message.body}</p> : null}

@@ -71,6 +71,26 @@ values
   ('f0000000-0000-4000-8000-000000000001', 'governance-executive@example.com', '{"display_name":"다른교회임원"}'),
   ('a1000000-0000-4000-8000-000000000001', 'governance-assistant-pastor@example.com', '{"display_name":"보조목사"}');
 
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source
+)
+select profile.id, document.document_key, document.version, true, 'admin_migration'
+from public.profiles as profile
+cross join public.consent_documents as document
+where profile.id in (
+    'a0000000-0000-4000-8000-000000000001',
+    'b0000000-0000-4000-8000-000000000001',
+    'c0000000-0000-4000-8000-000000000001',
+    'd0000000-0000-4000-8000-000000000001',
+    'e0000000-0000-4000-8000-000000000001',
+    'f0000000-0000-4000-8000-000000000001',
+    'a1000000-0000-4000-8000-000000000001'
+  )
+  and document.required
+  and document.retired_at is null
+  and document.published_at <= pg_catalog.statement_timestamp()
+  and document.effective_at <= pg_catalog.statement_timestamp();
+
 insert into public.platform_admins (user_id, note)
 values ('a0000000-0000-4000-8000-000000000001', 'hierarchical governance test');
 
@@ -288,7 +308,15 @@ select ok(
   exists (
     select 1
     from public.executive_office_assignments as assignment
-    join public.organization_memberships as membership on membership.id = assignment.membership_id
+    join public.list_visible_organization_memberships(
+      (
+        select organization.id
+        from public.organizations as organization
+        where organization.slug = 'jaegun-bupyeong'
+      ),
+      500,
+      0
+    ) as membership on membership.id = assignment.membership_id
     where membership.user_id = 'b0000000-0000-4000-8000-000000000001'
       and assignment.service_year = current_setting('test.governance_service_year')::integer
       and assignment.office_code = 'secretary'

@@ -7,7 +7,7 @@ set local search_path = public, extensions, pg_catalog;
 -- advisory-lock predicates are exercised without bypassing Storage's trigger.
 select set_config('storage.allow_delete_query', 'true', true);
 
-select no_plan();
+select plan(387);
 
 -- Structural release gates -------------------------------------------------
 select ok(
@@ -56,6 +56,44 @@ select ok(
   not pg_catalog.has_table_privilege('anon', 'public.organizations', 'select'),
   'anonymous callers cannot select the private organizations base table'
 );
+select is(
+  (
+    select count(*)
+    from public.consent_documents as document
+    join (
+      values
+        ('privacy_policy'::text, '/legal/privacy/2026-08-30'::text, '5a701de8e5f10cf94d8b6309f3c1333282b53c8823d449d0bc0ff9dffa76508d'::text),
+        ('sensitive_information'::text, '/legal/sensitive/2026-08-30'::text, 'a721d371977ecc486e04ddf98fa3287ff434d74a3b2d1045d6c6aa1b3c52fe9b'::text),
+        ('overseas_transfer'::text, '/legal/overseas/2026-08-30'::text, '8a8196a9d5493860a776d07443923410b0e9802de46e9878a08d23fbfaf9e684'::text),
+        ('terms_of_service'::text, '/legal/terms/2026-08-30'::text, 'ce6dedf9374ebad0cdd781598209ea773348c585aa34204808d073fc131f2aa9'::text),
+        ('community_guidelines'::text, '/legal/community/2026-08-30'::text, 'e0b737c75f94bf3dbb2a7d5a139541f1b95c882c94f620730202aeecdb07c56d'::text)
+    ) as expected(document_key, document_url, content_sha256)
+      on expected.document_key = document.document_key
+     and expected.document_url = document.document_url
+     and expected.content_sha256 = document.content_sha256
+    where document.version = '2026-08-30'
+      and document.retired_at is null
+      and document.required
+      and document.locale = 'ko-KR'
+  ),
+  5::bigint,
+  'the five launch consent documents expose exact canonical versions, URLs, and hashes'
+);
+select ok(
+  (
+    select count(*) = 2
+      and min(retired_at) = max(retired_at)
+      and min(retired_at) = (
+        select min(published_at)
+        from public.consent_documents
+        where version = '2026-08-30'
+      )
+    from public.consent_documents
+    where version = '2026-08-27'
+      and document_key in ('privacy_policy', 'community_guidelines')
+  ),
+  'both prior consent documents retire at the actual five-document transition timestamp'
+);
 select ok(
   pg_catalog.has_table_privilege('anon', 'public.public_organization_directory', 'select'),
   'anonymous callers can select the minimized directory view'
@@ -68,10 +106,10 @@ select ok(
 select ok(
   pg_catalog.has_function_privilege(
     'authenticated',
-    'public.save_my_privacy_preferences(text,text,boolean,boolean,boolean,boolean)',
+    'public.save_my_privacy_preferences_v2(jsonb,boolean,boolean,boolean,boolean)',
     'execute'
   ),
-  'frontend privacy settings contract is executable by authenticated users'
+  'five-document privacy settings contract is executable by authenticated users'
 );
 select ok(
   pg_catalog.has_function_privilege(
@@ -357,10 +395,14 @@ values
     'release-consent-good@example.com',
     '{
       "display_name":"동의 완료 회원",
-      "accepted_privacy":true,
-      "accepted_privacy_version":"2026-08-27",
-      "accepted_community":true,
-      "accepted_community_version":"2026-08-27",
+      "consent_contract":"required-consents-v2",
+      "accepted_required_consents":{
+        "privacy_policy":{"accepted":true,"version":"2026-08-30"},
+        "sensitive_information":{"accepted":true,"version":"2026-08-30"},
+        "overseas_transfer":{"accepted":true,"version":"2026-08-30"},
+        "terms_of_service":{"accepted":true,"version":"2026-08-30"},
+        "community_guidelines":{"accepted":true,"version":"2026-08-30"}
+      },
       "accepted_at":"1900-01-01T00:00:00Z"
     }'::jsonb
   ),
@@ -369,10 +411,14 @@ values
     'release-consent-bad@example.com',
     '{
       "display_name":"동의 미완료 회원",
-      "accepted_privacy":true,
-      "accepted_privacy_version":"forged-future-version",
-      "accepted_community":false,
-      "accepted_community_version":"2026-08-27"
+      "consent_contract":"required-consents-v2",
+      "accepted_required_consents":{
+        "privacy_policy":{"accepted":true,"version":"forged-future-version"},
+        "sensitive_information":{"accepted":true,"version":"2026-08-30"},
+        "overseas_transfer":{"accepted":true,"version":"2026-08-30"},
+        "terms_of_service":{"accepted":true,"version":"2026-08-30"},
+        "community_guidelines":{"accepted":false,"version":"2026-08-30"}
+      }
     }'::jsonb
   );
 
@@ -383,8 +429,8 @@ select is(
       and accepted
       and source = 'signup_metadata'
   ),
-  2::bigint,
-  'signup metadata records both exact active document versions'
+  5::bigint,
+  'signup metadata records all five exact active document versions'
 );
 select is(
   (
@@ -402,6 +448,25 @@ select ok(
   ),
   'client-supplied consent timestamps are ignored in favor of server time'
 );
+
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source
+)
+select profile.id, document.document_key, document.version, true, 'admin_migration'
+from public.profiles as profile
+cross join public.consent_documents as document
+where profile.id in (
+    'a1100000-0000-4000-8000-000000000001',
+    'b1100000-0000-4000-8000-000000000001',
+    'c1100000-0000-4000-8000-000000000001',
+    'd1100000-0000-4000-8000-000000000001',
+    'e1100000-0000-4000-8000-000000000001',
+    'a1200000-0000-4000-8000-000000000001'
+  )
+  and document.required
+  and document.retired_at is null
+  and document.published_at <= pg_catalog.statement_timestamp()
+  and document.effective_at <= pg_catalog.statement_timestamp();
 
 update public.organizations
 set status = 'active'
@@ -699,6 +764,11 @@ select 'foreign_post', 'community-media',
        'image/jpeg', 640
 from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
 union all
+select 'target_post', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000096.jpg',
+       'image/jpeg', 640
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
 select 'owner_mismatch', 'community-media',
        organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000090.jpg',
        'image/jpeg', 640
@@ -745,7 +815,7 @@ select
   'c1100000-0000-4000-8000-000000000001',
   pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
 from test_direct_media_paths as path
-where path.label in ('foreign_message', 'foreign_post');
+where path.label in ('foreign_message', 'foreign_post', 'target_post');
 
 -- owner_id is authoritative when present. A corrupted/malicious row whose
 -- legacy owner UUID disagrees is owned by neither identity for product flows.
@@ -1345,10 +1415,44 @@ select is(
   'block_user records only auth.uid as blocker'
 );
 select throws_ok(
+  $$select public.create_content_report(
+    'profile',
+    'c1100000-0000-4000-8000-000000000001',
+    'harassment',
+    'blocked profile replay probe'
+  )$$,
+  '42501',
+  'report_target_not_accessible',
+  'a blocked profile cannot be probed through an existing report replay'
+);
+select throws_ok(
+  $$select public.create_content_report(
+    'profile',
+    'a1100000-0000-4000-8000-000000000001',
+    'privacy',
+    'foreign profile probe'
+  )$$,
+  '42501',
+  'report_target_not_accessible',
+  'a current foreign profile returns the same inaccessible report response'
+);
+select throws_ok(
   $$select public.get_or_create_conversation('c1100000-0000-4000-8000-000000000001')$$,
   '42501',
-  'user_block_boundary',
+  'conversation_target_unavailable',
   'blocker cannot create or reopen a direct conversation'
+);
+select throws_ok(
+  $$select public.get_or_create_conversation('a1100000-0000-4000-8000-000000000001')$$,
+  '42501',
+  'conversation_target_unavailable',
+  'a current foreign target returns the same conversation eligibility error'
+);
+select throws_ok(
+  $$select public.get_or_create_conversation('97000000-0000-4000-8000-000000000299')$$,
+  '42501',
+  'conversation_target_unavailable',
+  'an unknown target returns the same conversation eligibility error'
 );
 select throws_ok(
   $$
@@ -1366,7 +1470,12 @@ select throws_ok(
   'blocker cannot send into an existing direct conversation'
 );
 select is(
-  (select count(*) from public.profiles where id = 'c1100000-0000-4000-8000-000000000001'),
+  (
+    select count(*)
+    from public.list_visible_profiles(
+      array['c1100000-0000-4000-8000-000000000001'::uuid]
+    )
+  ),
   0::bigint,
   'blocker no longer sees the blocked profile in ordinary member views'
 );
@@ -1392,7 +1501,7 @@ set local role authenticated;
 select throws_ok(
   $$select public.get_or_create_conversation('b1100000-0000-4000-8000-000000000001')$$,
   '42501',
-  'user_block_boundary',
+  'conversation_target_unavailable',
   'blocked user is also prevented from creating a direct conversation'
 );
 select throws_ok(
@@ -1411,7 +1520,12 @@ select throws_ok(
   'blocked user cannot send into the existing conversation either'
 );
 select is(
-  (select count(*) from public.profiles where id = 'b1100000-0000-4000-8000-000000000001'),
+  (
+    select count(*)
+    from public.list_visible_profiles(
+      array['b1100000-0000-4000-8000-000000000001'::uuid]
+    )
+  ),
   1::bigint,
   'blocked user view is not silently altered by another user blocking them'
 );
@@ -1474,6 +1588,50 @@ select is(
 );
 
 -- Versioned preferences, self-only RLS, mute state, and report idempotency --
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source
+)
+values
+  (
+    'b1100000-0000-4000-8000-000000000001',
+    'privacy_policy',
+    '2026-08-27',
+    true,
+    'admin_migration'
+  ),
+  (
+    'b1100000-0000-4000-8000-000000000001',
+    'community_guidelines',
+    '2026-08-27',
+    true,
+    'admin_migration'
+  );
+
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source, withdrawn_at
+)
+values (
+  'b1100000-0000-4000-8000-000000000001',
+  'privacy_policy',
+  '2026-08-30',
+  false,
+  'app',
+  pg_catalog.clock_timestamp()
+);
+
+select ok(
+  exists (
+    select 1
+    from storage.objects as object
+    join test_direct_media_paths as path
+      on path.bucket_id = object.bucket_id
+     and path.storage_path = object.name
+    where path.label = 'fresh_after_delete'
+      and object.owner_id = 'b1100000-0000-4000-8000-000000000001'
+  ),
+  'closed-gate Storage attack fixture exists before the authenticated attempt'
+);
+
 select set_config(
   'request.jwt.claims',
   '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
@@ -1482,10 +1640,297 @@ select set_config(
 select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
 set local role authenticated;
 select is(
+  (public.get_my_safety_privacy_state() ->> 'consent_gate_open')::boolean,
+  false,
+  'retired 2026-08-27 acceptances do not satisfy the launch consent gate'
+);
+select is(
+  (select count(*) from public.profiles),
+  0::bigint,
+  'closed-gate direct REST profile-id reads return zero rows under RLS'
+);
+select is(
+  (select count(*) from public.organizations),
+  0::bigint,
+  'closed-gate direct REST organization reads return zero rows'
+);
+select is(
+  (select count(*) from public.organization_memberships),
+  0::bigint,
+  'closed-gate direct REST roster reads return zero rows'
+);
+select is(
+  (select count(*) from public.governance_scopes),
+  0::bigint,
+  'closed-gate direct REST governance reads return zero rows'
+);
+select is(
+  (select count(*) from public.posts),
+  0::bigint,
+  'closed-gate direct REST post reads return zero rows'
+);
+select is(
+  (select count(*) from public.messages),
+  0::bigint,
+  'closed-gate direct REST message reads return zero rows'
+);
+select is(
+  (select count(*) from public.post_media),
+  0::bigint,
+  'closed-gate direct REST post-media reads return zero rows'
+);
+select is(
   (
-    public.save_my_privacy_preferences(
-      '2026-08-27',
-      '2026-08-27',
+    select count(*)
+    from storage.objects
+    where owner_id = auth.uid()::text
+      and bucket_id in ('community-media', 'avatars')
+  ),
+  0::bigint,
+  'closed-gate direct Storage reads return zero rows for previously accessible bytes'
+);
+with deleted as (
+  delete from storage.objects as object
+  using test_direct_media_paths as path
+  where path.label = 'fresh_after_delete'
+    and object.bucket_id = path.bucket_id
+    and object.name = path.storage_path
+  returning object.id
+)
+select is(
+  (select count(*) from deleted),
+  0::bigint,
+  'closed-gate direct Storage DELETE changes zero existing rows'
+);
+select is(
+  (select count(*) from public.notifications),
+  0::bigint,
+  'closed-gate direct REST notification reads return zero rows'
+);
+with changed as (
+  update public.profiles
+  set bio = '동의 없이 변경되면 안 됨'
+  where id = auth.uid()
+  returning id
+)
+select is(
+  (select count(*) from changed),
+  0::bigint,
+  'closed-gate direct REST self-profile mutation changes zero rows'
+);
+select throws_ok(
+  $$select public.get_my_context()$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate context SECURITY DEFINER RPC fails before protected reads'
+);
+select throws_ok(
+  $$select * from public.get_governance_tree()$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate governance SECURITY DEFINER RPC fails before roster reads'
+);
+select throws_ok(
+  $$select public.reconcile_post_operation(
+    '91000000-0000-4000-8000-000000000003',
+    'b1100000-0000-4000-8000-000000000001'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate post reconciliation cannot replay protected status'
+);
+select throws_ok(
+  $$select * from public.reconcile_message_batch(
+    '93000000-0000-4000-8000-000000000001',
+    'b1100000-0000-4000-8000-000000000001',
+    array['94100000-0000-4000-8000-000000000002']::uuid[]
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate message reconciliation cannot replay protected nonce existence'
+);
+select throws_ok(
+  $$select public.mark_notifications_read(null)$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate notification mutation is rejected before reading rows'
+);
+select throws_ok(
+  $$select public.block_user(
+    'c1100000-0000-4000-8000-000000000001', null
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate block replay is rejected before probing its target'
+);
+select throws_ok(
+  $$select * from public.list_my_security_activity(10)$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate security history read is rejected'
+);
+select throws_ok(
+  $$select public.touch_my_push_device(
+    '95100000-0000-4000-8000-000000000099', null
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate push device touch is rejected before probing device IDs'
+);
+select throws_ok(
+  $$select public.create_content_report(
+    'post',
+    '91000000-0000-4000-8000-000000000001',
+    'spam',
+    null
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate report replay is rejected before returning a report UUID'
+);
+select throws_ok(
+  $$select public.abandon_media_upload_intents(array['protected/intent.jpg']::text[])$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate upload-intent abandonment is rejected before reading cleanup state'
+);
+select throws_ok(
+  $$select public.abandon_direct_media_objects(
+    'community-media',
+    array['protected/direct.jpg']::text[]
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate direct-media abandonment is rejected before reading Storage state'
+);
+select throws_ok(
+  $$select public.submit_membership_application(
+    '96000000-0000-4000-8000-000000000301', 'member', null, null,
+    '{}'::text[], null
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate application submit rejects before organization or membership lookup'
+);
+select throws_ok(
+  $$select public.set_membership_application_evidence(
+    '96000000-0000-4000-8000-000000000302', 'protected/evidence.jpg'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate evidence mutation rejects before application lookup'
+);
+select throws_ok(
+  $$select public.withdraw_membership_application(
+    '96000000-0000-4000-8000-000000000302'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate application withdrawal rejects before application lookup'
+);
+select throws_ok(
+  $$select public.review_membership_application(
+    '96000000-0000-4000-8000-000000000302', 'reject', 'probe'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate review rejects before application lookup'
+);
+select throws_ok(
+  $$select public.set_membership_status(
+    '96000000-0000-4000-8000-000000000303', 'revoked', 'probe'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate membership status mutation rejects before membership lookup'
+);
+select throws_ok(
+  $$select public.publish_owned_post(
+    '96000000-0000-4000-8000-000000000304',
+    'b1100000-0000-4000-8000-000000000001',
+    '{}'::text[]
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate publish rejects before post lookup'
+);
+select throws_ok(
+  $$select public.send_message(
+    '96000000-0000-4000-8000-000000000305', 'text', 'probe', null,
+    '{}'::jsonb, '96000000-0000-4000-8000-000000000306'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate message send rejects before conversation lookup'
+);
+select throws_ok(
+  $$select public.send_message_batch(
+    '96000000-0000-4000-8000-000000000305',
+    'b1100000-0000-4000-8000-000000000001',
+    '[]'::jsonb
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate message batch rejects before payload or conversation lookup'
+);
+select throws_ok(
+  $$select public.mark_conversation_read(
+    '96000000-0000-4000-8000-000000000305', null
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate read receipt rejects before conversation lookup'
+);
+select throws_ok(
+  $$select public.resolve_content_report(
+    '96000000-0000-4000-8000-000000000307', 'no_action', 'probe'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate moderation resolution rejects before report lookup'
+);
+select throws_ok(
+  $$select public.revoke_governance_delegation(
+    '96000000-0000-4000-8000-000000000308', 'probe'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate delegation revocation rejects before delegation lookup'
+);
+select throws_ok(
+  $$select public.delete_meeting_minute(
+    '96000000-0000-4000-8000-000000000309'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate minute deletion rejects before minute lookup'
+);
+select throws_ok(
+  $$select public.delete_ledger_entry(
+    '96000000-0000-4000-8000-000000000310'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate ledger deletion rejects before ledger lookup'
+);
+select throws_ok(
+  $$select public.update_organization_profile(
+    '96000000-0000-4000-8000-000000000311', '{}'::jsonb
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate organization mutation rejects before organization lookup'
+);
+select is(
+  (
+    public.save_my_privacy_preferences_v2(
+      '{
+        "privacy_policy":"2026-08-30",
+        "sensitive_information":"2026-08-30",
+        "overseas_transfer":"2026-08-30",
+        "terms_of_service":"2026-08-30",
+        "community_guidelines":"2026-08-30"
+      }'::jsonb,
       true,
       true,
       false,
@@ -1493,12 +1938,35 @@ select is(
     ) #>> '{directory_visibility,avatar}'
   )::boolean,
   true,
-  'privacy preference contract stores exact consent versions and field visibility'
+  'privacy preference contract stores five exact consent versions and field visibility'
 );
 select is(
   (public.get_my_safety_privacy_state() ->> 'consent_gate_open')::boolean,
   true,
-  'safety/privacy state opens only after both current versions are accepted'
+  'safety/privacy state opens only after all five current versions are accepted'
+);
+select ok(
+  (
+    select count(*)
+    from public.list_visible_profiles(array[auth.uid()])
+  ) = 1
+    and (
+      select count(*)
+      from public.list_visible_organization_memberships(
+        (select id from public.organizations where slug = 'jaegun-bupyeong'),
+        500,
+        0
+      )
+      where user_id = auth.uid()
+    ) = 1
+    and (select count(*) from public.posts where author_id = auth.uid()) >= 1
+    and (select count(*) from public.messages where sender_id = auth.uid()) >= 1
+    and (select count(*) from public.governance_scopes) >= 1,
+  'five-document re-consent restores profile, roster, post, message, and governance access'
+);
+select lives_ok(
+  $$select public.get_my_context()$$,
+  'five-document re-consent restores the protected context RPC'
 );
 select is(
   (
@@ -1529,6 +1997,10 @@ select ok(
   'state adapter returns the muted conversation ID'
 );
 select lives_ok(
+  $$select public.unblock_user('c1100000-0000-4000-8000-000000000001')$$,
+  'report fixture restores ordinary profile visibility before capturing evidence'
+);
+select lives_ok(
   $$
     select public.create_content_report(
       'profile',
@@ -1539,6 +2011,30 @@ select lives_ok(
   $$,
   'member can create an exact-scope profile report'
 );
+reset role;
+create temporary table test_reports as
+select id
+from public.content_reports
+where reporter_id = 'b1100000-0000-4000-8000-000000000001'
+  and target_type = 'profile'
+  and target_id = 'c1100000-0000-4000-8000-000000000001';
+select ok(
+  (
+    select report.evidence_snapshot -> 'bio_excerpt' = 'null'::jsonb
+      and report.evidence_snapshot ->> 'display_name' = '밥'
+    from public.content_reports as report
+    join test_reports as fixture on fixture.id = report.id
+  ),
+  'profile reporting preserves the visible name but omits a hidden bio from evidence'
+);
+grant select on table test_reports to authenticated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+set local role authenticated;
 select is(
   public.create_content_report(
     'profile',
@@ -1546,13 +2042,7 @@ select is(
     'harassment',
     '재시도'
   ),
-  (
-    select id from public.content_reports
-    where reporter_id = 'b1100000-0000-4000-8000-000000000001'
-      and target_type = 'profile'
-      and target_id = 'c1100000-0000-4000-8000-000000000001'
-      and status in ('open', 'reviewing', 'escalated')
-  ),
+  (select id from test_reports),
   'same-reason duplicate report returns the existing active report ID'
 );
 select throws_ok(
@@ -1567,6 +2057,16 @@ select throws_ok(
   '23505',
   'active_report_already_exists',
   'different-reason duplicate report fails with a stable active-report error'
+);
+select is(
+  (
+    public.block_user(
+      'c1100000-0000-4000-8000-000000000001',
+      'moderation evidence fixture restored'
+    ) ->> 'blocked_user_id'
+  )::uuid,
+  'c1100000-0000-4000-8000-000000000001'::uuid,
+  'report fixture restores the existing block used by later withdrawal tests'
 );
 reset role;
 select throws_ok(
@@ -1588,14 +2088,6 @@ select throws_ok(
   null,
   'partial unique index prevents concurrent duplicate active reports'
 );
-create temporary table test_reports as
-select id
-from public.content_reports
-where reporter_id = 'b1100000-0000-4000-8000-000000000001'
-  and target_type = 'profile'
-  and target_id = 'c1100000-0000-4000-8000-000000000001';
-grant select on table test_reports to authenticated;
-
 -- Exact moderator scope and AAL2 sanctions -------------------------------
 select set_config(
   'request.jwt.claims',
@@ -1614,9 +2106,26 @@ select throws_ok(
     'select public.resolve_content_report(%L, ''no_action'', ''범위 밖 처리'')',
     (select id from test_reports)
   ),
-  '42501',
-  'moderation_scope_forbidden',
+  'P0002',
+  'content_report_not_found_or_forbidden',
   'other-church executive cannot resolve a report outside the exact scope'
+);
+select throws_ok(
+  $$select public.resolve_content_report(
+    '97000000-0000-4000-8000-000000000291', 'no_action', 'missing probe'
+  )$$,
+  'P0002',
+  'content_report_not_found_or_forbidden',
+  'other-church moderator receives the same response for an unknown report'
+);
+select throws_ok(
+  format(
+    'select public.resolve_content_report(%L, ''invalid_action'', ''state probe'')',
+    (select id from test_reports)
+  ),
+  'P0002',
+  'content_report_not_found_or_forbidden',
+  'report action validation cannot reveal a known foreign report'
 );
 
 reset role;
@@ -1649,11 +2158,7 @@ select is(
 select throws_ok(
   format(
     'select public.resolve_content_report(%L, ''warning_recorded'', ''AAL1 제재 거부'')',
-    (
-      select id from public.content_reports
-      where reporter_id = 'b1100000-0000-4000-8000-000000000001'
-        and target_type = 'profile'
-    )
+    (select id from test_reports)
   ),
   '42501',
   'aal2_required:moderation_sanction',
@@ -1672,9 +2177,7 @@ select is(
   (
     public.resolve_content_report(
       (
-        select id from public.content_reports
-        where reporter_id = 'b1100000-0000-4000-8000-000000000001'
-          and target_type = 'profile'
+        select id from test_reports
       ),
       'warning_recorded',
       '운영정책 경고 기록'
@@ -4057,5 +4560,1696 @@ select is(
 );
 
 reset role;
+
+-- Secondary actor columns are not direct REST surfaces. Authorized clients
+-- retain the exact safe columns used by the production bootstrap.
+select ok(
+  not pg_catalog.has_column_privilege('authenticated', 'public.organizations', 'claimed_by', 'select')
+  and not pg_catalog.has_column_privilege('authenticated', 'public.boards', 'created_by', 'select')
+  and not pg_catalog.has_column_privilege('authenticated', 'public.organization_memberships', 'approved_by', 'select')
+  and not pg_catalog.has_column_privilege('authenticated', 'public.organization_memberships', 'approved_from_application_id', 'select')
+  and not pg_catalog.has_column_privilege('authenticated', 'public.membership_applications', 'reviewed_by', 'select')
+  and not pg_catalog.has_column_privilege('authenticated', 'public.membership_applications', 'evidence_path', 'select')
+  and not pg_catalog.has_column_privilege('authenticated', 'public.executive_office_assignments', 'assigned_by', 'select')
+  and not pg_catalog.has_column_privilege('authenticated', 'public.platform_admins', 'granted_by', 'select')
+  and not pg_catalog.has_table_privilege('authenticated', 'public.event_revisions', 'select')
+  and not pg_catalog.has_table_privilege('authenticated', 'public.audit_logs', 'select')
+  and not pg_catalog.has_table_privilege('authenticated', 'public.content_reports', 'select')
+  and not pg_catalog.has_table_privilege('authenticated', 'public.moderation_actions', 'select'),
+  'direct REST cannot select secondary UUIDs, raw revisions, audits, or moderation evidence'
+);
+
+select set_config('request.jwt.claim.sub', 'd1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"d1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select claimed_by from public.organizations limit 1$$,
+  '42501',
+  null,
+  'organization claimer UUID is denied at the column privilege boundary'
+);
+select throws_ok(
+  $$select created_by from public.boards limit 1$$,
+  '42501',
+  null,
+  'board creator UUID is denied at the column privilege boundary'
+);
+select throws_ok(
+  $$select approved_by from public.organization_memberships limit 1$$,
+  '42501',
+  null,
+  'membership approver UUID is denied at the column privilege boundary'
+);
+select throws_ok(
+  $$select reviewed_by from public.membership_applications limit 1$$,
+  '42501',
+  null,
+  'application reviewer UUID is denied at the column privilege boundary'
+);
+select throws_ok(
+  $$select assigned_by from public.executive_office_assignments limit 1$$,
+  '42501',
+  null,
+  'executive assignment actor UUID is denied at the column privilege boundary'
+);
+select throws_ok(
+  $$select snapshot from public.event_revisions limit 1$$,
+  '42501',
+  null,
+  'raw event revision snapshots are RPC-only'
+);
+select throws_ok(
+  $$select action from public.audit_logs limit 1$$,
+  '42501',
+  null,
+  'raw audit records are not exposed through authenticated REST'
+);
+select throws_ok(
+  $$select evidence_snapshot from public.content_reports limit 1$$,
+  '42501',
+  null,
+  'raw moderation evidence is available only through the redacting RPC'
+);
+select throws_ok(
+  $$select actor_id from public.moderation_actions limit 1$$,
+  '42501',
+  null,
+  'raw moderation action actor metadata is not exposed through REST'
+);
+select lives_ok(
+  $$select id, display_name, status from public.organizations limit 1$$,
+  'authorized clients retain safe organization columns'
+);
+select lives_ok(
+  $$select id, slug, name from public.boards limit 1$$,
+  'authorized clients retain safe board columns'
+);
+select lives_ok(
+  $$select id from public.organization_memberships limit 1$$,
+  'authorized clients retain only the opaque membership id for Realtime invalidation'
+);
+reset role;
+
+-- Target withdrawal hides live community relations and identifiers while
+-- preserving authorized immutable moderation evidence.
+insert into public.post_media (
+  post_id, uploader_id, storage_path, kind, mime_type, byte_size, width, height
+)
+select
+  '91000000-0000-4000-8000-000000000001',
+  'c1100000-0000-4000-8000-000000000001',
+  path.storage_path,
+  'image',
+  path.mime_type,
+  path.byte_size,
+  20,
+  20
+from test_direct_media_paths as path
+where path.label = 'target_post';
+
+insert into public.conversations (
+  id, organization_id, participant_low, participant_high, created_by
+)
+values (
+  '96000000-0000-4000-8000-000000000101',
+  (select id from public.organizations where slug = 'jaegun-bupyeong'),
+  'c1100000-0000-4000-8000-000000000001',
+  'd1100000-0000-4000-8000-000000000001',
+  'd1100000-0000-4000-8000-000000000001'
+);
+insert into public.conversation_reads (conversation_id, user_id)
+values
+  ('96000000-0000-4000-8000-000000000101', 'c1100000-0000-4000-8000-000000000001'),
+  ('96000000-0000-4000-8000-000000000101', 'd1100000-0000-4000-8000-000000000001');
+insert into public.messages (
+  id, conversation_id, sender_id, kind, body, client_nonce
+)
+values (
+  '96000000-0000-4000-8000-000000000102',
+  '96000000-0000-4000-8000-000000000101',
+  'c1100000-0000-4000-8000-000000000001',
+  'text',
+  '철회 전에 보낸 대상 경계 메시지',
+  '96000000-0000-4000-8000-000000000104'
+);
+insert into public.notifications (
+  id, user_id, kind, title, body, entity_type, entity_id, metadata
+)
+values (
+  '96000000-0000-4000-8000-000000000103',
+  'd1100000-0000-4000-8000-000000000001',
+  'new_message',
+  '밥님의 새 메시지',
+  '앱에서 내용을 확인해 주세요.',
+  'conversation',
+  '96000000-0000-4000-8000-000000000101',
+  '{"message_id":"96000000-0000-4000-8000-000000000102"}'::jsonb
+);
+
+update public.organization_memberships
+set role = 'executive'::public.app_role
+where user_id = 'c1100000-0000-4000-8000-000000000001'
+  and status = 'active'::public.membership_status;
+
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source, withdrawn_at
+)
+values (
+  'c1100000-0000-4000-8000-000000000001',
+  'privacy_policy',
+  '2026-08-30',
+  false,
+  'app',
+  pg_catalog.clock_timestamp()
+);
+
+select set_config(
+  'test.withdrawn_target_membership',
+  (
+    select id::text
+    from public.organization_memberships
+    where user_id = 'c1100000-0000-4000-8000-000000000001'
+      and status = 'active'
+  ),
+  true
+);
+select set_config(
+  'test.withdrawn_target_scope',
+  (
+    select scope.id::text
+    from public.governance_scopes as scope
+    join public.organizations as organization
+      on organization.id = scope.organization_id
+    where scope.scope_type = 'church'::public.governance_scope_type
+      and organization.slug = 'jaegun-bupyeong'
+      and scope.is_active
+  ),
+  true
+);
+select set_config('request.jwt.claim.sub', 'e1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"e1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select public.set_governance_offices(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    current_setting('test.release_service_year')::integer,
+    'c1100000-0000-4000-8000-000000000001',
+    array['secretary']::text[]
+  )$$,
+  '42501',
+  'governance_office_management_forbidden',
+  'foreign-scope office set cannot probe the withdrawn target consent state'
+);
+select throws_ok(
+  $$select public.assign_governance_office(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    current_setting('test.release_service_year')::integer,
+    'secretary',
+    'c1100000-0000-4000-8000-000000000001'
+  )$$,
+  '42501',
+  'governance_office_management_forbidden',
+  'foreign-scope single assignment cannot probe the withdrawn target'
+);
+select throws_ok(
+  $$select public.set_executive_offices(
+    current_setting('test.withdrawn_target_membership')::uuid,
+    current_setting('test.release_service_year')::integer,
+    array['secretary']::text[]
+  )$$,
+  '42501',
+  'governance_office_management_forbidden',
+  'foreign-scope legacy assignment cannot probe membership or target state'
+);
+select throws_ok(
+  $$select public.grant_governance_delegation(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    'c1100000-0000-4000-8000-000000000001',
+    array['view_roster']::text[],
+    statement_timestamp() + interval '1 day',
+    'oracle probe'
+  )$$,
+  '42501',
+  'native_scope_authority_required_for_delegation',
+  'foreign-scope governance grant cannot probe target consent'
+);
+select throws_ok(
+  $$select public.grant_event_management_delegation(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    'c1100000-0000-4000-8000-000000000001',
+    statement_timestamp() + interval '1 day',
+    'oracle probe'
+  )$$,
+  '42501',
+  'native_scope_authority_required_for_delegation',
+  'foreign-scope event grant cannot probe target consent'
+);
+reset role;
+select set_config('request.jwt.claim.sub', 'a1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"a1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select public.set_governance_offices(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    current_setting('test.release_service_year')::integer,
+    'c1100000-0000-4000-8000-000000000001',
+    array['secretary']::text[]
+  )$$,
+  '42501',
+  'target_current_required_consents_required',
+  'governance office set rejects a withdrawn target before eligibility lookup'
+);
+select throws_ok(
+  $$select public.assign_governance_office(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    current_setting('test.release_service_year')::integer,
+    'secretary',
+    'c1100000-0000-4000-8000-000000000001'
+  )$$,
+  '42501',
+  'target_current_required_consents_required',
+  'single governance office assignment rejects a withdrawn target first'
+);
+select throws_ok(
+  $$select public.set_executive_offices(
+    current_setting('test.withdrawn_target_membership')::uuid,
+    current_setting('test.release_service_year')::integer,
+    array['secretary']::text[]
+  )$$,
+  '42501',
+  'target_current_required_consents_required',
+  'legacy executive office assignment rejects a withdrawn membership target first'
+);
+select throws_ok(
+  $$select public.grant_governance_delegation(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    'c1100000-0000-4000-8000-000000000001',
+    array['view_roster']::text[],
+    statement_timestamp() + interval '1 day',
+    'target boundary probe'
+  )$$,
+  '42501',
+  'target_current_required_consents_required',
+  'governance delegation rejects a withdrawn target before membership probing'
+);
+select throws_ok(
+  $$select public.grant_event_management_delegation(
+    current_setting('test.withdrawn_target_scope')::uuid,
+    'c1100000-0000-4000-8000-000000000001',
+    statement_timestamp() + interval '1 day',
+    'target boundary probe'
+  )$$,
+  '42501',
+  'target_current_required_consents_required',
+  'event delegation rejects a withdrawn target before membership probing'
+);
+reset role;
+
+select set_config('request.jwt.claim.sub', 'd1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"d1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select ok(
+  (
+    select count(*)
+    from public.list_visible_profiles(
+      array['c1100000-0000-4000-8000-000000000001'::uuid]
+    )
+  ) = 0
+  and (
+    select count(*)
+    from public.list_visible_organization_memberships(
+      (select id from public.organizations where slug = 'jaegun-bupyeong'),
+      500,
+      0
+    )
+    where user_id = 'c1100000-0000-4000-8000-000000000001'
+  ) = 0
+  and (select count(*) from public.posts where author_id = 'c1100000-0000-4000-8000-000000000001') = 0
+  and (select count(*) from public.comments where author_id = 'c1100000-0000-4000-8000-000000000001') = 0
+  and (select count(*) from public.messages where conversation_id = '96000000-0000-4000-8000-000000000101') = 0,
+  'target withdrawal hides profile, roster, posts, comments, and direct messages'
+);
+select is(
+  (
+    select count(*)
+    from public.post_media
+    where storage_path = (
+      select storage_path from test_direct_media_paths where label = 'target_post'
+    )
+  ),
+  0::bigint,
+  'target withdrawal hides post-media metadata uploaded by that target'
+);
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where bucket_id = 'community-media'
+      and name = (
+        select storage_path from test_direct_media_paths where label = 'target_post'
+      )
+  ),
+  0::bigint,
+  'target withdrawal blocks new Storage reads for that uploader bytes'
+);
+select is(
+  (
+    select count(*) from public.notifications
+    where id = '96000000-0000-4000-8000-000000000103'
+  ),
+  0::bigint,
+  'target withdrawal hides denormalized sender notification content'
+);
+select throws_ok(
+  $$select * from public.reconcile_message_batch(
+    '96000000-0000-4000-8000-000000000101',
+    'd1100000-0000-4000-8000-000000000001',
+    array['96000000-0000-4000-8000-000000000104']::uuid[]
+  )$$,
+  '42501',
+  'conversation_access_forbidden',
+  'target withdrawal closes message reconciliation for the conversation'
+);
+select ok(
+  exists (
+    select 1
+    from public.list_moderation_reports(null, 50) as report
+    where report.reported_user_id = 'c1100000-0000-4000-8000-000000000001'
+  ),
+  'authorized moderator retains immutable report evidence through the redacting RPC'
+);
+select ok(
+  exists (
+    select 1
+    from public.list_moderation_reports(null, 50) as report
+    where report.reported_user_id = 'c1100000-0000-4000-8000-000000000001'
+      and report.target_author_name = '동의 갱신 필요 회원'
+      and report.evidence_summary = '동의 갱신 필요 회원'
+  ),
+  'moderation RPC preserves evidence while pseudonymizing the withdrawn target'
+);
+
+reset role;
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+select set_config('request.jwt.claim.sub', '', true);
+set local role service_role;
+select set_config(
+  'test.withdrawn_source_push_claim_count',
+  (select count(*)::text from public.service_claim_push_jobs(50)),
+  true
+);
+reset role;
+select is(
+  (
+    select status
+    from private.push_outbox
+    where idempotency_key = 'notification:96000000-0000-4000-8000-000000000103'
+  ),
+  'dead',
+  'push claim suppresses a queued notification whose source target withdrew'
+);
+
+-- Existing executive membership and annual-office metadata cannot bypass the
+-- exact current-consent boundary through direct REST or SECURITY DEFINER
+-- save/delete paths.
+reset role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+select set_config(
+  'test.closed_exec_org',
+  (select id::text from public.organizations where slug = 'jaegun-namseoul'),
+  true
+);
+select set_config(
+  'test.closed_exec_year',
+  private.current_service_year()::text,
+  true
+);
+select set_config(
+  'test.closed_exec_date',
+  pg_catalog.make_date(private.current_service_year(), 1, 2)::text,
+  true
+);
+insert into public.executive_office_assignments (
+  membership_id, service_year, office_code, assigned_by
+)
+select membership.id, private.current_service_year(), office.code,
+       'a1100000-0000-4000-8000-000000000001'
+from public.organization_memberships as membership
+cross join (values ('secretary'), ('treasurer')) as office(code)
+where membership.user_id = 'e1100000-0000-4000-8000-000000000001'
+  and membership.status = 'active';
+delete from public.governance_office_assignments as assignment
+using public.governance_scopes as scope
+where scope.id = assignment.scope_id
+  and scope.scope_type = 'church'::public.governance_scope_type
+  and scope.organization_id = current_setting('test.closed_exec_org')::uuid
+  and assignment.service_year = private.current_service_year()
+  and assignment.ended_at is null
+  and assignment.office_code in ('secretary', 'treasurer');
+insert into public.governance_office_assignments (
+  scope_id, user_id, service_year, office_code, assigned_by
+)
+select scope.id,
+       'e1100000-0000-4000-8000-000000000001',
+       private.current_service_year(),
+       office.code,
+       'a1100000-0000-4000-8000-000000000001'
+from public.governance_scopes as scope
+cross join (values ('secretary'), ('treasurer')) as office(code)
+where scope.scope_type = 'church'::public.governance_scope_type
+  and scope.organization_id = current_setting('test.closed_exec_org')::uuid
+  and scope.is_active;
+insert into public.meeting_minutes (
+  id, organization_id, meeting_year, meeting_date, title, body, status,
+  author_id, author_name
+)
+values (
+  '96000000-0000-4000-8000-000000000201',
+  current_setting('test.closed_exec_org')::uuid,
+  current_setting('test.closed_exec_year')::smallint,
+  current_setting('test.closed_exec_date')::date,
+  '동의 경계 회의록',
+  '재동의 전후 접근 경계를 검증합니다.',
+  'draft',
+  'e1100000-0000-4000-8000-000000000001',
+  '다른교회 임원'
+);
+insert into public.ledger_entries (
+  id, organization_id, fiscal_year, entry_date, entry_type, category,
+  description, amount, memo, author_id, author_name
+)
+values (
+  '96000000-0000-4000-8000-000000000202',
+  current_setting('test.closed_exec_org')::uuid,
+  current_setting('test.closed_exec_year')::smallint,
+  current_setting('test.closed_exec_date')::date,
+  'income',
+  '헌금',
+  '동의 경계 회계 테스트',
+  10000,
+  null,
+  'e1100000-0000-4000-8000-000000000001',
+  '다른교회 임원'
+);
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source, withdrawn_at
+)
+values (
+  'e1100000-0000-4000-8000-000000000001',
+  'privacy_policy',
+  '2026-08-30',
+  false,
+  'app',
+  pg_catalog.clock_timestamp()
+);
+
+select set_config('request.jwt.claim.sub', 'e1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"e1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select ok(
+  (select count(*) from public.executive_office_assignments) = 0
+  and (select count(*) from public.meeting_minutes) = 0
+  and (select count(*) from public.ledger_entries) = 0,
+  'closed-gate executive sees zero assignment, minutes, and ledger rows'
+);
+select throws_ok(
+  $$select public.save_meeting_minute(
+    '96000000-0000-4000-8000-000000000201',
+    false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    '변경 시도', '본문 변경 시도', 'draft'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate executive cannot update an existing meeting minute by RPC'
+);
+select throws_ok(
+  $$select public.delete_meeting_minute(
+    '96000000-0000-4000-8000-000000000201'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate executive cannot delete an existing meeting minute by RPC'
+);
+select throws_ok(
+  $$select public.save_ledger_entry(
+    '96000000-0000-4000-8000-000000000202',
+    false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    'income', '헌금', '변경 시도', 20000, null
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate executive cannot update an existing ledger entry by RPC'
+);
+select throws_ok(
+  $$select public.delete_ledger_entry(
+    '96000000-0000-4000-8000-000000000202'
+  )$$,
+  '42501',
+  'current_required_consents_required',
+  'closed-gate executive cannot delete an existing ledger entry by RPC'
+);
+reset role;
+select ok(
+  exists (
+    select 1 from public.meeting_minutes
+    where id = '96000000-0000-4000-8000-000000000201'
+  )
+  and exists (
+    select 1 from public.ledger_entries
+    where id = '96000000-0000-4000-8000-000000000202'
+  ),
+  'closed-gate executive RPC attempts leave both protected records unchanged'
+);
+
+-- A scoped executive must not distinguish another church's live records,
+-- durable deletion tombstones, or never-used operation IDs. Restore the one
+-- withdrawn consent first so this section exercises resource authorization,
+-- not the actor-consent guard above.
+insert into public.meeting_minutes (
+  id, organization_id, meeting_year, meeting_date, title, body, status,
+  author_id, author_name
+)
+values (
+  '96000000-0000-4000-8000-000000000221',
+  (select id from public.organizations where slug = 'jaegun-bupyeong'),
+  current_setting('test.closed_exec_year')::smallint,
+  current_setting('test.closed_exec_date')::date,
+  '타 교회 회의록',
+  '교차 범위 UUID 오라클 검증용 원본입니다.',
+  'draft',
+  'd1100000-0000-4000-8000-000000000001',
+  '교회 사역자'
+);
+insert into public.ledger_entries (
+  id, organization_id, fiscal_year, entry_date, entry_type, category,
+  description, amount, memo, author_id, author_name
+)
+values (
+  '96000000-0000-4000-8000-000000000222',
+  (select id from public.organizations where slug = 'jaegun-bupyeong'),
+  current_setting('test.closed_exec_year')::smallint,
+  current_setting('test.closed_exec_date')::date,
+  'income',
+  '타 교회',
+  '교차 범위 UUID 오라클 검증용 원본',
+  12000,
+  null,
+  'd1100000-0000-4000-8000-000000000001',
+  '교회 사역자'
+);
+insert into private.executive_operation_tombstones (
+  entity_type, entity_id, organization_id, deleted_by
+)
+values
+  (
+    'meeting_minute',
+    '96000000-0000-4000-8000-000000000223',
+    (select id from public.organizations where slug = 'jaegun-bupyeong'),
+    'a1100000-0000-4000-8000-000000000001'
+  ),
+  (
+    'ledger_entry',
+    '96000000-0000-4000-8000-000000000224',
+    (select id from public.organizations where slug = 'jaegun-bupyeong'),
+    'a1100000-0000-4000-8000-000000000001'
+  );
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source
+)
+values (
+  'e1100000-0000-4000-8000-000000000001',
+  'privacy_policy',
+  '2026-08-30',
+  true,
+  'app'
+);
+
+select set_config('request.jwt.claim.sub', 'e1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"e1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select public.save_meeting_minute(
+    '96000000-0000-4000-8000-000000000221', false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    'foreign live probe', 'foreign live probe', 'draft'
+  )$$,
+  'P0002',
+  'meeting_minute_not_found_or_forbidden',
+  'meeting save hides a foreign live operation ID'
+);
+select throws_ok(
+  $$select public.save_meeting_minute(
+    '96000000-0000-4000-8000-000000000223', false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    'foreign tombstone probe', 'foreign tombstone probe', 'draft'
+  )$$,
+  'P0002',
+  'meeting_minute_not_found_or_forbidden',
+  'meeting save gives the same response for a foreign tombstone'
+);
+select throws_ok(
+  $$select public.save_meeting_minute(
+    '96000000-0000-4000-8000-000000000225', false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    'missing probe', 'missing probe', 'draft'
+  )$$,
+  'P0002',
+  'meeting_minute_not_found_or_forbidden',
+  'meeting save gives the same response for an unknown operation ID'
+);
+select throws_ok(
+  $$select public.save_ledger_entry(
+    '96000000-0000-4000-8000-000000000222', false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    'income', 'foreign live probe', 'foreign live probe', 1000, null
+  )$$,
+  'P0002',
+  'ledger_entry_not_found_or_forbidden',
+  'ledger save hides a foreign live operation ID'
+);
+select throws_ok(
+  $$select public.save_ledger_entry(
+    '96000000-0000-4000-8000-000000000224', false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    'income', 'foreign tombstone probe', 'foreign tombstone probe', 1000, null
+  )$$,
+  'P0002',
+  'ledger_entry_not_found_or_forbidden',
+  'ledger save gives the same response for a foreign tombstone'
+);
+select throws_ok(
+  $$select public.save_ledger_entry(
+    '96000000-0000-4000-8000-000000000226', false,
+    current_setting('test.closed_exec_org')::uuid,
+    current_setting('test.closed_exec_year')::integer,
+    current_setting('test.closed_exec_date')::date,
+    'income', 'missing probe', 'missing probe', 1000, null
+  )$$,
+  'P0002',
+  'ledger_entry_not_found_or_forbidden',
+  'ledger save gives the same response for an unknown operation ID'
+);
+select throws_ok(
+  $$select public.delete_meeting_minute(
+    '96000000-0000-4000-8000-000000000221'
+  )$$,
+  'P0002',
+  'meeting_minute_not_found_or_forbidden',
+  'meeting delete hides a foreign live record'
+);
+select throws_ok(
+  $$select public.delete_meeting_minute(
+    '96000000-0000-4000-8000-000000000225'
+  )$$,
+  'P0002',
+  'meeting_minute_not_found_or_forbidden',
+  'meeting delete gives the same response for an unknown record'
+);
+select throws_ok(
+  $$select public.delete_ledger_entry(
+    '96000000-0000-4000-8000-000000000222'
+  )$$,
+  'P0002',
+  'ledger_entry_not_found_or_forbidden',
+  'ledger delete hides a foreign live record'
+);
+select throws_ok(
+  $$select public.delete_ledger_entry(
+    '96000000-0000-4000-8000-000000000226'
+  )$$,
+  'P0002',
+  'ledger_entry_not_found_or_forbidden',
+  'ledger delete gives the same response for an unknown record'
+);
+reset role;
+
+-- Privacy-field projection and search-oracle boundary ---------------------
+reset role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+select set_config(
+  'test.privacy_org',
+  (select id::text from public.organizations where slug = 'jaegun-bupyeong'),
+  true
+);
+select set_config(
+  'test.privacy_scope',
+  (
+    select scope.id::text
+    from public.governance_scopes as scope
+    where scope.scope_type = 'church'::public.governance_scope_type
+      and scope.organization_id = current_setting('test.privacy_org')::uuid
+      and scope.is_active
+  ),
+  true
+);
+select set_config(
+  'test.privacy_department',
+  (
+    select department.id::text
+    from public.church_departments as department
+    where department.church_scope_id = current_setting('test.privacy_scope')::uuid
+      and department.department_code = 'adult'::public.church_department_code
+      and department.is_active
+  ),
+  true
+);
+
+update public.profiles
+set
+  bio = case id
+    when 'b1100000-0000-4000-8000-000000000001'::uuid
+      then '앨리스 자기소개'
+    else '사역자 비공개 자기소개'
+  end
+where id in (
+  'b1100000-0000-4000-8000-000000000001',
+  'd1100000-0000-4000-8000-000000000001'
+);
+
+update public.organization_memberships
+set church_title_code = case user_id
+  when 'b1100000-0000-4000-8000-000000000001'::uuid then 'deacon'
+  else 'elder'
+end
+where organization_id = current_setting('test.privacy_org')::uuid
+  and user_id in (
+    'b1100000-0000-4000-8000-000000000001',
+    'd1100000-0000-4000-8000-000000000001'
+  );
+
+delete from public.privacy_preferences
+where user_id = 'd1100000-0000-4000-8000-000000000001';
+
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+values (
+  'avatars',
+  'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg',
+  'd1100000-0000-4000-8000-000000000001'::uuid,
+  'd1100000-0000-4000-8000-000000000001',
+  '{"mimetype":"image/jpeg","size":512}'::jsonb
+);
+
+select set_config('request.jwt.claim.sub', 'd1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"d1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+update public.profiles
+set avatar_path = 'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'
+where id = 'd1100000-0000-4000-8000-000000000001';
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+
+insert into public.conversations (
+  id, organization_id, participant_low, participant_high, created_by
+)
+values (
+  '97000000-0000-4000-8000-000000000002',
+  current_setting('test.privacy_org')::uuid,
+  'b1100000-0000-4000-8000-000000000001',
+  'd1100000-0000-4000-8000-000000000001',
+  'b1100000-0000-4000-8000-000000000001'
+);
+insert into public.conversation_reads (conversation_id, user_id)
+values
+  (
+    '97000000-0000-4000-8000-000000000002',
+    'b1100000-0000-4000-8000-000000000001'
+  ),
+  (
+    '97000000-0000-4000-8000-000000000002',
+    'd1100000-0000-4000-8000-000000000001'
+  );
+
+insert into public.department_office_assignments (
+  department_id, user_id, service_year, office_code, assigned_by
+)
+values (
+  current_setting('test.privacy_department')::uuid,
+  'd1100000-0000-4000-8000-000000000001',
+  private.current_service_year(),
+  'president',
+  'a1100000-0000-4000-8000-000000000001'
+);
+
+select ok(
+  not pg_catalog.has_table_privilege('authenticated', 'public.profiles', 'select')
+  and not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.organization_memberships',
+    'select'
+  )
+  and pg_catalog.has_column_privilege(
+    'authenticated',
+    'public.profiles',
+    'id',
+    'select'
+  )
+  and not pg_catalog.has_column_privilege(
+    'authenticated',
+    'public.profiles',
+    'display_name',
+    'select'
+  )
+  and pg_catalog.has_column_privilege(
+    'authenticated',
+    'public.organization_memberships',
+    'id',
+    'select'
+  )
+  and not pg_catalog.has_column_privilege(
+    'authenticated',
+    'public.organization_memberships',
+    'church_title_code',
+    'select'
+  ),
+  'semantic profile and membership columns are RPC-only while opaque ids retain self-update and Realtime compatibility'
+);
+
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select display_name from public.profiles limit 1$$,
+  '42501',
+  null,
+  'authenticated direct profile SELECT is denied instead of bypassing field masks'
+);
+select throws_ok(
+  $$select church_title_code from public.organization_memberships limit 1$$,
+  '42501',
+  null,
+  'authenticated direct church-title SELECT is denied'
+);
+select lives_ok(
+  $$select id from public.organization_memberships limit 1$$,
+  'opaque membership id SELECT remains available for Realtime invalidation'
+);
+select throws_ok(
+  $$select * from public.list_visible_profiles(array[]::uuid[])$$,
+  '22023',
+  'invalid_profile_directory_request',
+  'profile projection rejects an empty UUID batch'
+);
+select throws_ok(
+  $$select * from public.list_visible_profiles(
+    pg_catalog.array_fill(
+      'b1100000-0000-4000-8000-000000000001'::uuid,
+      array[201]
+    )
+  )$$,
+  '22023',
+  'invalid_profile_directory_request',
+  'profile projection rejects batches larger than 200 UUIDs'
+);
+select is(
+  (
+    select profile.bio
+    from public.list_visible_profiles(
+      array['b1100000-0000-4000-8000-000000000001'::uuid]
+    ) as profile
+  ),
+  '앨리스 자기소개'::text,
+  'profile projection always returns the authenticated user full self fields'
+);
+select ok(
+  (
+    select profile.avatar_path is null and profile.bio is null
+    from public.list_visible_profiles(
+      array['d1100000-0000-4000-8000-000000000001'::uuid]
+    ) as profile
+  ),
+  'missing privacy preferences default peer avatar and bio visibility to false'
+);
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where bucket_id = 'avatars'
+      and name = 'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'
+  ),
+  0::bigint,
+  'missing avatar preference denies peer Storage reads'
+);
+reset role;
+
+insert into public.privacy_preferences (
+  user_id, avatar_visible, church_title_visible, bio_visible
+)
+values (
+  'd1100000-0000-4000-8000-000000000001',
+  false,
+  false,
+  false
+);
+
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select ok(
+  (
+    select profile.avatar_path is null and profile.bio is null
+    from public.list_visible_profiles(
+      array['d1100000-0000-4000-8000-000000000001'::uuid]
+    ) as profile
+  ),
+  'explicit false avatar and bio preferences remain masked from peers'
+);
+select is(
+  (
+    select membership.church_title_code
+    from public.list_visible_organization_memberships(
+      current_setting('test.privacy_org')::uuid,
+      500,
+      0
+    ) as membership
+    where membership.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  null::text,
+  'membership projection masks a peer church title when its toggle is false'
+);
+select is(
+  (
+    select participant.value ->> 'avatar_path'
+    from public.get_conversation_summaries() as conversation
+    cross join lateral pg_catalog.jsonb_array_elements(conversation.participants)
+      as participant(value)
+    where conversation.id = '97000000-0000-4000-8000-000000000002'
+      and participant.value ->> 'id' = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  null::text,
+  'conversation summaries mask the peer avatar using the same preference boundary'
+);
+reset role;
+
+select set_config('request.jwt.claim.sub', 'd1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"d1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select ok(
+  (
+    select profile.avatar_path = 'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'
+      and profile.bio = '사역자 비공개 자기소개'
+    from public.list_visible_profiles(
+      array['d1100000-0000-4000-8000-000000000001'::uuid]
+    ) as profile
+  ),
+  'false public toggles do not redact the profile owner self view'
+);
+select is(
+  (
+    select membership.church_title_code
+    from public.list_visible_organization_memberships(
+      current_setting('test.privacy_org')::uuid,
+      500,
+      0
+    ) as membership
+    where membership.user_id = auth.uid()
+  ),
+  'elder'::text,
+  'false public title toggle does not redact the membership owner self view'
+);
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where bucket_id = 'avatars'
+      and name = 'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'
+  ),
+  1::bigint,
+  'avatar owner retains self Storage read access while the public toggle is false'
+);
+reset role;
+
+select set_config('request.jwt.claim.sub', 'a1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"a1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select lives_ok(
+  $$select * from public.list_visible_organization_memberships(null, 500, 0)$$,
+  'platform administrator can page the authorized cross-organization membership directory with a null organization filter'
+);
+select ok(
+  (
+    select roster.church_title_code is null
+      and roster.church_title_name is null
+    from public.list_governance_roster(
+      current_setting('test.privacy_scope')::uuid,
+      current_setting('test.release_service_year')::integer,
+      null,
+      200,
+      0
+    ) as roster
+    where roster.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  'governance roster masks both church-title code and display name'
+);
+select is(
+  (
+    select count(*)
+    from public.list_governance_roster(
+      current_setting('test.privacy_scope')::uuid,
+      current_setting('test.release_service_year')::integer,
+      '장로',
+      200,
+      0
+    ) as roster
+    where roster.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  0::bigint,
+  'governance roster search cannot discover a hidden church title'
+);
+select ok(
+  (
+    select candidate.church_title_code is null
+      and candidate.church_title_name is null
+    from public.list_governance_office_candidates(
+      current_setting('test.privacy_scope')::uuid,
+      current_setting('test.release_service_year')::integer,
+      'pastor',
+      null,
+      100,
+      0
+    ) as candidate
+    where candidate.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  'governance office candidates mask both church-title fields'
+);
+select is(
+  (
+    select count(*)
+    from public.list_governance_office_candidates(
+      current_setting('test.privacy_scope')::uuid,
+      current_setting('test.release_service_year')::integer,
+      'pastor',
+      '장로',
+      100,
+      0
+    ) as candidate
+    where candidate.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  0::bigint,
+  'governance candidate search cannot discover a hidden church title'
+);
+select is(
+  (
+    select candidate.church_title_code
+    from public.list_department_office_candidates(
+      current_setting('test.privacy_department')::uuid,
+      current_setting('test.release_service_year')::integer,
+      null,
+      100,
+      0
+    ) as candidate
+    where candidate.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  null::text,
+  'department office candidates mask a hidden church title'
+);
+select is(
+  (
+    select count(*)
+    from public.list_department_office_candidates(
+      current_setting('test.privacy_department')::uuid,
+      current_setting('test.release_service_year')::integer,
+      '장로',
+      100,
+      0
+    ) as candidate
+    where candidate.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  0::bigint,
+  'department candidate search cannot discover a hidden church title'
+);
+select is(
+  (
+    select department.church_title_code
+    from public.list_church_departments(
+      current_setting('test.privacy_org')::uuid,
+      current_setting('test.release_service_year')::integer
+    ) as department
+    where department.user_id = 'd1100000-0000-4000-8000-000000000001'
+      and department.department_id = current_setting('test.privacy_department')::uuid
+      and department.office_code = 'president'
+  ),
+  null::text,
+  'department office holder projection masks the church title'
+);
+reset role;
+
+update public.privacy_preferences
+set avatar_visible = true,
+    church_title_visible = true,
+    bio_visible = true
+where user_id = 'd1100000-0000-4000-8000-000000000001';
+
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select ok(
+  (
+    select profile.avatar_path = 'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'
+      and profile.bio = '사역자 비공개 자기소개'
+    from public.list_visible_profiles(
+      array['d1100000-0000-4000-8000-000000000001'::uuid]
+    ) as profile
+  ),
+  'true peer avatar and bio preferences restore both projected fields'
+);
+select is(
+  (
+    select membership.church_title_code
+    from public.list_visible_organization_memberships(
+      current_setting('test.privacy_org')::uuid,
+      500,
+      0
+    ) as membership
+    where membership.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  'elder'::text,
+  'true peer title preference restores the membership title'
+);
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where bucket_id = 'avatars'
+      and name = 'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'
+  ),
+  1::bigint,
+  'true peer avatar preference restores Storage read access'
+);
+select is(
+  (
+    select participant.value ->> 'avatar_path'
+    from public.get_conversation_summaries() as conversation
+    cross join lateral pg_catalog.jsonb_array_elements(conversation.participants)
+      as participant(value)
+    where conversation.id = '97000000-0000-4000-8000-000000000002'
+      and participant.value ->> 'id' = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'::text,
+  'conversation summaries restore the peer avatar only after opt-in'
+);
+reset role;
+
+select set_config('request.jwt.claim.sub', 'a1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"a1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select ok(
+  (
+    select roster.church_title_code = 'elder'
+      and roster.church_title_name = '장로'
+    from public.list_governance_roster(
+      current_setting('test.privacy_scope')::uuid,
+      current_setting('test.release_service_year')::integer,
+      null,
+      200,
+      0
+    ) as roster
+    where roster.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  'governance roster restores both title fields after target opt-in'
+);
+select is(
+  (
+    select department.church_title_code
+    from public.list_church_departments(
+      current_setting('test.privacy_org')::uuid,
+      current_setting('test.release_service_year')::integer
+    ) as department
+    where department.user_id = 'd1100000-0000-4000-8000-000000000001'
+      and department.department_id = current_setting('test.privacy_department')::uuid
+      and department.office_code = 'president'
+  ),
+  'elder'::text,
+  'department holder title is restored after target opt-in'
+);
+reset role;
+
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source, withdrawn_at
+)
+values (
+  'd1100000-0000-4000-8000-000000000001',
+  'privacy_policy',
+  '2026-08-30',
+  false,
+  'app',
+  pg_catalog.clock_timestamp()
+);
+
+-- Oracle fixtures deliberately vary existence, scope, requested/assigned
+-- role, review state, and target consent. An unrelated ordinary member must
+-- receive one authority error before any of those attributes are exposed.
+insert into public.membership_applications (
+  id, user_id, organization_id, requested_role, status, applicant_note
+)
+values (
+  '97000000-0000-4000-8000-000000000201',
+  'b1200000-0000-4000-8000-000000000001',
+  (select id from public.organizations where slug = 'jaegun-namseoul'),
+  'minister',
+  'pending',
+  'foreign leadership authority-oracle fixture'
+);
+insert into public.membership_applications (
+  id, user_id, organization_id, requested_role, status, applicant_note,
+  review_reason, reviewed_at
+)
+values (
+  '97000000-0000-4000-8000-000000000202',
+  'c1100000-0000-4000-8000-000000000001',
+  (select id from public.organizations where slug = 'jaegun-bupyeong'),
+  'member',
+  'rejected',
+  'withdrawn target authority-oracle fixture',
+  'fixture rejection',
+  pg_catalog.statement_timestamp()
+);
+insert into public.organization_memberships (
+  id, user_id, organization_id, role, status, ended_at
+)
+values (
+  '97000000-0000-4000-8000-000000000203',
+  'a1100000-0000-4000-8000-000000000001',
+  (select id from public.organizations where slug = 'jaegun-bupyeong'),
+  'member',
+  'suspended',
+  pg_catalog.statement_timestamp()
+);
+insert into public.governance_authority_delegations (
+  id, scope_id, grantor_user_id, delegate_user_id, capabilities,
+  expires_at, reason
+)
+select
+  '97000000-0000-4000-8000-000000000204',
+  scope.id,
+  'a1100000-0000-4000-8000-000000000001',
+  'e1100000-0000-4000-8000-000000000001',
+  array['view_roster']::text[],
+  pg_catalog.statement_timestamp() + interval '1 day',
+  'foreign delegation oracle fixture'
+from public.governance_scopes as scope
+join public.organizations as organization
+  on organization.id = scope.organization_id
+where scope.scope_type = 'church'::public.governance_scope_type
+  and organization.slug = 'jaegun-namseoul'
+  and scope.is_active;
+select set_config(
+  'test.privacy_actor_membership',
+  (
+    select membership.id::text
+    from public.organization_memberships as membership
+    where membership.user_id = 'b1100000-0000-4000-8000-000000000001'
+      and membership.status = 'active'::public.membership_status
+  ),
+  true
+);
+
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select is(
+  (
+    select count(*)
+    from public.list_visible_profiles(
+      array['d1100000-0000-4000-8000-000000000001'::uuid]
+    )
+  ),
+  0::bigint,
+  'target consent withdrawal removes the profile projection row entirely'
+);
+select is(
+  (
+    select count(*)
+    from public.list_visible_organization_memberships(
+      current_setting('test.privacy_org')::uuid,
+      500,
+      0
+    ) as membership
+    where membership.user_id = 'd1100000-0000-4000-8000-000000000001'
+  ),
+  0::bigint,
+  'target consent withdrawal removes the membership projection row entirely'
+);
+select is(
+  (
+    select count(*)
+    from storage.objects
+    where bucket_id = 'avatars'
+      and name = 'd1100000-0000-4000-8000-000000000001/97000000-0000-4000-8000-000000000001.jpg'
+  ),
+  0::bigint,
+  'target consent withdrawal closes peer avatar Storage reads again'
+);
+select throws_ok(
+  format(
+    'select public.assign_department_office(%L, %s, ''president'', %L)',
+    current_setting('test.privacy_department')::uuid,
+    current_setting('test.release_service_year')::integer,
+    'a1100000-0000-4000-8000-000000000001'
+  ),
+  '42501',
+  'department_office_management_forbidden',
+  'unauthorized department assignment rejects a real current target before target inspection'
+);
+select throws_ok(
+  $$select public.assign_department_office(
+    '97000000-0000-4000-8000-000000000090',
+    current_setting('test.release_service_year')::integer,
+    'president',
+    'd1100000-0000-4000-8000-000000000001'
+  )$$,
+  '42501',
+  'department_office_management_forbidden',
+  'unauthorized fake department assignment gives the same error for a withdrawn target'
+);
+select throws_ok(
+  $$select public.assign_department_office(
+    '97000000-0000-4000-8000-000000000090',
+    current_setting('test.release_service_year')::integer,
+    'president',
+    '97000000-0000-4000-8000-000000000099'
+  )$$,
+  '42501',
+  'department_office_management_forbidden',
+  'unauthorized fake department assignment gives the same error for an unknown target'
+);
+select throws_ok(
+  $$select public.block_user(
+    'a1100000-0000-4000-8000-000000000001', null
+  )$$,
+  '42501',
+  'block_target_unavailable',
+  'block target eligibility hides a current foreign profile from an unrelated actor'
+);
+select throws_ok(
+  $$select public.block_user(
+    'd1100000-0000-4000-8000-000000000001', null
+  )$$,
+  '42501',
+  'block_target_unavailable',
+  'block target eligibility returns the same error for a withdrawn profile'
+);
+select throws_ok(
+  $$select public.block_user(
+    '97000000-0000-4000-8000-000000000099', null
+  )$$,
+  '42501',
+  'block_target_unavailable',
+  'block target eligibility returns the same error for an unknown UUID'
+);
+select is(
+  (
+    public.block_user(
+      'c1100000-0000-4000-8000-000000000001',
+      '철회 후에도 유지하는 기존 차단'
+    ) ->> 'blocked_user_id'
+  )::uuid,
+  'c1100000-0000-4000-8000-000000000001'::uuid,
+  'an existing block remains idempotently manageable after target consent withdrawal'
+);
+select throws_ok(
+  $$select public.review_membership_application(
+    '95000000-0000-4000-8000-000000000001', 'reject', 'oracle probe'
+  )$$,
+  '42501',
+  'membership_application_review_forbidden',
+  'unauthorized review hides a known pending self application'
+);
+select throws_ok(
+  $$select public.review_membership_application(
+    '97000000-0000-4000-8000-000000000201', 'reject', 'oracle probe'
+  )$$,
+  '42501',
+  'membership_application_review_forbidden',
+  'unauthorized review gives the same error for a foreign leadership request'
+);
+select throws_ok(
+  $$select public.review_membership_application(
+    '97000000-0000-4000-8000-000000000202', 'approve', 'oracle probe'
+  )$$,
+  '42501',
+  'membership_application_review_forbidden',
+  'unauthorized review gives the same error for a reviewed withdrawn target'
+);
+select throws_ok(
+  $$select public.review_membership_application(
+    '97000000-0000-4000-8000-000000000299', 'approve', 'oracle probe'
+  )$$,
+  '42501',
+  'membership_application_review_forbidden',
+  'unauthorized review gives the same error for an unknown application UUID'
+);
+select throws_ok(
+  $$select public.set_membership_status(
+    current_setting('test.privacy_actor_membership')::uuid,
+    'revoked',
+    'oracle probe'
+  )$$,
+  '42501',
+  'membership_status_change_forbidden',
+  'unauthorized status change hides a known self membership'
+);
+select throws_ok(
+  $$select public.set_membership_status(
+    current_setting('test.withdrawn_target_membership')::uuid,
+    'suspended',
+    'oracle probe'
+  )$$,
+  '42501',
+  'membership_status_change_forbidden',
+  'unauthorized status change gives the same error for withdrawn leadership'
+);
+select throws_ok(
+  $$select public.set_membership_status(
+    '97000000-0000-4000-8000-000000000203',
+    'active',
+    'oracle probe'
+  )$$,
+  '42501',
+  'membership_status_change_forbidden',
+  'unauthorized status change gives the same error for a suspended target'
+);
+select throws_ok(
+  $$select public.set_membership_status(
+    '97000000-0000-4000-8000-000000000299',
+    'active',
+    'oracle probe'
+  )$$,
+  '42501',
+  'membership_status_change_forbidden',
+  'unauthorized status change gives the same error for an unknown membership UUID'
+);
+select throws_ok(
+  $$select public.set_membership_application_evidence(
+    '97000000-0000-4000-8000-000000000201',
+    'foreign/probe.jpg'
+  )$$,
+  '42501',
+  'application_owner_forbidden',
+  'application evidence hides a foreign owned application'
+);
+select throws_ok(
+  $$select public.set_membership_application_evidence(
+    '97000000-0000-4000-8000-000000000299',
+    'missing/probe.jpg'
+  )$$,
+  '42501',
+  'application_owner_forbidden',
+  'application evidence gives the same error for an unknown UUID'
+);
+select throws_ok(
+  $$select public.withdraw_membership_application(
+    '97000000-0000-4000-8000-000000000201'
+  )$$,
+  '42501',
+  'application_owner_forbidden',
+  'application withdrawal hides a foreign owned application'
+);
+select throws_ok(
+  $$select public.withdraw_membership_application(
+    '97000000-0000-4000-8000-000000000299'
+  )$$,
+  '42501',
+  'application_owner_forbidden',
+  'application withdrawal gives the same error for an unknown UUID'
+);
+select throws_ok(
+  $$select public.revoke_governance_delegation(
+    '97000000-0000-4000-8000-000000000204', 'foreign delegation probe'
+  )$$,
+  'P0002',
+  'governance_delegation_not_found_or_forbidden',
+  'delegation revocation hides a known foreign delegation'
+);
+select throws_ok(
+  $$select public.revoke_governance_delegation(
+    '97000000-0000-4000-8000-000000000298', 'missing delegation probe'
+  )$$,
+  'P0002',
+  'governance_delegation_not_found_or_forbidden',
+  'delegation revocation gives the same response for an unknown UUID'
+);
+select throws_ok(
+  $$select public.create_content_report(
+    'profile',
+    'd1100000-0000-4000-8000-000000000001',
+    'privacy',
+    'withdrawn profile probe'
+  )$$,
+  '42501',
+  'report_target_not_accessible',
+  'a withdrawn profile cannot be newly captured into report evidence'
+);
+select throws_ok(
+  $$select public.create_content_report(
+    'comment',
+    '92000000-0000-4000-8000-000000000001',
+    'privacy',
+    'withdrawn comment probe'
+  )$$,
+  '42501',
+  'report_target_not_accessible',
+  'a withdrawn comment author cannot be recaptured through report evidence'
+);
+select throws_ok(
+  $$select public.create_content_report(
+    'profile',
+    '97000000-0000-4000-8000-000000000299',
+    'privacy',
+    'unknown profile probe'
+  )$$,
+  '42501',
+  'report_target_not_accessible',
+  'an unknown report profile gives the same inaccessible response'
+);
+select throws_ok(
+  $$select public.send_message(
+    '93000000-0000-4000-8000-000000000001',
+    'text',
+    'hidden conversation probe',
+    null,
+    '{}'::jsonb,
+    '97000000-0000-4000-8000-000000000211'
+  )$$,
+  'P0002',
+  'conversation_not_found_or_forbidden',
+  'message send hides a known conversation whose peer withdrew consent'
+);
+select throws_ok(
+  $$select public.send_message(
+    '97000000-0000-4000-8000-000000000299',
+    'text',
+    'missing conversation probe',
+    null,
+    '{}'::jsonb,
+    '97000000-0000-4000-8000-000000000212'
+  )$$,
+  'P0002',
+  'conversation_not_found_or_forbidden',
+  'message send gives the same response for an unknown conversation'
+);
+select throws_ok(
+  $$select public.send_message_batch(
+    '93000000-0000-4000-8000-000000000001',
+    'b1100000-0000-4000-8000-000000000001',
+    '[{"kind":"text","body":"hidden batch probe","media_path":null,"media_metadata":{},"client_nonce":"97000000-0000-4000-8000-000000000213"}]'::jsonb
+  )$$,
+  'P0002',
+  'conversation_not_found_or_forbidden',
+  'message batch hides a known conversation whose peer withdrew consent'
+);
+select throws_ok(
+  $$select public.send_message_batch(
+    '97000000-0000-4000-8000-000000000299',
+    'b1100000-0000-4000-8000-000000000001',
+    '[{"kind":"text","body":"missing batch probe","media_path":null,"media_metadata":{},"client_nonce":"97000000-0000-4000-8000-000000000214"}]'::jsonb
+  )$$,
+  'P0002',
+  'conversation_not_found_or_forbidden',
+  'message batch gives the same response for an unknown conversation'
+);
+reset role;
+select is(
+  (
+    select count(*)
+    from public.content_reports as report
+    where report.target_id in (
+      'd1100000-0000-4000-8000-000000000001',
+      '92000000-0000-4000-8000-000000000001',
+      '97000000-0000-4000-8000-000000000299'
+    )
+      and report.details in (
+        'withdrawn profile probe',
+        'withdrawn comment probe',
+        'unknown profile probe'
+      )
+  ),
+  0::bigint,
+  'inaccessible report attempts persist no new evidence snapshots'
+);
+
+select set_config('request.jwt.claim.sub', 'a1100000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"a1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select is(
+  public.review_membership_application(
+    '97000000-0000-4000-8000-000000000201',
+    'approve',
+    'authorized leadership approval'
+  ) ->> 'status',
+  'approved'::text,
+  'authorized AAL2 platform admin can still approve a leadership application'
+);
+select throws_ok(
+  $$select public.review_membership_application(
+    '97000000-0000-4000-8000-000000000201',
+    'approve',
+    'idempotency replay'
+  )$$,
+  '40001',
+  'application_already_reviewed',
+  'authorized review preserves the established already-reviewed result'
+);
+select lives_ok(
+  format(
+    'select public.set_membership_status(%L, ''suspended'', ''authorized suspension'')',
+    current_setting('test.withdrawn_target_membership')::uuid
+  ),
+  'authorized platform admin can still suspend a leadership member'
+);
+select lives_ok(
+  format(
+    'select public.set_membership_status(%L, ''suspended'', ''idempotency replay'')',
+    current_setting('test.withdrawn_target_membership')::uuid
+  ),
+  'authorized membership status replay remains idempotent'
+);
+reset role;
+select is(
+  (
+    select membership.status
+    from public.organization_memberships as membership
+    where membership.id = current_setting('test.withdrawn_target_membership')::uuid
+  ),
+  'suspended'::public.membership_status,
+  'authorized status mutation retains the requested final state'
+);
+
 select * from finish();
 rollback;

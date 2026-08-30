@@ -75,12 +75,22 @@ describe("safety and privacy adapter", () => {
   it("normalizes the canonical RPC response without opening consent by default", () => {
     const normalized = __normalizeSafetyPrivacyStateForTests({
       current_documents: {
-        privacy_policy: { version: "2026-08-27" },
-        community_guidelines: { version: "2026-08-27" },
+        privacy_policy: {
+          version: "2026-08-27",
+          required: true,
+          title: "개인정보 처리방침",
+          url: "/legal/privacy/2026-08-27",
+        },
+        community_guidelines: {
+          version: "2026-08-27",
+          required: true,
+          title: "공동체 이용규칙",
+          url: "/legal/community/2026-08-27",
+        },
       },
       consents: [
-        { document_key: "privacy_policy", document_version: "2026-08-27", accepted: true, recorded_at: "2026-08-27T01:00:00.000Z" },
-        { document_key: "community_guidelines", document_version: "2026-08-27", accepted: true, recorded_at: "2026-08-27T01:01:00.000Z" },
+        { document_key: "privacy_policy", document_version: "2026-08-27", accepted: true, recorded_at: "2026-08-30T01:00:00.000Z" },
+        { document_key: "community_guidelines", document_version: "2026-08-27", accepted: true, recorded_at: "2026-08-30T01:01:00.000Z" },
       ],
       directory_visibility: { avatar: true, church_title: false, email: false, bio: true },
       notifications: {
@@ -103,7 +113,12 @@ describe("safety and privacy adapter", () => {
       muted_conversation_ids: ["conversation-1"],
       account_deletion: { status: "none", requested_at: null, scheduled_for: null },
     });
-    expect(normalized.consents.sensitiveAffiliation.acceptedAt).toBe("2026-08-27T01:00:00.000Z");
+    expect(normalized.requiredConsents).toContainEqual({
+      key: "privacy_policy",
+      version: "2026-08-27",
+      acceptedAt: "2026-08-30T01:00:00.000Z",
+    });
+    expect(normalized.consentGateOpen).toBe(false);
     expect(normalized.directoryVisibility).toEqual({ avatar: true, churchTitle: false, email: false, bio: true });
     expect(normalized.notifications.lockScreenPreview).toBe("hidden");
     expect(normalized.pushDevices).toEqual([expect.objectContaining({ id: "device-1", platform: "ios" })]);
@@ -197,17 +212,28 @@ describe("safety and privacy routes", () => {
     ]));
   });
 
-  it("renders versioned privacy information before sign-in without inventing support contact", async () => {
-    renderApp("/legal/privacy/2026-08-27");
-    expect(await screen.findByRole("heading", { name: "개인정보 처리 안내" })).toBeInTheDocument();
-    expect(screen.getByText(/VITE_SUPPORT_EMAIL이 설정되지 않았습니다/)).toBeInTheDocument();
+  it("renders the versioned launch processor disclosure before sign-in", async () => {
+    renderApp("/legal/overseas/2026-08-30");
+    expect(await screen.findByRole("heading", { name: "개인정보 국외 이전 동의" })).toBeInTheDocument();
+    expect(screen.getByText(/SUPABASE PTE\. LTD\..*privacy@supabase\.io.*AWS us-east-1/)).toBeInTheDocument();
+    expect(screen.getByText(/Vercel Inc\..*privacy@vercel\.com.*Hobby 플랜/)).toBeInTheDocument();
+    expect(screen.getByText(/Google LLC.*chaos990562@gmail\.com/)).toBeInTheDocument();
+    expect(screen.getByText(/사실 고지이며.*법률 준수를 보증하는 것은 아닙니다/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "공동체 운영정책" })).toHaveAttribute("href", "/legal/community");
+  });
+
+  it("publishes a concrete community-policy appeal window and response target", async () => {
+    renderApp("/legal/community/2026-08-30");
+    expect(await screen.findByRole("heading", { name: "공동체 운영정책" })).toBeInTheDocument();
+    expect(screen.getByText(/조치를 확인한 뒤 가능한 한 14일 안에/)).toBeInTheDocument();
+    expect(screen.getByText(/합리적인 기간 안에 검토/)).toBeInTheDocument();
+    expect(screen.getByText(/검토가 지연되는 경우 그 사실과 이유를 안내/)).toBeInTheDocument();
   });
 
   it("does not silently substitute the current copy for an unknown legal version", async () => {
     renderApp("/legal/community/2025-01-01");
     expect(await screen.findByRole("heading", { name: "요청한 운영정책 버전을 찾을 수 없습니다" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "현재 버전 열기" })).toHaveAttribute("href", "/legal/community/2026-08-27");
+    expect(screen.getByRole("link", { name: "현재 버전 열기" })).toHaveAttribute("href", "/legal/community/2026-08-30");
   });
 
   it("provides a public store-facing account deletion path before sign-in", async () => {

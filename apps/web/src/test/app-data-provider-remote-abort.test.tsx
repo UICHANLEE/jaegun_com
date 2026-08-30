@@ -60,7 +60,7 @@ function RefreshProbe() {
 describe("AppDataProvider remote load cancellation", () => {
   it("joins same-session refreshes and aborts the fan-out when the session is invalidated", async () => {
     const view = render(<AppDataProvider><RefreshProbe /></AppDataProvider>);
-    await waitFor(() => expect(remote.signals.length).toBeGreaterThanOrEqual(3));
+    await waitFor(() => expect(remote.signals).toHaveLength(2));
     const firstLoadSignals = remote.signals.slice();
     expect(firstLoadSignals.every((signal) => !signal.aborted)).toBe(true);
 

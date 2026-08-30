@@ -1,3 +1,8 @@
+import type {
+  AcceptedConsentVersions,
+  ActiveConsentDocument,
+} from "../data/legalConsentContract";
+
 export type AppMode = "demo" | "supabase";
 export type GlobalRole = "platform_admin" | "user";
 export type MembershipRole = "minister" | "executive" | "member";
@@ -187,6 +192,7 @@ export interface MediaAsset {
   id: string;
   kind: "image" | "video";
   url: string;
+  storagePath?: string;
   alt?: string;
   name?: string;
   mimeType?: string;
@@ -305,8 +311,7 @@ export interface SignUpInput {
   email: string;
   password: string;
   organizationId: string;
-  acceptedPrivacyVersion: string;
-  acceptedCommunityVersion: string;
+  acceptedConsents: AcceptedConsentVersions;
 }
 
 export interface MembershipRequestInput {
@@ -322,6 +327,8 @@ export interface AppDataState {
   mode: AppMode;
   loading: boolean;
   viewer: ViewerContext | null;
+  requiredConsentDocuments: ActiveConsentDocument[];
+  consentGateOpen: boolean | null;
   organizations: Organization[];
   posts: Post[];
   applications: MembershipApplication[];

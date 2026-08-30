@@ -5,18 +5,38 @@ import {
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import type { MediaAsset, Post } from "../types/domain";
-import { Avatar, CategoryBadge, formatRelativeKorean, ResilientImage } from "./ui";
+import { ProtectedImage } from "./ProtectedImage";
+import { ProtectedVideo, type ProtectedMediaUrlRefresher } from "./ProtectedVideo";
+import { Avatar, CategoryBadge, formatRelativeKorean } from "./ui";
 
-function MediaPreview({ media, title }: { media: MediaAsset[]; title: string }) {
+function MediaPreview({
+  media,
+  title,
+  refreshProtectedMediaUrl,
+}: {
+  media: MediaAsset[];
+  title: string;
+  refreshProtectedMediaUrl?: ProtectedMediaUrlRefresher;
+}) {
   if (!media.length) return null;
   const first = media[0];
   return (
     <div className={`post-card__media ${media.length > 1 ? "post-card__media--multiple" : ""}`}>
       {first.kind === "video" ? (
-        <video src={first.url} muted playsInline preload="metadata" aria-label={`${title} 영상 미리보기`} />
-      ) : (
-        <ResilientImage
+        <ProtectedVideo
           src={first.url}
+          storagePath={first.storagePath}
+          refreshUrl={refreshProtectedMediaUrl}
+          muted
+          playsInline
+          preload="metadata"
+          aria-label={`${title} 영상 미리보기`}
+        />
+      ) : (
+        <ProtectedImage
+          src={first.url}
+          storagePath={first.storagePath}
+          refreshUrl={refreshProtectedMediaUrl}
           alt={first.alt ?? title}
           fallbackLabel="게시글 이미지를 불러오지 못했어요"
           loading="lazy"
@@ -27,7 +47,15 @@ function MediaPreview({ media, title }: { media: MediaAsset[]; title: string }) 
   );
 }
 
-export function PostCard({ post, compact = false }: { post: Post; compact?: boolean }) {
+export function PostCard({
+  post,
+  compact = false,
+  refreshProtectedMediaUrl,
+}: {
+  post: Post;
+  compact?: boolean;
+  refreshProtectedMediaUrl?: ProtectedMediaUrlRefresher;
+}) {
   return (
     <article className={`post-card ${compact ? "post-card--compact" : ""}`}>
       <Link className="post-card__link" to={`/app/posts/${post.id}`} aria-label={`${post.title} 글 열기`}>
@@ -47,12 +75,16 @@ export function PostCard({ post, compact = false }: { post: Post; compact?: bool
           <h2>{post.title}</h2>
           <p>{post.body}</p>
         </div>
-        <MediaPreview media={post.media} title={post.title} />
-        <footer className="post-card__meta">
-          <span><Heart weight="regular" /> 공감 {post.reactionCount}</span>
-          <span><ChatCircle weight="regular" /> 댓글 {post.comments.length}</span>
-        </footer>
       </Link>
+      <MediaPreview
+        media={post.media}
+        title={post.title}
+        refreshProtectedMediaUrl={refreshProtectedMediaUrl}
+      />
+      <footer className="post-card__meta">
+        <span><Heart weight="regular" /> 공감 {post.reactionCount}</span>
+        <span><ChatCircle weight="regular" /> 댓글 {post.comments.length}</span>
+      </footer>
     </article>
   );
 }

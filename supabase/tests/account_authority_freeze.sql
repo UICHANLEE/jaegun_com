@@ -10,6 +10,21 @@ values
   ('f1000000-0000-4000-8000-000000000001', 'freeze-admin@example.com', '{"display_name":"동결 관리자"}'),
   ('f1000000-0000-4000-8000-000000000002', 'freeze-applicant@example.com', '{"display_name":"동결 신청자"}');
 
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source
+)
+select profile.id, document.document_key, document.version, true, 'admin_migration'
+from public.profiles as profile
+cross join public.consent_documents as document
+where profile.id in (
+    'f1000000-0000-4000-8000-000000000001',
+    'f1000000-0000-4000-8000-000000000002'
+  )
+  and document.required
+  and document.retired_at is null
+  and document.published_at <= pg_catalog.statement_timestamp()
+  and document.effective_at <= pg_catalog.statement_timestamp();
+
 update public.organizations
 set status = 'active'
 where slug = 'jaegun-bupyeong';

@@ -1,10 +1,23 @@
+import { FunctionRegion } from "@supabase/supabase-js";
 import type { AppMode } from "../types/domain";
-import { LEGAL_DOCUMENT_VERSION } from "./legalDocuments";
+import {
+  CONSENT_DOCUMENT_KEYS,
+  LEGAL_DOCUMENT_DATABASE_TITLE_BY_KEY_VERSION,
+  findLegalDocument,
+  type ConsentDocumentKey,
+} from "./legalDocuments";
+import {
+  assertAcceptedConsentVersions,
+  bundledCurrentConsentDocuments,
+  classifyRequiredConsentDocuments,
+  legalDocumentUrl,
+  type AcceptedConsentVersions,
+  type ConsentContract,
+  type RequiredConsentDocument,
+} from "./legalConsentContract";
 import { detachCurrentNativePushDevice, nativePushRegistrationAvailable } from "./nativePush";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
-export const SENSITIVE_AFFILIATION_CONSENT_VERSION = LEGAL_DOCUMENT_VERSION;
-export const COMMUNITY_POLICY_CONSENT_VERSION = LEGAL_DOCUMENT_VERSION;
 export const ACCOUNT_DELETION_CONFIRMATION = "계정 삭제";
 
 export const REPORT_TARGET_TYPES = ["post", "comment", "message", "profile"] as const;
@@ -42,7 +55,8 @@ export const REPORT_TARGET_LABELS: Readonly<Record<ReportTargetType, string>> = 
   profile: "사용자",
 };
 
-export interface VersionedConsent {
+export interface RequiredConsentAcceptance {
+  key: ConsentDocumentKey;
   version: string;
   acceptedAt: string | null;
 }
@@ -96,10 +110,10 @@ export interface AccountDeletionStatus {
 }
 
 export interface SafetyPrivacyState {
-  consents: {
-    sensitiveAffiliation: VersionedConsent;
-    communityPolicy: VersionedConsent;
-  };
+  requiredDocuments: RequiredConsentDocument[];
+  requiredConsents: RequiredConsentAcceptance[];
+  consentContract: ConsentContract;
+  consentGateOpen: boolean;
   directoryVisibility: DirectoryVisibility;
   notifications: NotificationPreferences;
   pushDevices: PushDeviceSummary[];
@@ -200,10 +214,10 @@ function booleanOr(value: unknown, fallback: boolean) {
 
 function cloneState(state: SafetyPrivacyState): SafetyPrivacyState {
   return {
-    consents: {
-      sensitiveAffiliation: { ...state.consents.sensitiveAffiliation },
-      communityPolicy: { ...state.consents.communityPolicy },
-    },
+    requiredDocuments: state.requiredDocuments.map((document) => ({ ...document })),
+    requiredConsents: state.requiredConsents.map((consent) => ({ ...consent })),
+    consentContract: state.consentContract,
+    consentGateOpen: state.consentGateOpen,
     directoryVisibility: { ...state.directoryVisibility },
     notifications: {
       ...state.notifications,
@@ -218,17 +232,16 @@ function cloneState(state: SafetyPrivacyState): SafetyPrivacyState {
 
 function createDefaultState(consented = false): SafetyPrivacyState {
   const acceptedAt = consented ? new Date().toISOString() : null;
+  const requiredDocuments = bundledCurrentConsentDocuments();
   return {
-    consents: {
-      sensitiveAffiliation: {
-        version: SENSITIVE_AFFILIATION_CONSENT_VERSION,
-        acceptedAt,
-      },
-      communityPolicy: {
-        version: COMMUNITY_POLICY_CONSENT_VERSION,
-        acceptedAt,
-      },
-    },
+    requiredDocuments,
+    requiredConsents: requiredDocuments.map((document) => ({
+      key: document.key,
+      version: document.version,
+      acceptedAt,
+    })),
+    consentContract: "independent-v2",
+    consentGateOpen: consented,
     directoryVisibility: {
       avatar: false,
       churchTitle: true,
@@ -304,31 +317,81 @@ function normalizeTime(value: unknown, fallback: string) {
   return typeof value === "string" && HH_MM_PATTERN.test(value) ? value : fallback;
 }
 
+function isConsentDocumentKey(value: unknown): value is ConsentDocumentKey {
+  return typeof value === "string" && CONSENT_DOCUMENT_KEYS.includes(value as ConsentDocumentKey);
+}
+
 function normalizeState(data: unknown): SafetyPrivacyState {
   const row = firstRecord(data);
-  if (!row) return createDefaultState(false);
+  if (!row) throw new Error("필수 동의 상태 응답이 비어 있습니다.");
 
   const currentDocuments = asRecord(row.current_documents) ?? asRecord(row.currentDocuments) ?? {};
-  const privacyDocument = asRecord(currentDocuments.privacy_policy) ?? asRecord(currentDocuments.privacyPolicy);
-  const communityDocument = asRecord(currentDocuments.community_guidelines) ?? asRecord(currentDocuments.communityGuidelines);
-  const consentRows = Array.isArray(row.consents) ? row.consents.flatMap((value) => {
+  const rawDocumentKeys = Object.keys(currentDocuments);
+  if (rawDocumentKeys.some((key) => !isConsentDocumentKey(key))) {
+    throw new Error("알 수 없는 필수 동의 문서가 반환되었습니다.");
+  }
+  const requiredDocuments = CONSENT_DOCUMENT_KEYS.flatMap((key): RequiredConsentDocument[] => {
+    const document = asRecord(currentDocuments[key]);
+    const version = stringOrNull(document?.version);
+    if (!document || !version || document.required !== true) return [];
+    const bundled = findLegalDocument(key, version);
+    if (!bundled) throw new Error("이 앱에서 확인할 수 없는 필수 동의 문서 버전입니다.");
+    const title = stringOrNull(document.title);
+    const documentUrl = stringOrNull(document.url ?? document.document_url);
+    if (title !== LEGAL_DOCUMENT_DATABASE_TITLE_BY_KEY_VERSION[`${key}@${version}`]
+      || documentUrl !== legalDocumentUrl(key, version)) {
+      throw new Error("필수 동의 문서 메타데이터가 배포된 본문과 일치하지 않습니다.");
+    }
+    return [{
+      key,
+      version,
+      title: bundled.title,
+      documentUrl,
+      required: true,
+    }];
+  });
+  if (rawDocumentKeys.length !== requiredDocuments.length) {
+    throw new Error("서버의 필수 동의 문서 구성이 안전한 출시 계약과 일치하지 않습니다.");
+  }
+  const consentContract = classifyRequiredConsentDocuments(requiredDocuments);
+  const rawConsentRows = Array.isArray(row.required_consents)
+    ? row.required_consents
+    : Array.isArray(row.requiredConsents)
+      ? row.requiredConsents
+      : Array.isArray(row.consents)
+        ? row.consents
+        : [];
+  const consentRows = rawConsentRows.flatMap((value) => {
     const consent = asRecord(value);
     return consent ? [consent] : [];
-  }) : [];
-  const findConsent = (key: string, version: string | null) => consentRows.find((consent) => (
-    consent.document_key === key
-    && (version === null || consent.document_version === version)
+  });
+  const findConsent = (key: ConsentDocumentKey, version: string) => consentRows.find((consent) => (
+    (consent.document_key === key || consent.key === key)
+    && (consent.document_version === version || consent.version === version)
     && consent.accepted === true
   ));
-  const privacyVersion = stringOrNull(privacyDocument?.version);
-  const communityVersion = stringOrNull(communityDocument?.version);
-  const privacyArrayConsent = findConsent("privacy_policy", privacyVersion);
-  const communityArrayConsent = findConsent("community_guidelines", communityVersion);
   const consentRow = asRecord(row.consents) ?? row;
   const sensitiveConsent = asRecord(consentRow.sensitive_affiliation)
     ?? asRecord(consentRow.sensitiveAffiliation);
   const policyConsent = asRecord(consentRow.community_policy)
     ?? asRecord(consentRow.communityPolicy);
+  const requiredConsents = requiredDocuments.map((document): RequiredConsentAcceptance => {
+    const arrayConsent = findConsent(document.key, document.version);
+    const legacyConsent = document.key === "privacy_policy"
+      ? sensitiveConsent
+      : document.key === "community_guidelines"
+        ? policyConsent
+        : null;
+    const legacyVersion = stringOrNull(legacyConsent?.version);
+    return {
+      key: document.key,
+      version: document.version,
+      acceptedAt: stringOrNull(arrayConsent?.recorded_at ?? arrayConsent?.accepted_at)
+        ?? (legacyVersion === document.version
+          ? stringOrNull(legacyConsent?.accepted_at ?? legacyConsent?.acceptedAt)
+          : null),
+    };
+  });
   const directoryRow = asRecord(row.directory_visibility)
     ?? asRecord(row.directoryVisibility)
     ?? asRecord(row.privacy_preferences)
@@ -360,30 +423,10 @@ function normalizeState(data: unknown): SafetyPrivacyState {
       : [];
 
   return {
-    consents: {
-      sensitiveAffiliation: {
-        version: privacyVersion
-          ?? stringOrNull(sensitiveConsent?.version)
-          ?? stringOrNull(row.sensitive_affiliation_consent_version)
-          ?? SENSITIVE_AFFILIATION_CONSENT_VERSION,
-        acceptedAt: stringOrNull(privacyArrayConsent?.recorded_at)
-          ?? stringOrNull(privacyArrayConsent?.accepted_at)
-          ?? stringOrNull(sensitiveConsent?.accepted_at)
-          ?? stringOrNull(sensitiveConsent?.acceptedAt)
-          ?? stringOrNull(row.sensitive_affiliation_accepted_at),
-      },
-      communityPolicy: {
-        version: communityVersion
-          ?? stringOrNull(policyConsent?.version)
-          ?? stringOrNull(row.community_policy_version)
-          ?? COMMUNITY_POLICY_CONSENT_VERSION,
-        acceptedAt: stringOrNull(communityArrayConsent?.recorded_at)
-          ?? stringOrNull(communityArrayConsent?.accepted_at)
-          ?? stringOrNull(policyConsent?.accepted_at)
-          ?? stringOrNull(policyConsent?.acceptedAt)
-          ?? stringOrNull(row.community_policy_accepted_at),
-      },
-    },
+    requiredDocuments,
+    requiredConsents,
+    consentContract,
+    consentGateOpen: row.consent_gate_open === true || row.consentGateOpen === true,
     directoryVisibility: {
       avatar: booleanOr(directoryRow.avatar, directoryRow.directory_visibility === "church_profile"),
       churchTitle: booleanOr(directoryRow.church_title ?? directoryRow.churchTitle, directoryRow.directory_visibility === "church_profile"),
@@ -451,9 +494,15 @@ function normalizeState(data: unknown): SafetyPrivacyState {
   };
 }
 
-async function callRpc(name: string, args: Record<string, unknown> | undefined, fallback: string) {
+async function callRpc(
+  name: string,
+  args: Record<string, unknown> | undefined,
+  fallback: string,
+  signal?: AbortSignal,
+) {
   if (!supabase) throw new Error("보안 설정 서비스에 연결하지 못했습니다.");
-  const { data, error } = await supabase.rpc(name, args);
+  const request = supabase.rpc(name, args);
+  const { data, error } = signal ? await request.abortSignal(signal) : await request;
   if (error) throw safeServiceError(error, fallback);
   return data;
 }
@@ -473,48 +522,83 @@ export function validateContentReport(input: ContentReportInput) {
   return null;
 }
 
-export async function loadSafetyPrivacyState(mode: AppMode, userId: string) {
+export async function loadSafetyPrivacyState(mode: AppMode, userId: string, signal?: AbortSignal) {
   const client = requireMode(mode, userId);
   if (!client) return cloneState(demoRecord(userId).state);
   const data = await callRpc(
     "get_my_safety_privacy_state",
     undefined,
     "보안 및 개인정보 설정을 불러오지 못했습니다.",
+    signal,
   );
   return normalizeState(data);
+}
+
+export function requiredConsentsAreCurrent(state: SafetyPrivacyState | null) {
+  if (!state?.consentGateOpen) return false;
+  try {
+    classifyRequiredConsentDocuments(state.requiredDocuments);
+  } catch {
+    return false;
+  }
+  if (state.requiredConsents.length !== state.requiredDocuments.length
+    || new Set(state.requiredConsents.map((consent) => consent.key)).size !== state.requiredConsents.length) {
+    return false;
+  }
+  return state.requiredDocuments.every((document) => state.requiredConsents.some((consent) => (
+    consent.key === document.key
+    && consent.version === document.version
+    && Boolean(consent.acceptedAt)
+  )));
 }
 
 export async function savePrivacyAndConsents(
   mode: AppMode,
   userId: string,
   input: {
-    acceptSensitiveAffiliation: boolean;
-    acceptCommunityPolicy: boolean;
+    requiredDocuments: RequiredConsentDocument[];
+    acceptedConsents: AcceptedConsentVersions;
     directoryVisibility: DirectoryVisibility;
   },
 ) {
-  if (!input.acceptSensitiveAffiliation || !input.acceptCommunityPolicy) {
-    throw new Error("서비스 이용에 필요한 필수 동의 두 항목을 확인해 주세요.");
-  }
+  assertAcceptedConsentVersions(input.requiredDocuments, input.acceptedConsents);
+  const contract = classifyRequiredConsentDocuments(input.requiredDocuments);
   const client = requireMode(mode, userId);
   const acceptedAt = new Date().toISOString();
   if (!client) {
     const record = demoRecord(userId);
-    record.state.consents = {
-      sensitiveAffiliation: { version: SENSITIVE_AFFILIATION_CONSENT_VERSION, acceptedAt },
-      communityPolicy: { version: COMMUNITY_POLICY_CONSENT_VERSION, acceptedAt },
-    };
+    record.state.requiredDocuments = input.requiredDocuments.map((document) => ({ ...document }));
+    record.state.requiredConsents = input.requiredDocuments.map((document) => ({
+      key: document.key,
+      version: document.version,
+      acceptedAt,
+    }));
+    record.state.consentContract = contract;
+    record.state.consentGateOpen = true;
     record.state.directoryVisibility = { ...input.directoryVisibility };
     return cloneState(record.state);
   }
-  await callRpc("save_my_privacy_preferences", {
-    p_sensitive_affiliation_consent_version: SENSITIVE_AFFILIATION_CONSENT_VERSION,
-    p_community_policy_version: COMMUNITY_POLICY_CONSENT_VERSION,
+  const visibilityArgs = {
     p_avatar_visible: input.directoryVisibility.avatar,
     p_church_title_visible: input.directoryVisibility.churchTitle,
     p_email_visible: input.directoryVisibility.email,
     p_bio_visible: input.directoryVisibility.bio,
-  }, "개인정보 설정을 저장하지 못했습니다.");
+  };
+  if (contract === "legacy-v1") {
+    await callRpc("save_my_privacy_preferences", {
+      p_sensitive_affiliation_consent_version: input.acceptedConsents.privacy_policy,
+      p_community_policy_version: input.acceptedConsents.community_guidelines,
+      ...visibilityArgs,
+    }, "개인정보 설정을 저장하지 못했습니다.");
+  } else {
+    await callRpc("save_my_privacy_preferences_v2", {
+      p_required_consents: Object.fromEntries(input.requiredDocuments.map((document) => [
+        document.key,
+        input.acceptedConsents[document.key],
+      ])),
+      ...visibilityArgs,
+    }, "개인정보 설정을 저장하지 못했습니다.");
+  }
   return loadSafetyPrivacyState(mode, userId);
 }
 
@@ -664,6 +748,7 @@ export async function requestAccountDeletion(
   }
   if ((password?.length ?? 0) > 512) throw new Error("현재 비밀번호를 확인해 주세요.");
   const { error } = await client.functions.invoke("request-account-deletion", {
+    region: FunctionRegion.UsEast1,
     body: {
       confirmation: ACCOUNT_DELETION_CONFIRMATION,
       reason: reason?.trim() || null,

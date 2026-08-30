@@ -48,6 +48,16 @@ import { detachCurrentNativePushDevice, nativePushRegistrationAvailable } from "
 import { getServiceYear, millisecondsUntilNextServiceYear } from "../serviceTime";
 import { executiveApprovalErrorMessage, getExecutiveApprovalIssue } from "../executiveApprovalPolicy";
 import { normalizeGovernanceAccess } from "./governance";
+import {
+  assertAcceptedConsentVersions,
+  buildSignupConsentMetadata,
+  consentSetFingerprint,
+  fetchActiveConsentDocuments,
+} from "./legalConsentContract";
+import {
+  loadSafetyPrivacyState,
+  requiredConsentsAreCurrent,
+} from "./safetyPrivacy";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
 
@@ -123,6 +133,7 @@ interface AppDataContextValue extends AppDataState {
   markNotificationsRead: () => Promise<void>;
   loadMorePosts: () => Promise<void>;
   ensurePost: (postId: string) => Promise<"loaded" | "not_found">;
+  refreshProtectedMediaUrl: (storagePath: string) => Promise<string | undefined>;
   refresh: () => Promise<void>;
 }
 
@@ -130,6 +141,14 @@ const AppDataContext = createContext<AppDataContextValue | null>(null);
 
 const REMOTE_LOAD_TIMEOUT_MS = 20_000;
 const SIGNED_URL_TIMEOUT_MS = 10_000;
+const SIGNED_URL_TTL_SECONDS = {
+  avatars: 60,
+  "community-media": 60,
+} as const;
+const SIGNED_URL_CACHE_TTL_MS = {
+  avatars: 45_000,
+  "community-media": 45_000,
+} as const;
 const RECOVERY_SESSION_KEY = "jaegun-password-recovery-v1";
 const RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000;
 const STORAGE_CLEANUP_STORAGE_KEY = "jaegun-storage-cleanup-v1";
@@ -275,6 +294,8 @@ function createEmptyState(mode: AppDataState["mode"], loading = false): AppDataS
     mode,
     loading,
     viewer: null,
+    requiredConsentDocuments: [],
+    consentGateOpen: mode === "demo" ? true : null,
     organizations: [],
     posts: [],
     applications: [],
@@ -312,10 +333,16 @@ function mapOrganizationDirectory(value: unknown): Organization[] {
   });
 }
 
-function createAuthState(previous: AppDataState, mode: AppDataState["mode"], loading = false): AppDataState {
+function createAuthState(
+  previous: AppDataState,
+  mode: AppDataState["mode"],
+  loading = false,
+  preservePublicDirectory = false,
+): AppDataState {
   return {
     ...createEmptyState(mode, loading),
-    organizations: previous.organizations,
+    organizations: preservePublicDirectory ? previous.organizations : [],
+    requiredConsentDocuments: previous.requiredConsentDocuments,
   };
 }
 
@@ -545,14 +572,11 @@ async function fetchAllOrganizationMemberships(organizationId?: string, signal?:
   const data: Array<Record<string, unknown>> = [];
 
   for (let from = 0; ; from += MEMBERS_PAGE_SIZE) {
-    const request = supabase
-      .from("organization_memberships")
-      .select("id, organization_id, user_id, role, church_title_code, status, joined_at");
-    const scopedRequest = organizationId ? request.eq("organization_id", organizationId) : request;
-    const pageRequest = scopedRequest
-      .order("joined_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + MEMBERS_PAGE_SIZE - 1);
+    const pageRequest = supabase.rpc("list_visible_organization_memberships", {
+      p_organization_id: organizationId ?? null,
+      p_limit: MEMBERS_PAGE_SIZE,
+      p_offset: from,
+    });
     const result = await (signal ? pageRequest.abortSignal(signal) : pageRequest);
     if (result.error) return { data, error: result.error };
     const page = rowsOf(result.data);
@@ -597,10 +621,7 @@ async function fetchProfilesByIds(profileIds: string[], signal?: AbortSignal) {
     chunks.push(profileIds.slice(index, index + PROFILE_ID_CHUNK_SIZE));
   }
   const results = await Promise.all(chunks.map((ids) => {
-    const request = client
-      .from("profiles")
-      .select("id, display_name, avatar_path, bio")
-      .in("id", ids);
+    const request = client.rpc("list_visible_profiles", { p_profile_ids: ids });
     return signal ? request.abortSignal(signal) : request;
   }));
   const firstError = results.map((result) => result.error).find(Boolean);
@@ -617,7 +638,7 @@ async function fetchAllMeetingMinutes(organizationId: string, signal?: AbortSign
   for (let from = 0; ; from += EXECUTIVE_OPERATIONS_PAGE_SIZE) {
     const pageRequest = supabase
       .from("meeting_minutes")
-      .select("id, organization_id, meeting_year, meeting_date, title, body, status, author_name, updated_at")
+      .select("id, organization_id, meeting_year, meeting_date, title, body, status, updated_at")
       .eq("organization_id", organizationId)
       .order("meeting_date", { ascending: false })
       .order("id", { ascending: true })
@@ -639,7 +660,7 @@ async function fetchAllLedgerEntries(organizationId: string, signal?: AbortSigna
   for (let from = 0; ; from += EXECUTIVE_OPERATIONS_PAGE_SIZE) {
     const pageRequest = supabase
       .from("ledger_entries")
-      .select("id, organization_id, fiscal_year, entry_date, entry_type, category, description, amount, memo, author_name, updated_at")
+      .select("id, organization_id, fiscal_year, entry_date, entry_type, category, description, amount, memo, updated_at")
       .eq("organization_id", organizationId)
       .order("entry_date", { ascending: false })
       .order("id", { ascending: true })
@@ -674,28 +695,75 @@ function canWriteLedger(viewer: ViewerContext | null): boolean {
   return viewer.membership.executiveOfficeCodes.some((code) => code === "president" || code === "treasurer");
 }
 
+interface SignedUrlRequestEntry {
+  generation: number;
+  promise: Promise<string | undefined>;
+}
+
 const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
-const signedUrlRequestCache = new Map<string, Promise<string | undefined>>();
+const signedUrlRequestCache = new Map<string, SignedUrlRequestEntry>();
+const signedUrlKeyGenerations = new Map<string, number>();
+let signedUrlCacheGeneration = 0;
+
+function clearSignedUrlCaches() {
+  signedUrlCacheGeneration += 1;
+  signedUrlCache.clear();
+  signedUrlRequestCache.clear();
+  signedUrlKeyGenerations.clear();
+}
 
 async function getCachedSignedUrl(
   bucket: "avatars" | "community-media",
   path: string,
   isRequestCurrent: () => boolean = () => true,
+  forceRefresh = false,
 ) {
   const key = `${bucket}:${path}`;
-  const cached = signedUrlCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.url;
+  const cacheGeneration = signedUrlCacheGeneration;
+  const readFreshCache = () => {
+    const cached = signedUrlCache.get(key);
+    return cached && cached.expiresAt > Date.now() ? cached.url : undefined;
+  };
+  if (!forceRefresh) {
+    const cachedUrl = readFreshCache();
+    if (cachedUrl) return cachedUrl;
+  } else {
+    signedUrlCache.delete(key);
+  }
   if (!supabase) return undefined;
   const client = supabase;
-  const existingRequest = signedUrlRequestCache.get(key);
+  const resolveLatestRequest = async (supersededRequest?: Promise<string | undefined>) => {
+    if (!isRequestCurrent() || cacheGeneration !== signedUrlCacheGeneration) return undefined;
+    const latestGeneration = signedUrlKeyGenerations.get(key) ?? 0;
+    const latestRequest = signedUrlRequestCache.get(key);
+    if (latestRequest
+      && latestRequest.generation === latestGeneration
+      && latestRequest.promise !== supersededRequest) {
+      const latestUrl = await latestRequest.promise;
+      if (latestUrl
+        && isRequestCurrent()
+        && cacheGeneration === signedUrlCacheGeneration
+        && signedUrlKeyGenerations.get(key) === latestRequest.generation) return latestUrl;
+    }
+    return isRequestCurrent() && cacheGeneration === signedUrlCacheGeneration
+      ? readFreshCache()
+      : undefined;
+  };
+  const existingRequest = !forceRefresh ? signedUrlRequestCache.get(key) : undefined;
   if (existingRequest) {
-    const url = await existingRequest;
-    return isRequestCurrent() ? url : undefined;
+    const url = await existingRequest.promise;
+    if (url
+      && isRequestCurrent()
+      && cacheGeneration === signedUrlCacheGeneration
+      && signedUrlKeyGenerations.get(key) === existingRequest.generation) return url;
+    return resolveLatestRequest(existingRequest.promise);
   }
+  const requestGeneration = (signedUrlKeyGenerations.get(key) ?? 0) + 1;
+  signedUrlKeyGenerations.set(key, requestGeneration);
   const request = (async () => {
     let timeoutId: number | undefined;
     try {
-      const storageRequest = client.storage.from(bucket).createSignedUrl(path, 3600)
+      const storageRequest = client.storage.from(bucket).createSignedUrl(path, SIGNED_URL_TTL_SECONDS[bucket])
         .then(({ data, error: signedUrlError }) => signedUrlError ? undefined : data?.signedUrl)
         .catch(() => undefined);
       return await Promise.race([
@@ -708,14 +776,18 @@ async function getCachedSignedUrl(
       window.clearTimeout(timeoutId);
     }
   })();
-  signedUrlRequestCache.set(key, request);
+  const requestEntry = { generation: requestGeneration, promise: request };
+  signedUrlRequestCache.set(key, requestEntry);
   try {
     const url = await request;
-    if (!url || !isRequestCurrent()) return undefined;
-    signedUrlCache.set(key, { url, expiresAt: Date.now() + 55 * 60 * 1000 });
+    if (!url || !isRequestCurrent() || cacheGeneration !== signedUrlCacheGeneration) return undefined;
+    if (signedUrlKeyGenerations.get(key) !== requestGeneration) {
+      return resolveLatestRequest(request);
+    }
+    signedUrlCache.set(key, { url, expiresAt: Date.now() + SIGNED_URL_CACHE_TTL_MS[bucket] });
     return url;
   } finally {
-    if (signedUrlRequestCache.get(key) === request) signedUrlRequestCache.delete(key);
+    if (signedUrlRequestCache.get(key) === requestEntry) signedUrlRequestCache.delete(key);
   }
 }
 
@@ -781,6 +853,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const [serviceYear, setServiceYear] = useState(currentServiceYear);
   const [serverRolloverDeadline, setServerRolloverDeadline] = useState<number | null>(null);
   const [governanceRefreshDeadline, setGovernanceRefreshDeadline] = useState<number | null>(null);
+  const [realtimeSubscriptionEpoch, setRealtimeSubscriptionEpoch] = useState(0);
   const [passwordRecoveryReady, setPasswordRecoveryReady] = useState(false);
   const serverClockRef = useRef({
     unixMs: Date.now(),
@@ -1134,8 +1207,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     conversationMessageLoadGenerationRef.current.clear();
     conversationStateGenerationRef.current.clear();
     conversationSummaryLoadGenerationRef.current += 1;
-    signedUrlCache.clear();
-    signedUrlRequestCache.clear();
+    clearSignedUrlCaches();
     setHasMorePosts(false);
     setServerRolloverDeadline(null);
     return {
@@ -1151,6 +1223,31 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     && stateRef.current.mode === "supabase"
     && stateRef.current.viewer?.profile.id === userId,
   []);
+
+  const refreshProtectedMediaUrl = useCallback(async (storagePath: string) => {
+    const normalizedPath = storagePath.trim();
+    const currentState = stateRef.current;
+    const sessionEpoch = remoteSessionEpochRef.current;
+    const userId = activeRemoteUserIdRef.current;
+    if (!supabase
+      || !normalizedPath
+      || normalizedPath !== storagePath
+      || normalizedPath.length > 1_024
+      || /[\u0000-\u001f\u007f]/u.test(normalizedPath)
+      || !userId
+      || remoteLoadsBlockedRef.current
+      || currentState.mode !== "supabase"
+      || currentState.consentGateOpen !== true
+      || currentState.viewer?.profile.id !== userId) return undefined;
+    const isRequestCurrent = () =>
+      remoteSessionEpochRef.current === sessionEpoch
+      && activeRemoteUserIdRef.current === userId
+      && !remoteLoadsBlockedRef.current
+      && stateRef.current.mode === "supabase"
+      && stateRef.current.consentGateOpen === true
+      && stateRef.current.viewer?.profile.id === userId;
+    return getCachedSignedUrl("community-media", normalizedPath, isRequestCurrent, true);
+  }, []);
 
   const loadRemote = useCallback(async () => {
     if (!supabase || remoteLoadsBlockedRef.current || stateRef.current.mode !== "supabase") return;
@@ -1208,22 +1305,56 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         replaceState(createAuthState(stateRef.current, "supabase", Boolean(user)));
       }
       if (!user) {
-        const organizationsResult = await supabase
-          .from("public_organization_directory")
-          .select(PUBLIC_ORGANIZATION_DIRECTORY_FIELDS)
-          .order("display_name")
-          .abortSignal(abortController.signal);
+        const [organizationsResult, requiredConsentDocuments] = await Promise.all([
+          supabase
+            .from("public_organization_directory")
+            .select(PUBLIC_ORGANIZATION_DIRECTORY_FIELDS)
+            .order("display_name")
+            .abortSignal(abortController.signal),
+          fetchActiveConsentDocuments(abortController.signal),
+        ]);
         if (organizationsResult.error) throw organizationsResult.error;
         if (!isRequestCurrent()) return;
         replaceState({
           ...createEmptyState("supabase", false),
           organizations: mapOrganizationDirectory(organizationsResult.data),
+          requiredConsentDocuments,
         });
         setGovernanceRefreshDeadline(null);
         setError(null);
         return;
       }
       if (!isRequestCurrent()) return;
+      const [requiredConsentDocuments, safetyPrivacyState] = await Promise.all([
+        fetchActiveConsentDocuments(abortController.signal),
+        loadSafetyPrivacyState("supabase", user.id, abortController.signal),
+      ]);
+      if (!isRequestCurrent()) return;
+      if (consentSetFingerprint(requiredConsentDocuments) !== consentSetFingerprint(safetyPrivacyState.requiredDocuments)) {
+        throw new Error("필수 동의 문서가 변경되었습니다. 다시 확인해 주세요.");
+      }
+      const consentGateOpen = requiredConsentsAreCurrent(safetyPrivacyState);
+      if (!consentGateOpen) {
+        clearSignedUrlCaches();
+        replaceState({
+          ...createEmptyState("supabase", false),
+          viewer: {
+            profile: {
+              id: user.id,
+              displayName: String(user.user_metadata.display_name ?? user.email?.split("@")[0] ?? "사용자"),
+              email: user.email ?? "",
+              globalRole: "user",
+            },
+          },
+          requiredConsentDocuments,
+          consentGateOpen: false,
+        });
+        setGovernanceRefreshDeadline(null);
+        setServerRolloverDeadline(null);
+        setHasMorePosts(false);
+        setError(null);
+        return;
+      }
       const postLimit = postLimitRef.current;
       void flushPostCleanupQueues(user.id);
       void flushMessageReconciliations(user.id);
@@ -1427,6 +1558,8 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     const nextState: AppDataState = {
       mode: "supabase",
       loading: false,
+      requiredConsentDocuments,
+      consentGateOpen: true,
       viewer: {
         profile,
         membership: membershipRow ? {
@@ -1466,6 +1599,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
             id: String(media.id),
             kind: media.kind === "video" ? "video" as const : "image" as const,
             url: String(media.signed_url),
+            storagePath: String(media.storage_path),
             alt: media.alt_text ? String(media.alt_text) : String(row.title),
             mimeType: String(media.mime_type),
             byteSize: Number(media.byte_size),
@@ -1509,7 +1643,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         title: String(row.title),
         body: String(row.body),
         status: row.status === "published" ? "published" : "draft",
-        authorName: String(row.author_name),
+        authorName: "운영진",
         updatedAt: String(row.updated_at),
       })),
       ledgerEntries: ledgerEntryRows.map((row): LedgerEntry => ({
@@ -1522,7 +1656,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         description: String(row.description),
         amount: Number(row.amount),
         memo: row.memo ? String(row.memo) : undefined,
-        authorName: String(row.author_name),
+        authorName: "운영진",
         updatedAt: String(row.updated_at),
       })),
     };
@@ -1656,8 +1790,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       window.clearTimeout(authLoadTimer);
       remoteLoadGenerationRef.current += 1;
       remoteSessionEpochRef.current += 1;
-      signedUrlCache.clear();
-      signedUrlRequestCache.clear();
+      clearSignedUrlCaches();
       data.subscription.unsubscribe();
     };
   }, [clearPasswordRecovery, invalidateRemoteWork, loadRemote, replaceState]);
@@ -1802,11 +1935,11 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     // Keep signed-out routes mounted while Supabase validates credentials.
     // The auth page owns its submitting state; toggling the global loader here
     // unmounts the form and drops the provider error returned to its caller.
-    replaceState(createAuthState(stateRef.current, "supabase", false));
+    replaceState(createAuthState(stateRef.current, "supabase", false, true));
     setError(null);
     const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
     if (authError) {
-      replaceState(createAuthState(stateRef.current, "supabase", false));
+      replaceState(createAuthState(stateRef.current, "supabase", false, true));
       throw authError;
     }
     // onAuthStateChange owns the remote refresh so a successful login is not
@@ -1818,8 +1951,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     email,
     password,
     organizationId,
-    acceptedPrivacyVersion,
-    acceptedCommunityVersion,
+    acceptedConsents,
   }: SignUpInput) => {
     if (!supabase) {
       throw new Error("실서비스 회원가입이 아직 연결되지 않았습니다. 아래에서 신규 가입자 흐름을 미리볼 수 있어요.");
@@ -1833,13 +1965,21 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     if (!selectedOrganization) {
       throw new Error("선택한 교회를 확인하지 못했습니다. 노회와 교회를 다시 선택해 주세요.");
     }
+    assertAcceptedConsentVersions(stateRef.current.requiredConsentDocuments, acceptedConsents);
+    const currentConsentDocuments = await fetchActiveConsentDocuments();
+    if (consentSetFingerprint(currentConsentDocuments)
+      !== consentSetFingerprint(stateRef.current.requiredConsentDocuments)) {
+      throw new Error("필수 동의 문서가 변경되었습니다. 새 내용을 확인해 주세요.");
+    }
+    assertAcceptedConsentVersions(currentConsentDocuments, acceptedConsents);
+    const consentMetadata = buildSignupConsentMetadata(currentConsentDocuments, acceptedConsents);
     clearPasswordRecovery();
     remoteLoadsBlockedRef.current = false;
     invalidateRemoteWork(null);
     // Keep the signup form mounted so delivery/provider failures remain visible.
     // A session-bearing signup is moved into the global loading state by the
     // onAuthStateChange handler below.
-    replaceState(createAuthState(stateRef.current, "supabase", false));
+    replaceState(createAuthState(stateRef.current, "supabase", false, true));
     setError(null);
     const { data, error: authError } = await supabase.auth.signUp({
       email,
@@ -1848,18 +1988,15 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         data: {
           display_name: displayName,
           signup_organization_id: selectedOrganization.id,
-          accepted_privacy: true,
-          accepted_privacy_version: acceptedPrivacyVersion,
-          accepted_community: true,
-          accepted_community_version: acceptedCommunityVersion,
+          ...consentMetadata,
         },
       },
     });
     if (authError) {
-      replaceState(createAuthState(stateRef.current, "supabase", false));
+      replaceState(createAuthState(stateRef.current, "supabase", false, true));
       throw authError;
     }
-    if (!data.session) replaceState(createAuthState(stateRef.current, "supabase", false));
+    if (!data.session) replaceState(createAuthState(stateRef.current, "supabase", false, true));
     // A session-bearing signup is refreshed by onAuthStateChange.
   }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
 
@@ -1917,6 +2054,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       stateRef.current,
       isSupabaseConfigured ? "supabase" : "demo",
       false,
+      true,
     ));
     setError(null);
     const operation = (async () => {
@@ -2254,6 +2392,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
             id: String(mediaRow.id),
             kind: uploaded.kind,
             url: uploaded.url,
+            storagePath: uploaded.path,
             name: file.name,
             mimeType: uploaded.mimeType,
             byteSize: uploaded.byteSize,
@@ -2468,6 +2607,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         id: String(row.id),
         kind: row.kind === "video" ? "video" as const : "image" as const,
         url,
+        storagePath: String(row.storage_path),
         alt: row.alt_text ? String(row.alt_text) : String(postRow.title),
         mimeType: String(row.mime_type),
         byteSize: Number(row.byte_size),
@@ -2625,6 +2765,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           id: String(row.id),
           kind: row.kind === "video" ? "video" : "image",
           url: mediaUrl,
+          storagePath: String(row.media_path),
           name: rowOf(row.media_metadata)?.name ? String(rowOf(row.media_metadata)?.name) : undefined,
         }] : [],
       };
@@ -2829,7 +2970,19 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           messagesByConversation: {
             ...previous.messagesByConversation,
             [conversationId]: (previous.messagesByConversation[conversationId] ?? []).map((item) =>
-              item.id === message.id ? { ...item, status: "sent" } : item,
+              item.id === message.id ? {
+                ...item,
+                status: "sent",
+                media: uploadedFiles.map(({ file, uploaded, nonce }) => ({
+                  id: nonce,
+                  kind: uploaded.kind,
+                  url: uploaded.url,
+                  storagePath: uploaded.path,
+                  name: file.name,
+                  mimeType: uploaded.mimeType,
+                  byteSize: uploaded.byteSize,
+                })),
+              } : item,
             ),
           },
         }));
@@ -2950,7 +3103,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
 
   const realtimeViewerId = state.viewer?.profile.id;
   useEffect(() => {
-    if (!supabase || state.mode !== "supabase" || !realtimeViewerId) return;
+    if (!supabase
+      || state.mode !== "supabase"
+      || state.consentGateOpen !== true
+      || !realtimeViewerId) return;
     const realtimeClient = supabase;
     const realtimeSessionEpoch = remoteSessionEpochRef.current;
     let cancelled = false;
@@ -2970,6 +3126,29 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       aggregateTimer = window.setTimeout(() => {
         void loadRemote().catch(reportRealtimeError);
       }, 350);
+    };
+    const refreshForConsentDocumentChange = () => {
+      window.clearTimeout(aggregateTimer);
+      window.clearTimeout(conversationTimer);
+      window.clearTimeout(notificationTimer);
+      pendingConversationIds.clear();
+      invalidateRemoteWork(realtimeViewerId);
+      const current = stateRef.current;
+      const profile = current.viewer?.profile;
+      replaceState({
+        ...createEmptyState("supabase", true),
+        viewer: profile ? {
+          profile: {
+            id: profile.id,
+            displayName: profile.displayName,
+            email: profile.email,
+            globalRole: "user",
+          },
+        } : null,
+        requiredConsentDocuments: current.requiredConsentDocuments,
+      });
+      setRealtimeSubscriptionEpoch((currentEpoch) => currentEpoch + 1);
+      void loadRemote().catch(reportRealtimeError);
     };
     const scheduleNotificationRefresh = () => {
       window.clearTimeout(notificationTimer);
@@ -2991,26 +3170,28 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     };
     const channel = realtimeClient
       .channel(`jaegun-live-${realtimeViewerId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "consent_documents", select: ["document_key", "version"] }, refreshForConsentDocumentChange)
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages", select: ["id", "conversation_id"] }, (payload) => {
         const changed = rowOf(payload.new) ?? rowOf(payload.old);
         scheduleConversationRefresh(changed?.conversation_id ? String(changed.conversation_id) : undefined);
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_reads" }, () => scheduleConversationRefresh())
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => scheduleConversationRefresh())
-      .on("postgres_changes", { event: "*", schema: "public", table: "notifications" }, (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "conversation_reads", select: ["conversation_id"] }, () => scheduleConversationRefresh())
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "conversation_reads", select: ["conversation_id"] }, () => scheduleConversationRefresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversations", select: ["id"] }, () => scheduleConversationRefresh())
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", select: ["id", "entity_type"] }, (payload) => {
         scheduleNotificationRefresh();
         const changed = rowOf(payload.new) ?? rowOf(payload.old);
         if (changed?.entity_type === "governance_scope" || changed?.entity_type === "governance_delegation") {
           scheduleAggregateRefresh();
         }
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "membership_applications" }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "organization_memberships" }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "executive_office_assignments" }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "meeting_minutes" }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "ledger_entries" }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "membership_applications", select: ["id"] }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "organization_memberships", select: ["id"] }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "executive_office_assignments", select: ["id"] }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "meeting_minutes", select: ["id"] }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "ledger_entries", select: ["id"] }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "posts", select: ["id"] }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "comments", select: ["id"] }, scheduleAggregateRefresh)
       .subscribe();
     return () => {
       cancelled = true;
@@ -3019,7 +3200,18 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       window.clearTimeout(notificationTimer);
       void realtimeClient.removeChannel(channel);
     };
-  }, [loadConversationMessages, loadRemote, realtimeViewerId, refreshConversationSummaries, refreshNotifications, state.mode]);
+  }, [
+    invalidateRemoteWork,
+    loadConversationMessages,
+    loadRemote,
+    realtimeSubscriptionEpoch,
+    realtimeViewerId,
+    refreshConversationSummaries,
+    refreshNotifications,
+    replaceState,
+    state.consentGateOpen,
+    state.mode,
+  ]);
 
   const reviewApplication = useCallback(async (
     applicationId: string,
@@ -3462,6 +3654,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     markNotificationsRead,
     loadMorePosts,
     ensurePost,
+    refreshProtectedMediaUrl,
     refresh: loadRemote,
   }), [
     addComment,
@@ -3481,6 +3674,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     passwordRecoveryReady,
     requestPasswordReset,
     requestMembership,
+    refreshProtectedMediaUrl,
     reviewApplication,
     saveLedgerEntry,
     saveMeetingMinute,

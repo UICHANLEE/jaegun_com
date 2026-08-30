@@ -158,12 +158,17 @@ describe("direct private media upload", () => {
   });
 
   it.each([
-    ["post", "community-media", [ORGANIZATION_ID, "posts", TARGET_ID]],
-    ["message", "community-media", [ORGANIZATION_ID, "messages", TARGET_ID]],
-    ["application_evidence", "community-media", [ORGANIZATION_ID, "applications", TARGET_ID]],
-    ["organization_hero", "community-media", [ORGANIZATION_ID, "organization"]],
-    ["avatar", "avatars", [USER_ID]],
-  ] as const)("uploads %s directly to its final private path", async (purpose, bucket, parentSegments) => {
+    ["post", "community-media", [ORGANIZATION_ID, "posts", TARGET_ID], 60],
+    ["message", "community-media", [ORGANIZATION_ID, "messages", TARGET_ID], 60],
+    ["application_evidence", "community-media", [ORGANIZATION_ID, "applications", TARGET_ID], 60],
+    ["organization_hero", "community-media", [ORGANIZATION_ID, "organization"], 60],
+    ["avatar", "avatars", [USER_ID], 60],
+  ] as const)("uploads %s directly to its final private path", async (
+    purpose,
+    bucket,
+    parentSegments,
+    previewTtlSeconds,
+  ) => {
     const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
     const onObjectPathCreated = vi.fn();
     const progress = vi.fn();
@@ -189,7 +194,7 @@ describe("direct private media upload", () => {
       file,
       { contentType: "image/jpeg", upsert: false },
     );
-    expect(mediaMocks.calls.createSignedUrl).toHaveBeenLastCalledWith(path, 3_600);
+    expect(mediaMocks.calls.createSignedUrl).toHaveBeenLastCalledWith(path, previewTtlSeconds);
     expect(mediaMocks.calls.storageFrom).toHaveBeenNthCalledWith(
       mediaMocks.calls.storageFrom.mock.calls.length - 1,
       bucket,

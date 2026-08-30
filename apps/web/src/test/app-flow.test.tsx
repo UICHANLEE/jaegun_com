@@ -43,14 +43,12 @@ describe("primary service journeys", () => {
     fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "different123" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ }));
-    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+    fireEvent.submit(screen.getByRole("button", { name: "계정 만들기" }).closest("form")!);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 서로 일치하지 않습니다");
   });
 
-  it("requires separate sensitive-affiliation and community-policy consent before signup", async () => {
+  it("requires every active independent consent before signup", async () => {
     renderApp(["/auth"]);
     fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
@@ -63,9 +61,16 @@ describe("primary service journeys", () => {
     const submit = screen.getByRole("button", { name: "계정 만들기" });
     fireEvent.submit(submit.closest("form")!);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("필수 개인정보 처리와 공동체 이용규칙에 동의해 주세요");
-    expect(screen.getByRole("checkbox", { name: /개인정보·민감정보 처리 동의/ })).toBeRequired();
-    expect(screen.getByRole("checkbox", { name: /이용약관·공동체 이용규칙 동의/ })).toBeRequired();
+    expect(await screen.findByRole("alert")).toHaveTextContent("현재 필수 동의 문서를 각각 확인하고 동의해 주세요");
+    for (const name of [
+      /개인정보 수집·이용 동의/,
+      /종교 관련 민감정보 처리 동의/,
+      /개인정보 국외 이전 동의/,
+      /이용약관 동의 및 만 14세 이상 확인/,
+      /공동체 운영정책 동의/,
+    ]) {
+      expect(screen.getByRole("checkbox", { name })).toBeRequired();
+    }
   });
 
   it("filters signup churches by presbytery and clears an invalid church selection", async () => {

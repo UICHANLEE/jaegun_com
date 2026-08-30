@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_catalog;
 
-select plan(56);
+select no_plan();
 
 select has_table('public', 'events', 'events are first-class records separate from posts');
 select has_table('public', 'event_occurrences', 'finite generated occurrences exist');
@@ -21,6 +21,18 @@ values
   ('11000000-0000-4000-8000-000000000006', 'event-wait-two@example.com', '{"display_name":"대기회원2"}'),
   ('11000000-0000-4000-8000-000000000007', 'event-outsider@example.com', '{"display_name":"다른교회회원"}'),
   ('11000000-0000-4000-8000-000000000008', 'event-muted@example.com', '{"display_name":"일정알림끔"}');
+
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source
+)
+select profile.id, document.document_key, document.version, true, 'admin_migration'
+from public.profiles as profile
+cross join public.consent_documents as document
+where profile.id::text like '11000000-0000-4000-8000-00000000000%'
+  and document.required
+  and document.retired_at is null
+  and document.published_at <= pg_catalog.statement_timestamp()
+  and document.effective_at <= pg_catalog.statement_timestamp();
 
 insert into public.platform_admins (user_id, note)
 values ('11000000-0000-4000-8000-000000000001', 'event calendar pgTAP');
@@ -157,8 +169,8 @@ select throws_ok(
     current_setting('test.event_start')::timestamptz + interval '1 hour',
     'none'
   ),
-  '42501',
-  'event_management_forbidden',
+  'P0002',
+  'event_save_not_found_or_forbidden',
   'a presbytery president cannot write a child church event'
 );
 
@@ -176,8 +188,8 @@ select throws_ok(
     current_setting('test.event_start')::timestamptz + interval '1 hour',
     'none'
   ),
-  '42501',
-  'event_management_forbidden',
+  'P0002',
+  'event_save_not_found_or_forbidden',
   'an ordinary member cannot create events'
 );
 select is(
@@ -343,6 +355,17 @@ select is(
   public.cancel_event('12000000-0000-4000-8000-000000000004', '14000000-0000-4000-8000-000000000001', '장소 사정으로 취소') ->> 'status',
   'cancelled',
   'cancellation retry is idempotent'
+);
+select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal1"}', true);
+select throws_ok(
+  $$select public.cancel_event(
+    '12000000-0000-4000-8000-000000000004',
+    '14000000-0000-4000-8000-000000000001',
+    '장소 사정으로 취소'
+  )$$,
+  '42501',
+  'aal2_required:event_cancel',
+  'cancellation replay revalidates AAL2 before returning a cached result'
 );
 reset role;
 select is((select revision from public.events where id = '12000000-0000-4000-8000-000000000004'), 2, 'cancellation increments the event revision once');
@@ -611,6 +634,308 @@ select ok(
     'EXECUTE'
   ),
   'only service_role has EXECUTE privilege on the dispatcher'
+);
+
+-- Target-consent boundary: RSVP rows are retained but excluded from direct
+-- reads, capacity, aggregates, wait-list position, and promotion until the
+-- target records the current exact consent set again.
+reset role;
+select set_config('request.jwt.claim.sub', '11000000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select lives_ok(
+  format(
+    'select public.save_event(%L, true, %L, %L, null, %L, %L, %L, 1, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    '12000000-0000-4000-8000-000000000009',
+    current_setting('test.church_scope'),
+    '동의 경계 정원 테스트',
+    '소그룹실',
+    current_setting('test.event_start')::timestamptz + interval '4 days',
+    current_setting('test.event_start')::timestamptz + interval '4 days 1 hour',
+    'none'
+  ),
+  'target-consent aggregate fixture event is created while the manager is authorized'
+);
+reset role;
+select set_config('test.capacity_occurrence', (
+  select id::text
+  from public.event_occurrences
+  where event_id = '12000000-0000-4000-8000-000000000009'
+), true);
+insert into public.event_rsvps (
+  occurrence_id, user_id, response, responded_at
+)
+values
+  (
+    current_setting('test.capacity_occurrence')::uuid,
+    '11000000-0000-4000-8000-000000000005',
+    'yes',
+    pg_catalog.clock_timestamp() - interval '2 minutes'
+  ),
+  (
+    current_setting('test.capacity_occurrence')::uuid,
+    '11000000-0000-4000-8000-000000000006',
+    'waitlist',
+    pg_catalog.clock_timestamp() - interval '1 minute'
+  );
+insert into public.user_consents (
+  user_id, document_key, document_version, accepted, source, withdrawn_at
+)
+values
+  (
+    '11000000-0000-4000-8000-000000000005',
+    'privacy_policy',
+    '2026-08-30',
+    false,
+    'app',
+    pg_catalog.clock_timestamp()
+  ),
+  (
+    '11000000-0000-4000-8000-000000000006',
+    'privacy_policy',
+    '2026-08-30',
+    false,
+    'app',
+    pg_catalog.clock_timestamp()
+  );
+select is(
+  (
+    select count(*)
+    from public.event_rsvps
+    where occurrence_id = current_setting('test.capacity_occurrence')::uuid
+      and user_id in (
+        '11000000-0000-4000-8000-000000000005',
+        '11000000-0000-4000-8000-000000000006'
+      )
+  ),
+  2::bigint,
+  'withdrawal preserves both raw RSVP rows for later re-consent'
+);
+
+select set_config('request.jwt.claim.sub', '11000000-0000-4000-8000-000000000004', true);
+select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-000000000004","role":"authenticated","aal":"aal1"}', true);
+set local role authenticated;
+select ok(
+  not pg_catalog.has_table_privilege(
+    'authenticated',
+    'public.event_rsvps',
+    'select'
+  ),
+  'authenticated users have no direct REST RSVP table read surface'
+);
+select ok(
+  (public.get_event_occurrence(
+    current_setting('test.capacity_occurrence')::uuid
+  ) ->> 'yes_count')::integer = 0
+  and (public.get_event_occurrence(
+    current_setting('test.capacity_occurrence')::uuid
+  ) ->> 'waitlist_count')::integer = 0,
+  'event detail excludes non-current yes and wait-list targets from aggregates'
+);
+select ok(
+  exists (
+    select 1
+    from public.list_event_occurrences(
+      statement_timestamp(),
+      statement_timestamp() + interval '90 days',
+      current_setting('test.church_scope')::uuid,
+      100
+    ) as occurrence
+    where occurrence.occurrence_id = current_setting('test.capacity_occurrence')::uuid
+      and occurrence.yes_count = 0
+      and occurrence.waitlist_count = 0
+  ),
+  'event list excludes non-current RSVP targets from aggregates'
+);
+select is(
+  public.respond_to_event(
+    current_setting('test.capacity_occurrence')::uuid,
+    'yes',
+    '13000000-0000-4000-8000-000000000016'
+  ) ->> 'response',
+  'yes',
+  'a non-current yes RSVP does not consume capacity'
+);
+select is(
+  public.respond_to_event(
+    current_setting('test.capacity_occurrence')::uuid,
+    'no',
+    '13000000-0000-4000-8000-000000000017'
+  ) ->> 'response',
+  'no',
+  'the current member can release the newly acquired seat'
+);
+reset role;
+select is(
+  (
+    select response
+    from public.event_rsvps
+    where occurrence_id = current_setting('test.capacity_occurrence')::uuid
+      and user_id = '11000000-0000-4000-8000-000000000006'
+  ),
+  'waitlist',
+  'seat release does not promote a non-current wait-list target'
+);
+select ok(
+  not exists (
+    select 1
+    from public.notifications
+    where user_id = '11000000-0000-4000-8000-000000000006'
+      and entity_type = 'event_occurrence'
+      and entity_id = current_setting('test.capacity_occurrence')::uuid
+  ),
+  'non-current wait-list target receives no promotion notification'
+);
+
+-- Operation ledgers are not authorization tokens. Once exact-scope access is
+-- revoked, known operation IDs cannot return cached cancellation payloads or
+-- freshly recomputed RSVP aggregates.
+reset role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+update public.organization_memberships
+set status = 'revoked',
+    ended_at = pg_catalog.clock_timestamp()
+where user_id in (
+  '11000000-0000-4000-8000-000000000002',
+  '11000000-0000-4000-8000-000000000004'
+)
+  and organization_id = (
+    select id from public.organizations where slug = 'jaegun-bupyeong'
+  );
+
+select set_config('request.jwt.claim.sub', '11000000-0000-4000-8000-000000000004', true);
+select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-000000000004","role":"authenticated","aal":"aal1"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select public.respond_to_event(
+    current_setting('test.capacity_occurrence')::uuid,
+    'yes',
+    '13000000-0000-4000-8000-000000000016'
+  )$$,
+  'P0002',
+  'event_occurrence_not_found_or_forbidden',
+  'RSVP replay revalidates the current event scope before returning aggregates'
+);
+select throws_ok(
+  $$select public.respond_to_event(
+    '15000000-0000-4000-8000-000000000099',
+    'yes',
+    '13000000-0000-4000-8000-000000000099'
+  )$$,
+  'P0002',
+  'event_occurrence_not_found_or_forbidden',
+  'RSVP returns the same response for an unknown occurrence'
+);
+select throws_ok(
+  $$select public.respond_to_event(
+    current_setting('test.capacity_occurrence')::uuid,
+    'invalid-response',
+    '13000000-0000-4000-8000-000000000098'
+  )$$,
+  'P0002',
+  'event_occurrence_not_found_or_forbidden',
+  'RSVP checks current scope before validating a protected occurrence payload'
+);
+
+reset role;
+select set_config('request.jwt.claim.sub', '11000000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select public.cancel_event(
+    '12000000-0000-4000-8000-000000000004',
+    '14000000-0000-4000-8000-000000000001',
+    '장소 사정으로 취소'
+  )$$,
+  'P0002',
+  'event_not_found_or_forbidden',
+  'cancellation replay revalidates exact-scope management authority'
+);
+select throws_ok(
+  $$select public.cancel_event(
+    '12000000-0000-4000-8000-000000000099',
+    '14000000-0000-4000-8000-000000000099',
+    'unknown event probe'
+  )$$,
+  'P0002',
+  'event_not_found_or_forbidden',
+  'cancellation gives the same response for an unknown event'
+);
+select throws_ok(
+  $$select public.cancel_event(
+    '12000000-0000-4000-8000-000000000004',
+    '14000000-0000-4000-8000-000000000098',
+    ''
+  )$$,
+  'P0002',
+  'event_not_found_or_forbidden',
+  'cancellation checks scope before validating a protected event payload'
+);
+select throws_ok(
+  $$select * from public.list_event_revisions(
+    '12000000-0000-4000-8000-000000000004'
+  )$$,
+  'P0002',
+  'event_revision_not_found_or_forbidden',
+  'revision history hides a known event after management authority is lost'
+);
+select throws_ok(
+  $$select * from public.list_event_revisions(
+    '12000000-0000-4000-8000-000000000099'
+  )$$,
+  'P0002',
+  'event_revision_not_found_or_forbidden',
+  'revision history gives the same response for an unknown event'
+);
+select throws_ok(
+  format(
+    'select public.save_event(%L, false, %L, %L, null, null, statement_timestamp() + interval ''1 day'', statement_timestamp() + interval ''1 day 1 hour'', null, ''none'', 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    '12000000-0000-4000-8000-000000000004',
+    current_setting('test.church_scope'),
+    'known forbidden event probe'
+  ),
+  'P0002',
+  'event_save_not_found_or_forbidden',
+  'event save hides a known event after exact-scope authority is lost'
+);
+select throws_ok(
+  format(
+    'select public.save_event(%L, false, %L, %L, null, null, statement_timestamp() + interval ''1 day'', statement_timestamp() + interval ''1 day 1 hour'', null, ''none'', 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    '12000000-0000-4000-8000-000000000099',
+    current_setting('test.church_scope'),
+    'unknown event probe'
+  ),
+  'P0002',
+  'event_save_not_found_or_forbidden',
+  'event save gives the same response for a missing event'
+);
+select throws_ok(
+  format(
+    'select public.save_event(%L, false, %L, null, null, null, null, null, null, ''invalid'', 0, array[0]::smallint[], 0, null, 0, array[-1]::integer[])',
+    '12000000-0000-4000-8000-000000000004',
+    current_setting('test.church_scope')
+  ),
+  'P0002',
+  'event_save_not_found_or_forbidden',
+  'event save checks authority before validating a protected existing payload'
+);
+
+reset role;
+delete from public.events
+where id = '12000000-0000-4000-8000-000000000004';
+select set_config('request.jwt.claim.sub', '11000000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-000000000002","role":"authenticated","aal":"aal2"}', true);
+set local role authenticated;
+select throws_ok(
+  $$select public.cancel_event(
+    '12000000-0000-4000-8000-000000000004',
+    '14000000-0000-4000-8000-000000000001',
+    '장소 사정으로 취소'
+  )$$,
+  'P0002',
+  'event_not_found_or_forbidden',
+  'cancellation replay fails closed when the cached event no longer exists'
 );
 
 select * from finish();

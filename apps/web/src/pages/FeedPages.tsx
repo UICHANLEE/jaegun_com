@@ -18,6 +18,8 @@ import {
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PostCard } from "../components/PostCard";
+import { ProtectedImage } from "../components/ProtectedImage";
+import { ProtectedVideo } from "../components/ProtectedVideo";
 import { ReportActionLink } from "../components/SafetyControls";
 import {
   Avatar,
@@ -56,7 +58,7 @@ function clearPostOperation(key: string | null) {
 }
 
 export function FeedPage() {
-  const { posts, viewer, hasMorePosts, loadMorePosts } = useAppData();
+  const { posts, viewer, hasMorePosts, loadMorePosts, refreshProtectedMediaUrl } = useAppData();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"all" | PostCategory>("all");
   const [loadingMore, setLoadingMore] = useState(false);
@@ -106,7 +108,13 @@ export function FeedPage() {
 
       <div className="feed-summary"><strong>{filteredPosts.length}개의 이야기</strong><span>최신순</span></div>
       <div className="feed-list">
-        {filteredPosts.map((post) => <PostCard key={post.id} post={post} />)}
+        {filteredPosts.map((post) => (
+          <PostCard
+            key={post.id}
+            post={post}
+            refreshProtectedMediaUrl={refreshProtectedMediaUrl}
+          />
+        ))}
         {!filteredPosts.length ? (
           <EmptyState
             icon={<MagnifyingGlass />}
@@ -308,7 +316,7 @@ export function ComposerPage() {
 export function PostDetailPage() {
   const { postId } = useParams();
   const navigate = useNavigate();
-  const { posts, addComment, ensurePost, viewer } = useAppData();
+  const { posts, addComment, ensurePost, refreshProtectedMediaUrl, viewer } = useAppData();
   const post = posts.find((item) => item.id === postId);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -433,13 +441,24 @@ export function PostDetailPage() {
         {post.media.length ? (
           <div className={`post-detail__media post-detail__media--${Math.min(post.media.length, 3)}`}>
             {post.media.map((media) => media.kind === "image" ? (
-              <ResilientImage
+              <ProtectedImage
                 key={media.id}
                 src={media.url}
+                storagePath={media.storagePath}
+                refreshUrl={refreshProtectedMediaUrl}
                 alt={media.alt ?? post.title}
                 fallbackLabel="게시글 이미지를 불러오지 못했어요"
               />
-            ) : <video key={media.id} src={media.url} controls preload="metadata" />)}
+            ) : (
+              <ProtectedVideo
+                key={media.id}
+                src={media.url}
+                storagePath={media.storagePath}
+                refreshUrl={refreshProtectedMediaUrl}
+                controls
+                preload="metadata"
+              />
+            ))}
           </div>
         ) : null}
         <div className="post-detail__actions">

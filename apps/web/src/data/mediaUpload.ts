@@ -295,7 +295,10 @@ export async function uploadCommunityFile(
   await uploadDirectFile(file, destination, onProgress, request.signal);
   throwIfAborted(request.signal);
 
-  const signed = await supabase.storage.from(destination.bucket).createSignedUrl(destination.path, 60 * 60);
+  const previewTtlSeconds = 60;
+  const signed = await supabase.storage
+    .from(destination.bucket)
+    .createSignedUrl(destination.path, previewTtlSeconds);
   throwIfAborted(request.signal);
   if (signed.error || !signed.data?.signedUrl) {
     throw signed.error ?? new Error("업로드 파일 URL을 만들 수 없습니다.");

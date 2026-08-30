@@ -1,4 +1,4 @@
-import { type FormEvent, type KeyboardEvent, type ReactNode, useMemo, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -23,9 +23,11 @@ import { ApplicationStatusBadge, ErrorBanner, ROLE_LABELS } from "../components/
 import { useAppData } from "../data/AppDataProvider";
 import { MAX_PASSWORD_LENGTH, MIN_NEW_PASSWORD_LENGTH, validateNewPassword } from "../data/authPolicy";
 import {
-  COMMUNITY_POLICY_CONSENT_VERSION,
-  SENSITIVE_AFFILIATION_CONSENT_VERSION,
-} from "../data/safetyPrivacy";
+  assertAcceptedConsentVersions,
+  consentSetFingerprint,
+  type AcceptedConsentVersions,
+} from "../data/legalConsentContract";
+import type { ConsentDocumentKey } from "../data/legalDocuments";
 import {
   CHURCH_TITLE_CODES,
   CHURCH_TITLE_LABELS,
@@ -37,6 +39,29 @@ import {
 } from "../types/domain";
 
 type AuthView = "login" | "signup";
+
+const CONSENT_COPY: Readonly<Record<ConsentDocumentKey, { label: string; description: string }>> = {
+  privacy_policy: {
+    label: "개인정보 수집·이용 동의",
+    description: "계정 생성과 공동체 기능 제공에 필요한 개인정보 항목·목적·보유기간을 확인합니다.",
+  },
+  sensitive_information: {
+    label: "종교 관련 민감정보 처리 동의",
+    description: "노회·교회·직분·역할 등 종교 관련 정보의 처리 목적과 거부 영향을 확인합니다.",
+  },
+  overseas_transfer: {
+    label: "개인정보 국외 이전 동의",
+    description: "Supabase·Vercel 등 국외 처리 제공자, 이전 항목·목적·보유기간을 확인합니다.",
+  },
+  terms_of_service: {
+    label: "이용약관 동의 및 만 14세 이상 확인",
+    description: "현재 만 14세 미만은 가입할 수 없습니다. 약관에 동의하며 만 14세 이상임을 확인합니다.",
+  },
+  community_guidelines: {
+    label: "공동체 운영정책 동의",
+    description: "신고, 차단, 콘텐츠 조치와 공동체 안의 존중·안전 기준을 확인합니다.",
+  },
+};
 
 function authSubmitError(reason: unknown, view: AuthView) {
   const message = reason instanceof Error ? reason.message.toLowerCase() : "";
@@ -129,7 +154,7 @@ function ExecutiveOfficeToggles({
 }
 
 export function LoginPage() {
-  const { signIn, signUp, enterDemo, error, refresh, mode, organizations } = useAppData();
+  const { signIn, signUp, enterDemo, error, refresh, mode, organizations, requiredConsentDocuments } = useAppData();
   const navigate = useNavigate();
   const [view, setView] = useState<AuthView>("login");
   const [displayName, setDisplayName] = useState("");
@@ -138,8 +163,7 @@ export function LoginPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [presbytery, setPresbytery] = useState("");
   const [organizationId, setOrganizationId] = useState("");
-  const [privacyAccepted, setPrivacyAccepted] = useState(false);
-  const [communityPolicyAccepted, setCommunityPolicyAccepted] = useState(false);
+  const [acceptedConsents, setAcceptedConsents] = useState<AcceptedConsentVersions>({});
   const submittingRef = useRef(false);
   const retryingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -161,6 +185,11 @@ export function LoginPage() {
     [availableOrganizations, presbytery],
   );
   const selectedSignupOrganization = presbyteryOrganizations.find((organization) => organization.id === organizationId);
+  const consentFingerprint = consentSetFingerprint(requiredConsentDocuments);
+
+  useEffect(() => {
+    setAcceptedConsents({});
+  }, [consentFingerprint]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -186,9 +215,13 @@ export function LoginPage() {
       setLocalError("소속 노회를 선택해 주세요.");
       return;
     }
-    if (view === "signup" && (!privacyAccepted || !communityPolicyAccepted)) {
-      setLocalError("필수 개인정보 처리와 공동체 이용규칙에 동의해 주세요.");
-      return;
+    if (view === "signup") {
+      try {
+        assertAcceptedConsentVersions(requiredConsentDocuments, acceptedConsents);
+      } catch {
+        setLocalError("현재 필수 동의 문서를 각각 확인하고 동의해 주세요.");
+        return;
+      }
     }
     submittingRef.current = true;
     setSubmitting(true);
@@ -203,8 +236,7 @@ export function LoginPage() {
           email: email.trim(),
           password,
           organizationId: selectedSignupOrganization.id,
-          acceptedPrivacyVersion: SENSITIVE_AFFILIATION_CONSENT_VERSION,
-          acceptedCommunityVersion: COMMUNITY_POLICY_CONSENT_VERSION,
+          acceptedConsents,
         });
         setLocalSuccess("가입 요청을 처리했습니다. 확인 메일의 링크를 연 뒤 로그인해 주세요. 메일이 도착하지 않으면 관리자에게 문의해 주세요.");
       } else {
@@ -224,8 +256,7 @@ export function LoginPage() {
     setLocalSuccess(null);
     setConfirmPassword("");
     if (nextView === "login") {
-      setPrivacyAccepted(false);
-      setCommunityPolicyAccepted(false);
+      setAcceptedConsents({});
     }
   }
 
@@ -345,31 +376,38 @@ export function LoginPage() {
                   </label>
                   <fieldset className="auth-consent" aria-describedby="auth-consent-help">
                     <legend>필수 동의</legend>
-                    <label>
-                      <input required type="checkbox" checked={privacyAccepted} onChange={(event) => setPrivacyAccepted(event.target.checked)} />
-                      <span>
-                        <strong>[필수] 개인정보·민감정보 처리 동의</strong>
-                        <small>가입 교회와 노회 정보는 종교적 신념을 드러낼 수 있어 별도로 동의받습니다.</small>
-                      </span>
-                    </label>
-                    <Link target="_blank" rel="noopener noreferrer" to={`/legal/privacy/${SENSITIVE_AFFILIATION_CONSENT_VERSION}`}>개인정보 처리방침 전문 보기</Link>
-                    <label>
-                      <input required type="checkbox" checked={communityPolicyAccepted} onChange={(event) => setCommunityPolicyAccepted(event.target.checked)} />
-                      <span>
-                        <strong>[필수] 이용약관·공동체 이용규칙 동의</strong>
-                        <small>신고, 차단, 콘텐츠 조치와 공동체 내 존중 기준을 확인했습니다.</small>
-                      </span>
-                    </label>
-                    <span className="auth-consent__links">
-                      <Link target="_blank" rel="noopener noreferrer" to="/legal/terms">이용약관</Link>
-                      <Link target="_blank" rel="noopener noreferrer" to={`/legal/community/${COMMUNITY_POLICY_CONSENT_VERSION}`}>공동체 이용규칙</Link>
-                    </span>
+                    {requiredConsentDocuments.map((document) => {
+                      const copy = CONSENT_COPY[document.key];
+                      const checked = acceptedConsents[document.key] === document.version;
+                      return (
+                        <div className="auth-consent__item" key={`${document.key}@${document.version}`}>
+                          <label>
+                            <input
+                              required
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => setAcceptedConsents((current) => {
+                                const next = { ...current };
+                                if (event.target.checked) next[document.key] = document.version;
+                                else delete next[document.key];
+                                return next;
+                              })}
+                            />
+                            <span>
+                              <strong>[필수] {copy.label}</strong>
+                              <small>{copy.description}</small>
+                            </span>
+                          </label>
+                          <Link target="_blank" rel="noopener noreferrer" to={document.documentUrl}>{document.title} 전문 보기</Link>
+                        </div>
+                      );
+                    })}
                     <p id="auth-consent-help">선택 동의나 마케팅 수신 동의는 계정 생성 조건이 아닙니다.</p>
                   </fieldset>
                 </>
               ) : null}
               {view === "login" ? <Link className="auth-form__link" to="/forgot-password">비밀번호를 잊으셨나요?</Link> : null}
-              <button className="button button--primary button--full" disabled={submitting} type="submit">
+              <button className="button button--primary button--full" disabled={submitting || (view === "signup" && requiredConsentDocuments.length === 0)} type="submit">
                 {submitting ? <CircleNotch className="spin" /> : null}
                 {view === "login" ? "로그인" : "계정 만들기"}
               </button>
