@@ -809,6 +809,9 @@ fieldset {
 
 .auth-form__link {
   width: fit-content;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
   justify-self: end;
   margin-top: -5px;
   color: var(--forest-700);
