@@ -185,6 +185,34 @@ describe("AppDataProvider password recovery trust boundary", () => {
     expect(screen.getByTestId("provider-error")).toHaveTextContent("");
   });
 
+  it("preserves the signed-out signup form when the browser regains focus", async () => {
+    render(
+      <MemoryRouter initialEntries={["/auth"]}>
+        <AppDataProvider><App /></AppDataProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입 상태 보존" } });
+    fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
+    fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
+    fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "preserve@example.com" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /개인정보 수집·이용 동의/ }));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole("heading", { name: "공동체에 함께해요" })).toBeInTheDocument();
+    expect(screen.getByLabelText("이름")).toHaveValue("가입 상태 보존");
+    expect(screen.getByLabelText("소속 노회")).toHaveValue("서울노회");
+    expect(screen.getByLabelText("소속 교회")).toHaveValue("org-19");
+    expect(screen.getByLabelText("이메일")).toHaveValue("preserve@example.com");
+    expect(screen.getByRole("checkbox", { name: /개인정보 수집·이용 동의/ })).toBeChecked();
+  });
+
   it("fails closed without falling back to the private organizations table when the public view fails", async () => {
     remote.directoryError = new Error("directory unavailable");
     render(<AppDataProvider><AuthProbe /></AppDataProvider>);

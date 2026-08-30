@@ -1802,6 +1802,11 @@ export function AppDataProvider({ children }: PropsWithChildren) {
 
     const refreshServiceYear = async () => {
       if (supabase && stateRef.current.mode === "supabase") {
+        // Signed-out pages have no service-year or governance state to refresh.
+        // Reloading their public bootstrap on focus briefly raises the global
+        // loading screen, remounting /auth and discarding an in-progress signup
+        // whenever a required legal document is reviewed in a new tab.
+        if (!stateRef.current.viewer) return;
         try {
           await loadRemote();
         } catch (reason) {
