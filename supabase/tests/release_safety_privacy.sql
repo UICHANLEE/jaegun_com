@@ -2,6 +2,10 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_catalog;
+-- The Storage API enables this transaction-local guard only around its own
+-- object DELETE statement. pgTAP uses the same guarded SQL path so RLS and our
+-- advisory-lock predicates are exercised without bypassing Storage's trigger.
+select set_config('storage.allow_delete_query', 'true', true);
 
 select no_plan();
 
@@ -98,6 +102,14 @@ select ok(
 select ok(
   not pg_catalog.has_function_privilege(
     'authenticated',
+    'public.create_media_upload_intent(text,uuid,public.media_kind,text,bigint)',
+    'execute'
+  ),
+  'future quarantine/scanner intent creation is dormant in direct-upload mode'
+);
+select ok(
+  not pg_catalog.has_function_privilege(
+    'authenticated',
     'public.service_claim_push_jobs(integer)',
     'execute'
   )
@@ -148,15 +160,148 @@ select is(
       and tablename = 'objects'
       and policyname in (
         'jaegun_community_media_insert',
-        'jaegun_community_media_update',
         'jaegun_community_media_delete',
         'jaegun_avatars_insert',
-        'jaegun_avatars_update',
         'jaegun_avatars_delete'
       )
   ),
+  4::bigint,
+  'direct compatibility keeps bounded INSERT/DELETE while blocking overwrite quota bypasses'
+);
+select ok(
+  (
+    select bool_and(
+      coalesce(with_check, qual, '') like '%authorize_direct_media_upload%'
+      or coalesce(with_check, qual, '') like '%can_mutate_direct_media_object%'
+    )
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname in (
+        'jaegun_community_media_insert',
+        'jaegun_community_media_delete',
+        'jaegun_avatars_insert',
+        'jaegun_avatars_delete'
+      )
+  ),
+  'direct Storage policies reserve scanner paths and protect referenced objects'
+);
+select ok(
+  not pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.require_owned_media_object(text,text,uuid,public.media_kind,text,bigint)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.media_object_path_metadata_allowed(text,text,jsonb)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.can_write_direct_media_object(text,text,uuid)',
+    'execute'
+  )
+  and pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.authorize_direct_media_upload(text,text,uuid,jsonb)',
+    'execute'
+  )
+  and pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.can_mutate_direct_media_object(text,text,uuid)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'private.authorize_direct_media_upload(text,text,uuid,jsonb)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'private.can_mutate_direct_media_object(text,text,uuid)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'anon',
+    'private.can_write_quarantine_media(text,uuid,jsonb)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.lock_active_media_uploader(uuid)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.direct_media_path_attachable(text,text)',
+    'execute'
+  )
+  and not pg_catalog.has_function_privilege(
+    'authenticated',
+    'private.media_path_is_referenced(text,text)',
+    'execute'
+  ),
+  'only authenticated Storage policy entrypoints are executable; internal media helpers remain private'
+);
+select ok(
+  (
+    select bool_and(qual like '%owner_id%')
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'jaegun_avatars_delete'
+  ),
+  'avatar deletion requires exact Storage owner_id'
+);
+select is(
+  (
+    select count(*)
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and cmd = 'UPDATE'
+      and policyname in ('jaegun_community_media_update', 'jaegun_avatars_update')
+  ),
   0::bigint,
-  'authenticated clients have no direct approved-bucket write policies'
+  'authenticated approved-bucket overwrite is disabled to prevent byte-quota inflation'
+);
+select ok(
+  pg_catalog.to_regclass('public.profiles_avatar_path_lookup_idx') is not null
+  and pg_catalog.to_regclass('public.messages_media_path_lookup_idx') is not null
+  and pg_catalog.to_regclass('public.membership_applications_evidence_path_lookup_idx') is not null
+  and pg_catalog.to_regclass('public.organizations_hero_path_lookup_idx') is not null,
+  'every media reference checked by cleanup has a bounded lookup index'
+);
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'private.retained_media_bytes_for_user(uuid)'::regprocedure
+    ),
+    'direct_media_upload_reservations'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'private.retained_media_bytes_for_organization(uuid)'::regprocedure
+    ),
+    'direct_media_upload_reservations'
+  ) > 0,
+  'pending direct-upload reservations participate in user and organization retained quotas'
+);
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'private.require_owned_media_object(text,text,uuid,public.media_kind,text,bigint)'::regprocedure
+    ),
+    'pg_advisory_xact_lock'
+  ) > 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(
+      'private.can_mutate_direct_media_object(text,text,uuid)'::regprocedure
+    ),
+    'pg_advisory_xact_lock'
+  ) > 0,
+  'attachment and Storage mutation serialize on the same object-path advisory lock'
 );
 select is(
   (
@@ -465,8 +610,8 @@ select throws_ok(
     )::text
   ),
   '42501',
-  'approved_media_required',
-  'legacy send_message_batch rejects a forged approved-bucket path'
+  'direct_media_object_required',
+  'legacy send_message_batch rejects a forged or missing direct object path'
 );
 
 select throws_ok(
@@ -504,11 +649,655 @@ select throws_ok(
     )
   $$,
   '42501',
-  'approved_media_required',
-  'post media rows require a scanner-approved upload intent'
+  'direct_media_object_required',
+  'post media rows require an exact owned Storage object or approved intent'
+);
+
+-- Direct media compatibility keeps current uploads working without trusting
+-- caller paths or metadata. Scanner intents remain a separate strict path.
+reset role;
+create temporary table test_direct_media_paths (
+  label text primary key,
+  bucket_id text not null,
+  storage_path text not null,
+  mime_type text not null,
+  byte_size bigint not null
+);
+grant select on table test_direct_media_paths to authenticated, service_role;
+insert into test_direct_media_paths
+select 'post', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000001.jpg',
+       'image/jpeg', 1024
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'message', 'community-media',
+       organization.id::text || '/messages/93000000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000002.mp4',
+       'video/mp4', 2048
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'avatar', 'avatars',
+       'b1100000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000003.jpg',
+       'image/jpeg', 512
+union all
+select 'evidence', 'community-media',
+       organization.id::text || '/applications/95000000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000004.png',
+       'image/png', 768
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'hero', 'community-media',
+       organization.id::text || '/organization/95100000-0000-4000-8000-000000000005.webp',
+       'image/webp', 1536
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'foreign_message', 'community-media',
+       organization.id::text || '/messages/93000000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000006.jpg',
+       'image/jpeg', 640
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'foreign_post', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000097.jpg',
+       'image/jpeg', 640
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'owner_mismatch', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000090.jpg',
+       'image/jpeg', 640
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'legacy_mismatch', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000098.png',
+       'image/jpeg', 640
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'orphan', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000007.webp',
+       'image/webp', 384
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'reuse', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000008.jpg',
+       'image/jpeg', 256
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong'
+union all
+select 'fresh_after_delete', 'community-media',
+       organization.id::text || '/posts/91000000-0000-4000-8000-000000000002/95100000-0000-4000-8000-000000000009.jpg',
+       'image/jpeg', 256
+from public.organizations as organization where organization.slug = 'jaegun-bupyeong';
+
+insert into public.membership_applications (
+  id, user_id, organization_id, requested_role, applicant_note
+)
+values (
+  '95000000-0000-4000-8000-000000000001',
+  'b1100000-0000-4000-8000-000000000001',
+  (select id from public.organizations where slug = 'jaegun-bupyeong'),
+  'member',
+  '직접 업로드 증빙 테스트'
+);
+
+-- Seed an exact-path object owned by the other participant. Alice may access
+-- the conversation, but may never adopt Bob's bytes into her message.
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  path.bucket_id,
+  path.storage_path,
+  'c1100000-0000-4000-8000-000000000001'::uuid,
+  'c1100000-0000-4000-8000-000000000001',
+  pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+from test_direct_media_paths as path
+where path.label in ('foreign_message', 'foreign_post');
+
+-- owner_id is authoritative when present. A corrupted/malicious row whose
+-- legacy owner UUID disagrees is owned by neither identity for product flows.
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  path.bucket_id,
+  path.storage_path,
+  'b1100000-0000-4000-8000-000000000001'::uuid,
+  'c1100000-0000-4000-8000-000000000001',
+  pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+from test_direct_media_paths as path
+where path.label = 'owner_mismatch';
+
+-- A pre-011 canonical UUID path may carry an original-filename suffix that
+-- disagrees with Storage MIME. It cannot be newly uploaded after 011, but an
+-- exact owner object already present at migration time remains attachable.
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  path.bucket_id,
+  path.storage_path,
+  'b1100000-0000-4000-8000-000000000001'::uuid,
+  'b1100000-0000-4000-8000-000000000001',
+  pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+from test_direct_media_paths as path
+where path.label = 'legacy_mismatch';
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+
+select is(
+  private.authorize_direct_media_upload(
+    'avatars',
+    'c1100000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000099.jpg',
+    'c1100000-0000-4000-8000-000000000001',
+    '{"mimetype":"image/jpeg","size":"128"}'::jsonb
+  ),
+  false,
+  'Storage policy helper rejects a caller-supplied victim actor before locking or reserving'
+);
+reset role;
+select ok(
+  not exists (
+    select 1
+    from private.direct_media_upload_reservations as reservation
+    where reservation.storage_path =
+      'c1100000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000099.jpg'
+  )
+  and not exists (
+    select 1
+    from private.rate_limit_counters as counter
+    where counter.actor_id = 'c1100000-0000-4000-8000-000000000001'
+      and counter.action_key = 'uploads'
+  ),
+  'cross-user helper call cannot burn victim quota or rate allowance'
+);
+set local role authenticated;
+
+select is(
+  private.authorize_direct_media_upload(
+    'community-media',
+    (select storage_path from test_direct_media_paths where label = 'legacy_mismatch'),
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"640"}'::jsonb
+  ),
+  false,
+  'new direct upload rejects a canonical legacy path whose MIME and suffix disagree'
+);
+select lives_ok(
+  $$
+    insert into public.post_media (
+      post_id, uploader_id, storage_path, kind, mime_type, byte_size, width, height
+    )
+    select
+      '91000000-0000-4000-8000-000000000002',
+      auth.uid(),
+      path.storage_path,
+      'image',
+      path.mime_type,
+      path.byte_size,
+      20,
+      20
+    from test_direct_media_paths as path
+    where path.label = 'legacy_mismatch'
+  $$,
+  'pre-011 canonical owner object attaches using authoritative Storage MIME despite suffix mismatch'
+);
+
+select lives_ok(
+  $$
+    insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+    select
+      path.bucket_id,
+      path.storage_path,
+      auth.uid(),
+      auth.uid()::text,
+      pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+    from test_direct_media_paths as path
+    where path.label in ('post', 'message', 'avatar', 'evidence', 'orphan')
+  $$,
+  'legacy client can directly upload exact owned post/message/avatar/evidence objects'
+);
+select lives_ok(
+  $$
+    insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+    select
+      path.bucket_id,
+      path.storage_path,
+      auth.uid(),
+      auth.uid()::text,
+      pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+    from test_direct_media_paths as path
+    where path.label = 'reuse'
+  $$,
+  'direct upload creates a single-use reservation for its UUID path'
+);
+reset role;
+create temporary table test_retained_bytes_before_delete (value bigint);
+insert into test_retained_bytes_before_delete
+values (private.retained_media_bytes_for_user('b1100000-0000-4000-8000-000000000001'));
+set local role authenticated;
+with removed as (
+  delete from storage.objects as object
+  using test_direct_media_paths as path
+  where path.label = 'reuse'
+    and object.bucket_id = path.bucket_id
+    and object.name = path.storage_path
+  returning object.id
+)
+select is(
+  (select count(*) from removed),
+  1::bigint,
+  'unreferenced direct object can be deleted by its exact owner'
+);
+reset role;
+select is(
+  (select value from test_retained_bytes_before_delete)
+    - private.retained_media_bytes_for_user('b1100000-0000-4000-8000-000000000001'),
+  256::bigint,
+  'deleting direct bytes releases retained-byte quota while daily history remains'
+);
+set local role authenticated;
+select throws_ok(
+  $$
+    insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+    select
+      path.bucket_id,
+      path.storage_path,
+      auth.uid(),
+      auth.uid()::text,
+      pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+    from test_direct_media_paths as path
+    where path.label = 'reuse'
+  $$,
+  '42501',
+  'new row violates row-level security policy for table "objects"',
+  'a committed direct UUID path cannot be recycled after deletion'
+);
+select lives_ok(
+  $$
+    insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+    select
+      path.bucket_id,
+      path.storage_path,
+      auth.uid(),
+      auth.uid()::text,
+      pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+    from test_direct_media_paths as path
+    where path.label = 'fresh_after_delete'
+  $$,
+  'a fresh UUID upload succeeds after deleted bytes release retained quota'
+);
+select lives_ok(
+  $$
+    insert into public.post_media (
+      post_id, uploader_id, storage_path, kind, mime_type, byte_size, width, height
+    )
+    select
+      '91000000-0000-4000-8000-000000000002',
+      auth.uid(),
+      path.storage_path,
+      'image',
+      path.mime_type,
+      path.byte_size,
+      32,
+      32
+    from test_direct_media_paths as path
+    where path.label = 'post'
+  $$,
+  'direct post object attaches without a scanner intent'
+);
+with changed as (
+  update storage.objects as object
+  set metadata = object.metadata || '{"cacheControl":"changed"}'::jsonb
+  from test_direct_media_paths as path
+  where path.label = 'post'
+    and object.bucket_id = path.bucket_id
+    and object.name = path.storage_path
+  returning object.id
+)
+select is(
+  (select count(*) from changed),
+  0::bigint,
+  'referenced post bytes cannot be overwritten through direct Storage policy'
+);
+with removed as (
+  delete from storage.objects as object
+  using test_direct_media_paths as path
+  where path.label = 'post'
+    and object.bucket_id = path.bucket_id
+    and object.name = path.storage_path
+  returning object.id
+)
+select is(
+  (select count(*) from removed),
+  0::bigint,
+  'referenced post bytes cannot be deleted through direct Storage policy'
+);
+select lives_ok(
+  format(
+    'select public.send_message_batch(%L, %L, %L::jsonb)',
+    '93000000-0000-4000-8000-000000000001',
+    auth.uid(),
+    pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'kind', 'video',
+        'body', null,
+        'media_path', (select storage_path from test_direct_media_paths where label = 'message'),
+        'media_metadata', pg_catalog.jsonb_build_object(
+          'mime_type', 'image/png',
+          'byte_size', 1,
+          'scan_approved', true,
+          'upload_intent_id', gen_random_uuid()
+        ),
+        'client_nonce', '95200000-0000-4000-8000-000000000001'
+      )
+    )::text
+  ),
+  'legacy message batch attaches an exact uploader-owned direct object'
+);
+select is(
+  (
+    select (message.media_metadata ->> 'mime_type')
+      || ':' || (message.media_metadata ->> 'byte_size')
+      || ':' || (message.media_metadata ->> 'scan_approved')
+      || ':' || (message.media_metadata ->> 'legacy_direct')
+    from public.messages as message
+    where message.client_nonce = '95200000-0000-4000-8000-000000000001'
+  ),
+  'video/mp4:2048:false:true',
+  'direct message metadata is authoritative from Storage and never marked scanned'
+);
+select throws_ok(
+  format(
+    'select public.send_message(%L, ''image'', null, %L, ''{}''::jsonb, %L)',
+    '93000000-0000-4000-8000-000000000001',
+    (select storage_path from test_direct_media_paths where label = 'foreign_message'),
+    '95200000-0000-4000-8000-000000000002'
+  ),
+  '42501',
+  'direct_media_object_required',
+  'conversation access cannot adopt another participant direct object'
+);
+select throws_ok(
+  $$
+    insert into public.post_media (
+      post_id, uploader_id, storage_path, kind, mime_type, byte_size
+    )
+    select
+      '91000000-0000-4000-8000-000000000002',
+      auth.uid(),
+      path.storage_path,
+      'image',
+      path.mime_type,
+      path.byte_size
+    from test_direct_media_paths as path
+    where path.label = 'owner_mismatch'
+  $$,
+  '42501',
+  'direct_media_object_required',
+  'legacy owner and owner_id disagreement cannot be attached by owner UUID'
+);
+with removed as (
+  delete from storage.objects as object
+  using test_direct_media_paths as path
+  where path.label = 'owner_mismatch'
+    and object.bucket_id = path.bucket_id
+    and object.name = path.storage_path
+  returning object.id
+)
+select is(
+  (select count(*) from removed),
+  0::bigint,
+  'legacy owner and owner_id disagreement cannot be deleted by owner UUID'
+);
+reset role;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"c1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'c1100000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+with removed as (
+  delete from storage.objects as object
+  using test_direct_media_paths as path
+  where path.label = 'owner_mismatch'
+    and object.bucket_id = path.bucket_id
+    and object.name = path.storage_path
+  returning object.id
+)
+select is(
+  (select count(*) from removed),
+  0::bigint,
+  'legacy owner and owner_id disagreement cannot be deleted by owner_id identity'
+);
+reset role;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select lives_ok(
+  $$
+    update public.profiles
+    set avatar_path = (select storage_path from test_direct_media_paths where label = 'avatar')
+    where id = auth.uid()
+  $$,
+  'direct avatar object links to the uploader profile'
+);
+select lives_ok(
+  $$
+    select public.set_membership_application_evidence(
+      '95000000-0000-4000-8000-000000000001',
+      (select storage_path from test_direct_media_paths where label = 'evidence')
+    )
+  $$,
+  'direct image evidence links through the existing application RPC'
+);
+select is(
+  private.authorize_direct_media_upload(
+    'community-media',
+    pg_catalog.replace(
+      (select storage_path from test_direct_media_paths where label = 'evidence'),
+      '95100000-0000-4000-8000-000000000004.png',
+      '95100000-0000-4000-8000-000000000094.mp4'
+    ),
+    auth.uid(),
+    '{"mimetype":"video/mp4","size":"2048"}'::jsonb
+  ),
+  false,
+  'application evidence rejects video before direct upload can create an orphan'
+);
+select is(
+  private.authorize_direct_media_upload(
+    'avatars',
+    auth.uid()::text || '/95100000-0000-4000-8000-000000000095.mp4',
+    auth.uid(),
+    '{"mimetype":"video/mp4","size":"2048"}'::jsonb
+  ),
+  false,
+  'avatar rejects video before direct upload can create an orphan'
+);
+
+-- Internal shape/metadata helpers are deliberately revoked from browser roles;
+-- inspect their pure predicates as the migration owner.
+reset role;
+select is(
+  private.can_write_direct_media_object(
+    'community-media',
+    (select storage_path from test_direct_media_paths where label = 'post')
+      || '/95100000-0000-4000-8000-000000000099.jpg',
+    auth.uid()
+  ),
+  false,
+  'nested direct object paths are rejected'
+);
+select is(
+  private.can_write_direct_media_object(
+    'community-media',
+    pg_catalog.replace(
+      (select storage_path from test_direct_media_paths where label = 'post'),
+      '.jpg',
+      '.extra.jpg'
+    ),
+    auth.uid()
+  ),
+  false,
+  'direct object leaf permits one UUID and exactly one extension dot'
+);
+select is(
+  private.media_object_path_metadata_allowed(
+    'community-media',
+    (select storage_path from test_direct_media_paths where label = 'post'),
+    '{"mimetype":"image/png","size":1024}'::jsonb
+  ),
+  false,
+  'MIME and filename extension must match exactly'
+);
+select is(
+  private.media_object_path_metadata_allowed(
+    'community-media',
+    (select storage_path from test_direct_media_paths where label = 'post'),
+    '{"mimetype":"image/jpeg","size":15728641}'::jsonb
+  ),
+  false,
+  'direct image metadata cannot exceed the production size ceiling'
+);
+
+set local role authenticated;
+select is(
+  private.can_mutate_direct_media_object(
+    'community-media',
+    (select storage_path from test_direct_media_paths where label = 'orphan'),
+    auth.uid()
+  ),
+  true,
+  'uploader may clean an exact unreferenced direct object'
 );
 
 reset role;
+delete from private.rate_limit_counters
+where actor_id = 'b1100000-0000-4000-8000-000000000001'
+  and action_key = 'messages';
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"d1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'd1100000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select is(
+  private.authorize_direct_media_upload(
+    'community-media',
+    pg_catalog.replace(
+      (select storage_path from test_direct_media_paths where label = 'hero'),
+      '95100000-0000-4000-8000-000000000005.webp',
+      '95100000-0000-4000-8000-000000000096.mp4'
+    ),
+    auth.uid(),
+    '{"mimetype":"video/mp4","size":"2048"}'::jsonb
+  ),
+  false,
+  'organization hero rejects video before direct upload can create an orphan'
+);
+select lives_ok(
+  $$
+    insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+    select
+      path.bucket_id,
+      path.storage_path,
+      auth.uid(),
+      auth.uid()::text,
+      pg_catalog.jsonb_build_object('mimetype', path.mime_type, 'size', path.byte_size)
+    from test_direct_media_paths as path
+    where path.label = 'hero'
+  $$,
+  'church manager can directly upload an exact organization hero image'
+);
+select lives_ok(
+  $$
+    select public.update_organization_profile(
+      (select id from public.organizations where slug = 'jaegun-bupyeong'),
+      pg_catalog.jsonb_build_object(
+        'hero_path', (select storage_path from test_direct_media_paths where label = 'hero')
+      )
+    )
+  $$,
+  'direct organization hero links through the existing profile RPC'
+);
+
+reset role;
+with generated as materialized (
+  select series.n, gen_random_uuid() as intent_id
+  from pg_catalog.generate_series(1, 119) as series(n)
+)
+insert into public.media_upload_intents (
+  id, uploader_id, organization_id, purpose, target_id, kind,
+  expected_mime_type, expected_byte_size, quarantine_path,
+  approved_bucket_id, approved_path, status, rejection_code, expires_at
+)
+select
+  generated.intent_id,
+  'b1200000-0000-4000-8000-000000000001',
+  null,
+  'avatar',
+  'b1200000-0000-4000-8000-000000000001',
+  'image',
+  'image/jpeg',
+  1,
+  'b1200000-0000-4000-8000-000000000001/' || generated.intent_id::text || '/upload.jpg',
+  'avatars',
+  'b1200000-0000-4000-8000-000000000001/' || generated.intent_id::text || '.jpg',
+  'expired',
+  'quota_regression_fixture',
+  pg_catalog.clock_timestamp() + interval '1 hour'
+from generated;
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"b1200000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'b1200000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select is(
+  private.authorize_direct_media_upload(
+    'avatars',
+    'b1200000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000100.jpg',
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"1"}'::jsonb
+  ),
+  true,
+  '119 expired scanner intents still allow only the final shared daily upload slot'
+);
+reset role;
+select is(
+  private.retained_media_bytes_for_user(
+    'b1200000-0000-4000-8000-000000000001'
+  ),
+  1::bigint,
+  'an unmaterialized direct reservation consumes retained user quota during its retry lease'
+);
+set local role authenticated;
+select throws_ok(
+  $$
+    select private.authorize_direct_media_upload(
+      'avatars',
+      'b1200000-0000-4000-8000-000000000001/95100000-0000-4000-8000-000000000101.jpg',
+      auth.uid(),
+      '{"mimetype":"image/jpeg","size":"1"}'::jsonb
+    )
+  $$,
+  '54000',
+  'daily_media_upload_count_exceeded',
+  'direct and scanner modes share a 120-per-day upload ceiling across terminal statuses'
+);
+reset role;
+delete from public.media_upload_intents
+where uploader_id = 'b1200000-0000-4000-8000-000000000001'
+  and rejection_code = 'quota_regression_fixture';
+delete from private.direct_media_upload_reservations
+where uploader_id = 'b1200000-0000-4000-8000-000000000001';
+delete from private.rate_limit_counters
+where actor_id = 'b1200000-0000-4000-8000-000000000001'
+  and action_key = 'uploads';
+
 insert into private.rate_limit_counters (
   actor_id, action_key, window_started_at, event_count
 )
@@ -1029,7 +1818,9 @@ select set_config(
   true
 );
 select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
-set local role authenticated;
+delete from private.rate_limit_counters
+where actor_id = 'b1100000-0000-4000-8000-000000000001'
+  and action_key = 'uploads';
 insert into test_media_scan_intents
 select
   'safe_image',
@@ -1090,6 +1881,89 @@ from (
     8192
   ) as result
 ) as created;
+insert into test_media_scan_intents
+select
+  'bad_size',
+  (result ->> 'id')::uuid,
+  result ->> 'quarantine_path',
+  result ->> 'approved_path'
+from (
+  select public.create_media_upload_intent(
+    'post',
+    '91000000-0000-4000-8000-000000000002',
+    'image',
+    'image/jpeg',
+    1
+  ) as result
+) as created;
+insert into test_media_scan_intents
+select
+  'bad_mime',
+  (result ->> 'id')::uuid,
+  result ->> 'quarantine_path',
+  result ->> 'approved_path'
+from (
+  select public.create_media_upload_intent(
+    'post',
+    '91000000-0000-4000-8000-000000000002',
+    'image',
+    'image/jpeg',
+    1024
+  ) as result
+) as created;
+
+set local role authenticated;
+select is(
+  private.can_write_quarantine_media(
+    (select quarantine_path from test_media_scan_intents where label = 'safe_image'),
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"1024"}'::jsonb
+  ),
+  true,
+  'quarantine upload accepts metadata that exactly matches its active intent'
+);
+select is(
+  private.can_write_quarantine_media(
+    (select quarantine_path from test_media_scan_intents where label = 'bad_size'),
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"500000000"}'::jsonb
+  ),
+  false,
+  'quarantine upload cannot inflate bytes beyond its intent reservation'
+);
+select is(
+  private.can_write_quarantine_media(
+    (select quarantine_path from test_media_scan_intents where label = 'bad_mime'),
+    auth.uid(),
+    '{"mimetype":"video/mp4","size":"1024"}'::jsonb
+  ),
+  false,
+  'quarantine upload MIME must exactly match its intent reservation'
+);
+select throws_ok(
+  format(
+    'insert into storage.objects (bucket_id,name,owner,owner_id,metadata) values (''community-media-quarantine'',%L,%L,%L,%L::jsonb)',
+    (select quarantine_path from test_media_scan_intents where label = 'bad_size'),
+    auth.uid(),
+    auth.uid()::text,
+    '{"mimetype":"image/jpeg","size":"500000000"}'
+  ),
+  '42501',
+  'new row violates row-level security policy for table "objects"',
+  'quarantine Storage INSERT rejects a byte-size mismatch'
+);
+select throws_ok(
+  format(
+    'insert into storage.objects (bucket_id,name,owner,owner_id,metadata) values (''community-media-quarantine'',%L,%L,%L,%L::jsonb)',
+    (select quarantine_path from test_media_scan_intents where label = 'bad_mime'),
+    auth.uid(),
+    auth.uid()::text,
+    '{"mimetype":"video/mp4","size":"1024"}'
+  ),
+  '42501',
+  'new row violates row-level security policy for table "objects"',
+  'quarantine Storage INSERT rejects a MIME mismatch'
+);
 
 reset role;
 insert into storage.objects (
@@ -1100,9 +1974,69 @@ select
   intent.quarantine_path,
   'b1100000-0000-4000-8000-000000000001'::uuid,
   'b1100000-0000-4000-8000-000000000001',
-  pg_catalog.jsonb_build_object('mimetype', 'image/jpeg', 'size', '1024')
+  case intent.label
+    when 'safe_image' then '{"mimetype":"image/jpeg","size":"1024"}'::jsonb
+    when 'stale_image' then '{"mimetype":"image/jpeg","size":"2048"}'::jsonb
+    else '{"mimetype":"video/mp4","size":"8192"}'::jsonb
+  end
 from test_media_scan_intents as intent
 where intent.label in ('safe_image', 'stale_image', 'safe_video');
+
+-- Simulate legacy/service-created malformed rows that bypassed browser RLS.
+-- The atomic claim must independently refuse them.
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  'community-media-quarantine',
+  intent.quarantine_path,
+  'b1100000-0000-4000-8000-000000000001'::uuid,
+  'b1100000-0000-4000-8000-000000000001',
+  case intent.label
+    when 'bad_size' then '{"mimetype":"image/jpeg","size":"500000000"}'::jsonb
+    else '{"mimetype":"video/mp4","size":"1024"}'::jsonb
+  end
+from test_media_scan_intents as intent
+where intent.label in ('bad_size', 'bad_mime');
+
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  'community-media',
+  intent.approved_path,
+  'b1100000-0000-4000-8000-000000000001'::uuid,
+  'b1100000-0000-4000-8000-000000000001',
+  '{"mimetype":"image/jpeg","size":"4096"}'::jsonb
+from test_media_scan_intents as intent
+where intent.label = 'upload_missing';
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select is(
+  private.authorize_direct_media_upload(
+    'community-media',
+    (select approved_path from test_media_scan_intents where label = 'upload_missing'),
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"4096"}'::jsonb
+  ),
+  false,
+  'any scanner intent reservation prevents fallback to direct upload mode'
+);
+select throws_ok(
+  format(
+    'insert into public.post_media (post_id,uploader_id,storage_path,kind,mime_type,byte_size) values (%L,%L,%L,''image'',''image/jpeg'',4096)',
+    '91000000-0000-4000-8000-000000000002',
+    auth.uid(),
+    (select approved_path from test_media_scan_intents where label = 'upload_missing')
+  ),
+  '42501',
+  'approved_media_required',
+  'quarantine intent cannot downgrade to legacy attachment even when approved-path bytes exist'
+);
+
+reset role;
 
 select set_config('request.jwt.claims', '', true);
 select set_config('request.jwt.claim.sub', '', true);
@@ -1123,7 +2057,7 @@ select * from public.service_claim_media_scan_intents(10);
 select is(
   (select count(*) from test_media_scan_claims),
   3::bigint,
-  'scanner claims only intents whose owned quarantine object exists'
+  'scanner claims only intents whose exact owned quarantine object exists'
 );
 select ok(
   not exists (
@@ -1135,11 +2069,33 @@ select ok(
   'scanner does not claim an intent before upload completion'
 );
 select ok(
+  not exists (
+    select 1
+    from test_media_scan_claims as claim
+    join test_media_scan_intents as intent using (intent_id)
+    where intent.label in ('bad_size', 'bad_mime')
+  ),
+  'scanner claim independently rejects malformed preexisting quarantine objects'
+);
+select ok(
   (select bool_and(lease_token is not null and scan_attempts = 1) from test_media_scan_claims),
   'first scan claim returns a fencing token and attempt one'
 );
 
 reset role;
+update public.media_upload_intents
+set status = 'expired',
+    rejection_code = 'malformed_fixture_expired',
+    updated_at = pg_catalog.clock_timestamp()
+where id = (
+  select intent_id from test_media_scan_intents where label = 'bad_size'
+);
+select ok(
+  private.retained_media_bytes_for_organization(
+    (select id from public.organizations where slug = 'jaegun-bupyeong')
+  ) >= 500000000,
+  'expired intent quarantine bytes remain in organization retained quota until cleanup'
+);
 select set_config(
   'request.jwt.claims',
   '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
@@ -1150,7 +2106,8 @@ set local role authenticated;
 select is(
   private.can_write_quarantine_media(
     (select quarantine_path from test_media_scan_intents where label = 'safe_image'),
-    auth.uid()
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"1024"}'::jsonb
   ),
   false,
   'uploader cannot mutate quarantine bytes after the scanner claims them'
@@ -1415,6 +2372,8 @@ create temporary table test_media_cleanup_claims (
   attempts integer
 );
 grant all on table test_media_cleanup_claims to service_role;
+create temporary table test_direct_cleanup_claims (like test_media_cleanup_claims);
+grant all on table test_direct_cleanup_claims to service_role;
 
 select set_config(
   'request.jwt.claims',
@@ -1423,6 +2382,111 @@ select set_config(
 );
 select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
 set local role authenticated;
+select is(
+  (
+    public.abandon_direct_media_objects(
+      'community-media',
+      array[(select storage_path from test_direct_media_paths where label = 'orphan')]
+    ) ->> 'queued_count'
+  )::integer,
+  1,
+  'owner can queue an unreferenced direct object for service cleanup'
+);
+select ok(
+  (
+    public.abandon_direct_media_objects(
+      'community-media',
+      array[(select storage_path from test_direct_media_paths where label = 'orphan')]
+    ) ->> 'cleanup_queued'
+  )::boolean,
+  'direct cleanup retry is an idempotent success when the path is already queued'
+);
+select throws_ok(
+  format(
+    'insert into public.post_media (post_id,uploader_id,storage_path,kind,mime_type,byte_size) values (%L,%L,%L,''image'',''image/webp'',384)',
+    '91000000-0000-4000-8000-000000000002',
+    auth.uid(),
+    (select storage_path from test_direct_media_paths where label = 'orphan')
+  ),
+  '55000',
+  'direct_media_cleanup_pending',
+  'cleanup tombstone prevents a queued direct path from being reattached'
+);
+select ok(
+  (
+    public.prepare_post_media_cleanup(
+      '91000000-0000-4000-8000-000000000002',
+      auth.uid(),
+      array[(select storage_path from test_direct_media_paths where label = 'foreign_post')]
+    ) #> '{protected_paths}'
+  ) @> pg_catalog.jsonb_build_array(
+    (select storage_path from test_direct_media_paths where label = 'foreign_post')
+  ),
+  'post cleanup protects another uploader direct object instead of queueing it'
+);
+
+reset role;
+insert into private.media_cleanup_items (
+  uploader_id, bucket_id, storage_path, reason
+)
+values (
+  'b1100000-0000-4000-8000-000000000001',
+  'community-media',
+  (select storage_path from test_direct_media_paths where label = 'post'),
+  'user_abandoned'
+);
+select ok(
+  not exists (
+    select 1
+    from private.media_cleanup_items as cleanup
+    where cleanup.storage_path =
+      (select storage_path from test_direct_media_paths where label = 'foreign_post')
+  ),
+  'foreign-owned post path is absent from the service cleanup queue'
+);
+
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+select set_config('request.jwt.claim.sub', '', true);
+set local role service_role;
+insert into test_direct_cleanup_claims
+select * from public.service_claim_media_cleanup_items(10);
+select is(
+  (select count(*) from test_direct_cleanup_claims),
+  1::bigint,
+  'cleanup worker claims the unreferenced direct path only'
+);
+delete from storage.objects as object
+where object.bucket_id = 'community-media'
+  and object.name = (select storage_path from test_direct_media_paths where label = 'orphan');
+select lives_ok(
+  format(
+    'select public.service_complete_media_cleanup_item(%L, ''deleted'', null, 60)',
+    (select item_id from test_direct_cleanup_claims)
+  ),
+  'direct cleanup worker records deletion after removing exact bytes'
+);
+
+reset role;
+select is(
+  (
+    select cleanup.last_error_code
+    from private.media_cleanup_items as cleanup
+    where cleanup.storage_path =
+      (select storage_path from test_direct_media_paths where label = 'post')
+  ),
+  'media_path_referenced',
+  'cleanup claim rechecks references and defers a forced live path'
+);
+
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"b1100000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'b1100000-0000-4000-8000-000000000001', true);
+delete from private.rate_limit_counters
+where actor_id = 'b1100000-0000-4000-8000-000000000001'
+  and action_key = 'uploads';
 insert into test_media_intents (intent_id, approved_path)
 select
   (result ->> 'id')::uuid,
@@ -1436,6 +2500,7 @@ from (
     1024
   ) as result
 ) as created;
+set local role authenticated;
 select is(
   (
     public.abandon_media_upload_intents(
@@ -1451,7 +2516,17 @@ select is(
     where id = (select intent_id from test_media_intents)
   ),
   'expired',
-  'abandoned intent is no longer attachable or quota-active'
+  'abandoned intent is no longer attachable or retained-quota-active'
+);
+select ok(
+  exists (
+    select 1
+    from public.media_upload_intents
+    where id = (select intent_id from test_media_intents)
+      and created_at >= pg_catalog.clock_timestamp() - interval '24 hours'
+      and expected_byte_size = 1024
+  ),
+  'abandoned intent remains in the 24-hour throughput history'
 );
 
 reset role;
@@ -2325,6 +3400,16 @@ select
 from public.organizations as organization
 where organization.slug = 'jaegun-bupyeong';
 
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  'community-media',
+  organization.id::text || '/posts/91000000-0000-4000-8000-000000000004/96000000-0000-4000-8000-000000000089.jpg',
+  'a1200000-0000-4000-8000-000000000001'::uuid,
+  'c1100000-0000-4000-8000-000000000001',
+  '{"mimetype":"image/jpeg","size":"444"}'::jsonb
+from public.organizations as organization
+where organization.slug = 'jaegun-bupyeong';
+
 insert into public.media_upload_intents (
   id, uploader_id, organization_id, purpose, target_id, kind,
   expected_mime_type, expected_byte_size, quarantine_path,
@@ -2477,6 +3562,32 @@ select
   '{"mimetype":"image/jpeg","size":"900"}'::jsonb
 from public.media_upload_intents as intent
 where intent.id = '96000000-0000-4000-8000-000000000003';
+
+-- Replace the scanner-intent hero with a current-production direct hero, and
+-- leave one direct orphan. Deletion inventory must preserve/transfer only the
+-- current hero while queueing both the orphan and retired scanned derivative.
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  'community-media',
+  organization.id::text || '/organization/96000000-0000-4000-8000-000000000007.webp',
+  'a1200000-0000-4000-8000-000000000001'::uuid,
+  'a1200000-0000-4000-8000-000000000001',
+  '{"mimetype":"image/webp","size":"1200"}'::jsonb
+from public.organizations as organization
+where organization.slug = 'jaegun-bupyeong';
+update public.organizations
+set hero_path = id::text || '/organization/96000000-0000-4000-8000-000000000007.webp'
+where slug = 'jaegun-bupyeong';
+
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  'community-media',
+  organization.id::text || '/posts/91000000-0000-4000-8000-000000000004/96000000-0000-4000-8000-000000000008.jpg',
+  'a1200000-0000-4000-8000-000000000001'::uuid,
+  'a1200000-0000-4000-8000-000000000001',
+  '{"mimetype":"image/jpeg","size":"700"}'::jsonb
+from public.organizations as organization
+where organization.slug = 'jaegun-bupyeong';
 update public.membership_applications
 set evidence_path = (
   select approved_path from public.media_upload_intents
@@ -2505,6 +3616,24 @@ select lives_ok(
 );
 
 reset role;
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  'community-media',
+  organization.id::text || '/messages/93000000-0000-4000-8000-000000000002/96000000-0000-4000-8000-000000000099.jpg',
+  'c1100000-0000-4000-8000-000000000001'::uuid,
+  'c1100000-0000-4000-8000-000000000001',
+  '{"mimetype":"image/jpeg","size":"333"}'::jsonb
+from public.organizations as organization
+where organization.slug = 'jaegun-bupyeong';
+update public.messages
+set media_path = (
+      select organization.id::text || '/messages/93000000-0000-4000-8000-000000000002/96000000-0000-4000-8000-000000000099.jpg'
+      from public.organizations as organization
+      where organization.slug = 'jaegun-bupyeong'
+    ),
+    media_metadata = '{"mime_type":"image/jpeg","byte_size":333}'::jsonb
+where client_nonce = '94600000-0000-4000-8000-000000000001';
+
 update public.account_deletion_requests
 set requested_at = pg_catalog.clock_timestamp() - interval '15 days',
     scheduled_for = pg_catalog.clock_timestamp() - interval '1 day'
@@ -2541,12 +3670,35 @@ select
   ) as approved_post_path,
   max(approved_path) filter (
     where id = '96000000-0000-4000-8000-000000000003'
+  ) as retired_scanned_hero_path,
+  (
+    select organization.hero_path
+    from public.organizations as organization
+    where organization.slug = 'jaegun-bupyeong'
   ) as attached_hero_path,
+  (
+    select object.name
+    from storage.objects as object
+    where object.owner_id = 'a1200000-0000-4000-8000-000000000001'
+      and object.name like '%/96000000-0000-4000-8000-000000000008.jpg'
+  ) as direct_orphan_path,
+  (
+    select object.name
+    from storage.objects as object
+    where object.owner_id = 'c1100000-0000-4000-8000-000000000001'
+      and object.name like '%/96000000-0000-4000-8000-000000000099.jpg'
+  ) as foreign_owned_message_path,
+  (
+    select organization.id::text || '/posts/91000000-0000-4000-8000-000000000004/96000000-0000-4000-8000-000000000089.jpg'
+    from public.organizations as organization
+    where organization.slug = 'jaegun-bupyeong'
+  ) as mismatched_owner_path,
   max(quarantine_path) filter (
     where id = '96000000-0000-4000-8000-000000000006'
   ) as quarantined_post_path
 from public.media_upload_intents;
 grant all on table test_deletion_paths to service_role;
+grant select on table test_deletion_paths to authenticated;
 
 select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
 select set_config('request.jwt.claim.sub', '', true);
@@ -2583,6 +3735,30 @@ select ok(
   'deletion cleanup inventory includes still-quarantined bytes'
 );
 select ok(
+  (
+    select cleanup_items @> pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'storage_path',
+        (select direct_orphan_path from test_deletion_paths)
+      )
+    )
+    from test_deletion_claims
+  ),
+  'deletion cleanup inventory includes a no-intent direct orphan object'
+);
+select ok(
+  (
+    select cleanup_items @> pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'storage_path',
+        (select retired_scanned_hero_path from test_deletion_paths)
+      )
+    )
+    from test_deletion_claims
+  ),
+  'retired scanned hero derivative is cleaned after direct hero replacement'
+);
+select ok(
   not (
     select cleanup_items @> pg_catalog.jsonb_build_array(
       pg_catalog.jsonb_build_object(
@@ -2594,7 +3770,35 @@ select ok(
   ),
   'attached organization hero derivative is retained as organization-owned'
 );
+select ok(
+  not (
+    select cleanup_items @> pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'storage_path',
+        (select foreign_owned_message_path from test_deletion_paths)
+      )
+    )
+    from test_deletion_claims
+  ),
+  'forged legacy message reference cannot queue another member Storage object'
+);
+select ok(
+  not (
+    select cleanup_items @> pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'storage_path',
+        (select mismatched_owner_path from test_deletion_paths)
+      )
+    )
+    from test_deletion_claims
+  ),
+  'account deletion does not claim a corrupt object with disagreeing owner columns'
+);
 reset role;
+delete from storage.objects as object
+using test_deletion_paths as path
+where object.bucket_id = 'community-media'
+  and object.name = path.mismatched_owner_path;
 select ok(
   exists (
     select 1
@@ -2615,9 +3819,41 @@ select ok(
   ),
   'organization hero ownership transfer is audit logged'
 );
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"a1200000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal2"}',
+  true
+);
+select set_config('request.jwt.claim.sub', 'a1200000-0000-4000-8000-000000000001', true);
+set local role authenticated;
+select is(
+  private.authorize_direct_media_upload(
+    'avatars',
+    'a1200000-0000-4000-8000-000000000001/96000000-0000-4000-8000-000000000098.jpg',
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"100"}'::jsonb
+  ),
+  false,
+  'stale authenticated session cannot upload an avatar after deletion claim freeze'
+);
+select is(
+  private.can_write_quarantine_media(
+    (select quarantined_post_path from test_deletion_paths),
+    auth.uid(),
+    '{"mimetype":"image/jpeg","size":"1000"}'::jsonb
+  ),
+  false,
+  'stale authenticated session cannot mutate quarantine bytes after deletion claim freeze'
+);
+reset role;
 select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
 select set_config('request.jwt.claim.sub', '', true);
 set local role service_role;
+delete from storage.objects as object
+using test_deletion_claims as claim,
+      lateral pg_catalog.jsonb_array_elements(claim.cleanup_items) as cleanup(item)
+where object.bucket_id = cleanup.item ->> 'bucket_id'
+  and object.name = cleanup.item ->> 'storage_path';
 select public.service_mark_account_cleanup_item(
   (item ->> 'id')::uuid,
   'deleted',
@@ -2625,6 +3861,63 @@ select public.service_mark_account_cleanup_item(
 )
 from test_deletion_claims
 cross join lateral pg_catalog.jsonb_array_elements(cleanup_items) as cleanup(item);
+
+-- Simulate a response-loss/out-of-band service race after the worker reported
+-- this path deleted. Finalize must reactivate the terminal cleanup row instead
+-- of deleting the Auth identity while owned bytes remain.
+insert into storage.objects (bucket_id, name, owner, owner_id, metadata)
+select
+  'community-media',
+  direct_orphan_path,
+  'a1200000-0000-4000-8000-000000000001'::uuid,
+  'a1200000-0000-4000-8000-000000000001',
+  '{"mimetype":"image/jpeg","size":"700"}'::jsonb
+from test_deletion_paths;
+insert into test_deletion_finalize (result)
+select public.service_finalize_account_anonymization(request_id)
+from test_deletion_claims;
+select is(
+  (select result ->> 'status' from test_deletion_finalize),
+  'processing',
+  'finalize refuses identity deletion when a terminal cleanup path reappears'
+);
+select is(
+  (select result ->> 'error_code' from test_deletion_finalize),
+  'storage_cleanup_incomplete',
+  'late owner inventory persists a stable cleanup retry result'
+);
+reset role;
+select is(
+  (
+    select cleanup.status
+    from private.account_deletion_cleanup_items as cleanup
+    join test_deletion_claims as claim on claim.request_id = cleanup.request_id
+    where cleanup.storage_path =
+      (select direct_orphan_path from test_deletion_paths)
+  ),
+  'pending',
+  'finalize reactivates a deleted cleanup row when exact bytes exist again'
+);
+create temporary table test_reactivated_account_cleanup (item_id uuid primary key);
+grant select on table test_reactivated_account_cleanup to service_role;
+insert into test_reactivated_account_cleanup
+select cleanup.id
+from private.account_deletion_cleanup_items as cleanup
+join test_deletion_claims as claim on claim.request_id = cleanup.request_id
+where cleanup.storage_path = (select direct_orphan_path from test_deletion_paths);
+delete from storage.objects as object
+where object.bucket_id = 'community-media'
+  and object.name = (select direct_orphan_path from test_deletion_paths);
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+select set_config('request.jwt.claim.sub', '', true);
+set local role service_role;
+select public.service_mark_account_cleanup_item(
+  cleanup.item_id,
+  'deleted',
+  null
+)
+from test_reactivated_account_cleanup as cleanup;
+delete from test_deletion_finalize;
 insert into test_deletion_finalize (result)
 select public.service_finalize_account_anonymization(request_id)
 from test_deletion_claims;
@@ -2633,6 +3926,19 @@ select is(
   'awaiting_identity_deletion',
   'Storage-complete account is anonymized before Auth identity deletion'
 );
+reset role;
+select is(
+  (
+    select count(*)
+    from private.direct_media_upload_reservations as reservation
+    where reservation.uploader_id = 'a1200000-0000-4000-8000-000000000001'
+  ),
+  0::bigint,
+  'account anonymization removes private direct-upload reservation history'
+);
+select set_config('request.jwt.claims', '{"role":"service_role","aal":"aal2"}', true);
+select set_config('request.jwt.claim.sub', '', true);
+set local role service_role;
 insert into test_identity_deletion_claims
 select * from public.service_claim_pending_identity_deletions(10);
 select is(
@@ -2686,10 +3992,9 @@ select is(
     where slug = 'jaegun-bupyeong'
   ),
   (
-    select approved_path from public.media_upload_intents
-    where id = '96000000-0000-4000-8000-000000000003'
+    select attached_hero_path from test_deletion_paths
   ),
-  'organization hero remains attached after uploader anonymization'
+  'direct organization hero remains attached after uploader anonymization'
 );
 
 delete from auth.users

@@ -1,12 +1,9 @@
 import { supabase, supabasePublicKey, supabaseUrl } from "./supabase";
 
-const QUARANTINE_BUCKET = "community-media-quarantine";
 const LARGE_FILE_THRESHOLD = 6 * 1024 * 1024;
+const MAX_AVATAR_SIZE = 5 * 1024 * 1024;
 const MAX_IMAGE_SIZE = 15 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 500 * 1024 * 1024;
-const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
-const DEFAULT_APPROVAL_POLL_INTERVAL_MS = 1_500;
-const MAX_CONSECUTIVE_POLL_ERRORS = 3;
 
 const ALLOWED_IMAGE_TYPES = new Set([
   "image/jpeg",
@@ -34,6 +31,25 @@ const EXTENSIONS_BY_MIME: Readonly<Record<string, readonly string[]>> = {
   "video/webm": ["webm"],
 };
 
+const CANONICAL_EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+};
+
+const DIRECTORY_BY_PURPOSE = {
+  post: "posts",
+  message: "messages",
+  organization_hero: "organization",
+  application_evidence: "applications",
+} as const;
+
 export type MediaUploadPurpose =
   | "post"
   | "message"
@@ -42,7 +58,6 @@ export type MediaUploadPurpose =
   | "avatar";
 
 export interface ApprovedMediaUpload {
-  intentId: string;
   bucket: "community-media" | "avatars";
   path: string;
   url: string;
@@ -54,52 +69,17 @@ export interface ApprovedMediaUpload {
   durationSeconds?: number;
 }
 
-interface MediaApprovalPollingOptions {
-  timeoutMs?: number;
-  pollIntervalMs?: number;
-  now?: () => number;
-  wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
-}
-
-export interface CommunityMediaUploadRequest extends MediaApprovalPollingOptions {
+export interface CommunityMediaUploadRequest {
   purpose: MediaUploadPurpose;
   targetId: string;
+  /** Required for every purpose except avatar. */
+  organizationId?: string;
   signal?: AbortSignal;
   /**
-   * Called as soon as the backend creates the intent. The approved path is the
-   * cleanup handle; quarantine paths are deliberately never exposed or read.
-   */
-  onIntentCreated?: (approvedPath: string) => void;
-}
-
-interface UploadIntentContract {
-  id: string;
-  bucketId: typeof QUARANTINE_BUCKET;
-  quarantinePath: string;
-  approvedPath: string;
-  approvedBucketId: "community-media" | "avatars";
-  expiresAt: string;
-  expectedMimeType: string;
-  expectedByteSize: number;
-  expectedKind: "image" | "video";
-  status: "quarantine";
-}
-
-interface MediaIntentRow {
-  id: string;
-  purpose: MediaUploadPurpose;
-  targetId: string;
-  kind: "image" | "video";
-  status: "quarantine" | "scanning" | "approved" | "attached" | "rejected" | "expired";
-  rejectionCode?: string;
-  approvedBucketId: "community-media" | "avatars";
-  approvedPath: string;
-  approvedMimeType?: string;
-  approvedByteSize?: number;
-  approvedWidth?: number;
-  approvedHeight?: number;
-  approvedDurationSeconds?: number;
-  expiresAt: string;
+   * Called before bytes are uploaded so a caller can remove a partially
+   * uploaded object even when signing or the following database write fails.
+  */
+  onObjectPathCreated?: (objectPath: string) => void;
 }
 
 function fileExtension(name: string) {
@@ -134,98 +114,16 @@ function detectedMime(bytes: Uint8Array): string | null {
   return null;
 }
 
-function rowOf(value: unknown): Record<string, unknown> | null {
-  if (Array.isArray(value)) return rowOf(value[0]);
-  return value && typeof value === "object" ? value as Record<string, unknown> : null;
-}
-
-function isSafeObjectPath(value: unknown): value is string {
-  if (typeof value !== "string" || !value || value.length > 1_000) return false;
-  if (value.startsWith("/") || value.includes("\\") || /[\u0000-\u001f\u007f]/u.test(value)) return false;
-  return value.split("/").every((segment) => Boolean(segment) && segment !== "." && segment !== "..");
-}
-
-function requiredString(row: Record<string, unknown>, key: string) {
-  const value = row[key];
-  if (typeof value !== "string" || !value) throw new Error("업로드 승인 정보를 확인할 수 없습니다.");
-  return value;
-}
-
-function optionalPositiveNumber(value: unknown) {
-  const number = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(number) && number > 0 ? number : undefined;
-}
-
-function parseUploadIntent(
-  value: unknown,
-  file: File,
-  expectedKind: "image" | "video",
-): UploadIntentContract {
-  const row = rowOf(value);
-  if (!row) throw new Error("안전한 업로드 공간을 만들지 못했습니다.");
-  const bucketId = requiredString(row, "bucket_id");
-  const quarantinePath = row.quarantine_path;
-  const approvedPath = row.approved_path;
-  const approvedBucketId = requiredString(row, "approved_bucket_id");
-  const expectedByteSize = Number(row.expected_byte_size);
-  const expiresAt = typeof row.expires_at === "string" ? row.expires_at : "";
-  if (bucketId !== QUARANTINE_BUCKET
-    || !isSafeObjectPath(quarantinePath)
-    || !isSafeObjectPath(approvedPath)
-    || !["community-media", "avatars"].includes(approvedBucketId)
-    || row.status !== "quarantine"
-    || row.expected_mime_type !== file.type
-    || expectedByteSize !== file.size
-    || !Number.isFinite(Date.parse(expiresAt))) {
-    throw new Error("서버가 반환한 업로드 승인 정보가 요청과 일치하지 않습니다.");
-  }
-  return {
-    id: requiredString(row, "id"),
-    bucketId,
-    quarantinePath,
-    approvedPath,
-    approvedBucketId: approvedBucketId as UploadIntentContract["approvedBucketId"],
-    expiresAt,
-    expectedMimeType: String(row.expected_mime_type),
-    expectedByteSize,
-    expectedKind,
-    status: "quarantine",
-  };
-}
-
-function parseMediaIntentRow(value: unknown): MediaIntentRow {
-  const row = rowOf(value);
-  if (!row) throw new Error("업로드 처리 상태를 확인할 수 없습니다.");
-  const purpose = requiredString(row, "purpose");
-  const kind = requiredString(row, "kind");
-  const status = requiredString(row, "status");
-  const approvedBucketId = requiredString(row, "approved_bucket_id");
-  const approvedPath = row.approved_path;
-  if (!["post", "message", "organization_hero", "application_evidence", "avatar"].includes(purpose)
-    || !["image", "video"].includes(kind)
-    || !["quarantine", "scanning", "approved", "attached", "rejected", "expired"].includes(status)
-    || !["community-media", "avatars"].includes(approvedBucketId)
-    || !isSafeObjectPath(approvedPath)) {
-    throw new Error("업로드 처리 상태가 올바르지 않습니다.");
-  }
-  return {
-    id: requiredString(row, "id"),
-    purpose: purpose as MediaUploadPurpose,
-    targetId: requiredString(row, "target_id"),
-    kind: kind as MediaIntentRow["kind"],
-    status: status as MediaIntentRow["status"],
-    rejectionCode: typeof row.rejection_code === "string" ? row.rejection_code : undefined,
-    approvedBucketId: approvedBucketId as MediaIntentRow["approvedBucketId"],
-    approvedPath,
-    approvedMimeType: typeof row.approved_mime_type === "string" ? row.approved_mime_type : undefined,
-    approvedByteSize: optionalPositiveNumber(row.approved_byte_size),
-    approvedWidth: optionalPositiveNumber(row.approved_width),
-    approvedHeight: optionalPositiveNumber(row.approved_height),
-    approvedDurationSeconds: row.approved_duration_seconds === 0
-      ? 0
-      : optionalPositiveNumber(row.approved_duration_seconds),
-    expiresAt: requiredString(row, "expires_at"),
-  };
+function isSafePathSegment(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 200
+    && value === value.trim()
+    && value !== "."
+    && value !== ".."
+    && !value.includes("/")
+    && !value.includes("\\")
+    && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
 function abortError() {
@@ -236,108 +134,33 @@ function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw abortError();
 }
 
-function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
-  if (milliseconds <= 0) return Promise.resolve();
-  throwIfAborted(signal);
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-    const onAbort = () => {
-      window.clearTimeout(timeout);
-      reject(abortError());
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-function isNonRetryablePollError(error: unknown) {
-  const row = rowOf(error);
-  const code = String(row?.code ?? "");
-  const status = Number(row?.status ?? 0);
-  return code === "42501" || code === "PGRST301" || status === 401 || status === 403;
-}
-
-async function waitForMediaApproval(
-  contract: UploadIntentContract,
-  request: CommunityMediaUploadRequest,
-): Promise<Omit<ApprovedMediaUpload, "url">> {
-  if (!supabase) throw new Error("Supabase가 연결되지 않았습니다.");
-  const now = request.now ?? (() => performance.now());
-  const wait = request.wait ?? abortableDelay;
-  const timeoutMs = Math.max(1, request.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS);
-  const pollIntervalMs = Math.max(0, request.pollIntervalMs ?? DEFAULT_APPROVAL_POLL_INTERVAL_MS);
-  // Use a monotonic client deadline. Device wall clocks can be wrong; the
-  // backend remains authoritative for the intent's absolute expiry.
-  const deadline = now() + timeoutMs;
-  let consecutiveErrors = 0;
-
-  for (;;) {
-    throwIfAborted(request.signal);
-    let query = supabase
-      .from("media_upload_intents")
-      .select("id, purpose, target_id, kind, status, rejection_code, approved_bucket_id, approved_path, approved_mime_type, approved_byte_size, approved_width, approved_height, approved_duration_seconds, expires_at")
-      .eq("id", contract.id);
-    if (request.signal && typeof query.abortSignal === "function") query = query.abortSignal(request.signal);
-    const result = await query.single();
-    throwIfAborted(request.signal);
-
-    if (result.error) {
-      consecutiveErrors += 1;
-      if (isNonRetryablePollError(result.error) || consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
-        throw new Error("업로드 처리 상태를 확인하지 못했습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.");
-      }
-    } else {
-      consecutiveErrors = 0;
-      const row = parseMediaIntentRow(result.data);
-      if (row.id !== contract.id
-        || row.purpose !== request.purpose
-        || row.targetId !== request.targetId
-        || row.approvedBucketId !== contract.approvedBucketId
-        || row.approvedPath !== contract.approvedPath) {
-        throw new Error("업로드 승인 대상이 요청과 일치하지 않습니다.");
-      }
-      if (row.status === "rejected") {
-        throw new Error(row.rejectionCode === "malware_detected"
-          ? "안전하지 않은 파일이 감지되어 업로드가 차단되었습니다."
-          : "파일 안전성 검사를 통과하지 못했습니다. 다른 원본 파일을 선택해 주세요.");
-      }
-      if (row.status === "expired") {
-        throw new Error("업로드 승인 시간이 만료되었습니다. 파일을 다시 선택해 주세요.");
-      }
-      if (row.status === "attached") {
-        throw new Error("이 업로드는 이미 다른 콘텐츠에 연결되었습니다. 파일을 다시 선택해 주세요.");
-      }
-      if (row.status === "approved") {
-        if (!row.approvedMimeType || !row.approvedByteSize) {
-          throw new Error("승인된 파일의 검사 결과가 완전하지 않습니다.");
-        }
-        if (row.kind !== contract.expectedKind
-          || (row.kind === "image" && (!ALLOWED_IMAGE_TYPES.has(row.approvedMimeType) || row.approvedByteSize > MAX_IMAGE_SIZE))
-          || (row.kind === "video" && (!ALLOWED_VIDEO_TYPES.has(row.approvedMimeType) || row.approvedByteSize > MAX_VIDEO_SIZE))) {
-          throw new Error("승인된 파일 형식이 서비스 정책과 일치하지 않습니다.");
-        }
-        return {
-          intentId: row.id,
-          bucket: row.approvedBucketId,
-          path: row.approvedPath,
-          kind: row.kind,
-          mimeType: row.approvedMimeType,
-          byteSize: row.approvedByteSize,
-          width: row.approvedWidth,
-          height: row.approvedHeight,
-          durationSeconds: row.approvedDurationSeconds,
-        };
-      }
-    }
-
-    const remaining = deadline - now();
-    if (remaining <= 0) {
-      throw new Error("파일 안전성 검사가 예상보다 오래 걸리고 있습니다. 잠시 후 다시 시도해 주세요.");
-    }
-    await wait(Math.min(pollIntervalMs, remaining), request.signal);
+function mediaDestination(file: File, request: CommunityMediaUploadRequest) {
+  if (!isSafePathSegment(request.targetId)) {
+    throw new Error("안전한 업로드 대상을 확인할 수 없습니다.");
   }
+  const extension = CANONICAL_EXTENSION_BY_MIME[file.type];
+  if (!extension) throw new Error("안전한 업로드 파일 형식을 확인할 수 없습니다.");
+  const objectId = crypto.randomUUID();
+
+  if (request.purpose === "avatar") {
+    return {
+      bucket: "avatars" as const,
+      path: `${request.targetId}/${objectId}.${extension}`,
+    };
+  }
+
+  if (!isSafePathSegment(request.organizationId)) {
+    throw new Error("업로드할 교회 정보를 확인할 수 없습니다.");
+  }
+  if (request.purpose === "organization_hero" && request.organizationId !== request.targetId) {
+    throw new Error("교회 대표 사진의 업로드 대상이 현재 교회와 일치하지 않습니다.");
+  }
+  const directory = DIRECTORY_BY_PURPOSE[request.purpose];
+  const targetDirectory = request.purpose === "organization_hero" ? "" : `/${request.targetId}`;
+  return {
+    bucket: "community-media" as const,
+    path: `${request.organizationId}/${directory}${targetDirectory}/${objectId}.${extension}`,
+  };
 }
 
 export function validateMediaFile(file: File): string | null {
@@ -367,9 +190,9 @@ export async function validateMediaSignature(file: File): Promise<string | null>
   return null;
 }
 
-async function uploadQuarantineFile(
+async function uploadDirectFile(
   file: File,
-  contract: UploadIntentContract,
+  destination: Pick<ApprovedMediaUpload, "bucket" | "path">,
   onProgress: (progress: number) => void,
   signal?: AbortSignal,
 ) {
@@ -377,18 +200,22 @@ async function uploadQuarantineFile(
   throwIfAborted(signal);
   if (file.size < LARGE_FILE_THRESHOLD) {
     const { error } = await supabase.storage
-      .from(contract.bucketId)
-      .upload(contract.quarantinePath, file, { contentType: file.type, upsert: false });
+      .from(destination.bucket)
+      .upload(destination.path, file, { contentType: file.type, upsert: false });
     throwIfAborted(signal);
     if (error) throw error;
     onProgress(1);
     return;
   }
 
-  const { data: sessionData } = await supabase.auth.getSession();
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   throwIfAborted(signal);
+  if (sessionError) throw sessionError;
   const accessToken = sessionData.session?.access_token;
   if (!accessToken) throw new Error("업로드를 계속하려면 다시 로그인해 주세요.");
+  const uploadServerUrl = supabaseUrl;
+  const uploadPublicKey = supabasePublicKey;
+  if (!uploadServerUrl || !uploadPublicKey) throw new Error("업로드 서버 설정을 확인할 수 없습니다.");
   const { Upload } = await import("tus-js-client");
 
   await new Promise<void>((resolve, reject) => {
@@ -400,31 +227,43 @@ async function uploadQuarantineFile(
       callback();
     };
     const upload = new Upload(file, {
-      endpoint: `${supabaseUrl!}/storage/v1/upload/resumable`,
+      endpoint: `${uploadServerUrl}/storage/v1/upload/resumable`,
       headers: {
         authorization: `Bearer ${accessToken}`,
-        apikey: supabasePublicKey!,
+        apikey: uploadPublicKey,
       },
       uploadDataDuringCreation: true,
       storeFingerprintForResuming: false,
       removeFingerprintOnSuccess: true,
       metadata: {
-        bucketName: contract.bucketId,
-        objectName: contract.quarantinePath,
+        bucketName: destination.bucket,
+        objectName: destination.path,
         contentType: file.type,
         cacheControl: "3600",
       },
       chunkSize: 6 * 1024 * 1024,
       onError: (error) => settle(() => reject(signal?.aborted ? abortError() : error)),
-      onProgress: (uploaded, total) => onProgress(total ? uploaded / total : 0),
-      onSuccess: () => settle(() => signal?.aborted ? reject(abortError()) : resolve()),
+      onProgress: (uploaded, total) => {
+        if (!settled && !signal?.aborted) onProgress(total ? Math.min(Math.max(uploaded / total, 0), 1) : 0);
+      },
+      onSuccess: () => settle(() => {
+        if (signal?.aborted) reject(abortError());
+        else {
+          onProgress(1);
+          resolve();
+        }
+      }),
     });
     const onAbort = () => {
-      const abortResult = typeof upload.abort === "function" ? upload.abort(false) : undefined;
-      void Promise.resolve(abortResult).then(
-        () => settle(() => reject(abortError())),
-        () => settle(() => reject(abortError())),
-      );
+      try {
+        const abortResult = typeof upload.abort === "function" ? upload.abort(false) : undefined;
+        void Promise.resolve(abortResult).then(
+          () => settle(() => reject(abortError())),
+          () => settle(() => reject(abortError())),
+        );
+      } catch {
+        settle(() => reject(abortError()));
+      }
     };
     signal?.addEventListener("abort", onAbort, { once: true });
     if (signal?.aborted) onAbort();
@@ -438,36 +277,34 @@ export async function uploadCommunityFile(
   onProgress: (progress: number) => void,
 ): Promise<ApprovedMediaUpload> {
   if (!supabase) throw new Error("Supabase가 연결되지 않았습니다.");
-  if (!request.targetId || !request.purpose) throw new Error("안전한 업로드 대상을 확인할 수 없습니다.");
   throwIfAborted(request.signal);
   const signatureError = await validateMediaSignature(file);
   if (signatureError) throw new Error(signatureError);
-  throwIfAborted(request.signal);
-
-  const kind = file.type.startsWith("video/") ? "video" : "image";
-  const intentResult = await supabase.rpc("create_media_upload_intent", {
-    p_purpose: request.purpose,
-    p_target_id: request.targetId,
-    p_kind: kind,
-    p_expected_mime_type: file.type,
-    p_expected_byte_size: file.size,
-  });
-  if (intentResult.error) throw intentResult.error;
-  const contract = parseUploadIntent(intentResult.data, file, kind);
-  const expectedApprovedBucket = request.purpose === "avatar" ? "avatars" : "community-media";
-  if (contract.approvedBucketId !== expectedApprovedBucket) {
-    throw new Error("서버가 반환한 승인 저장소가 업로드 목적과 일치하지 않습니다.");
+  const kind = file.type.startsWith("video/") ? "video" as const : "image" as const;
+  if (["organization_hero", "application_evidence", "avatar"].includes(request.purpose) && kind !== "image") {
+    throw new Error("이 항목에는 사진 파일만 업로드할 수 있습니다.");
   }
-  request.onIntentCreated?.(contract.approvedPath);
+  if (request.purpose === "avatar" && file.size > MAX_AVATAR_SIZE) {
+    throw new Error("프로필 사진은 5MB까지 업로드할 수 있습니다.");
+  }
   throwIfAborted(request.signal);
 
-  await uploadQuarantineFile(file, contract, onProgress, request.signal);
-  const approved = await waitForMediaApproval(contract, request);
+  const destination = mediaDestination(file, request);
+  request.onObjectPathCreated?.(destination.path);
   throwIfAborted(request.signal);
-  const signed = await supabase.storage.from(approved.bucket).createSignedUrl(approved.path, 60 * 60);
+  await uploadDirectFile(file, destination, onProgress, request.signal);
+  throwIfAborted(request.signal);
+
+  const signed = await supabase.storage.from(destination.bucket).createSignedUrl(destination.path, 60 * 60);
   throwIfAborted(request.signal);
   if (signed.error || !signed.data?.signedUrl) {
-    throw signed.error ?? new Error("승인된 업로드 파일 URL을 만들 수 없습니다.");
+    throw signed.error ?? new Error("업로드 파일 URL을 만들 수 없습니다.");
   }
-  return { ...approved, url: signed.data.signedUrl };
+  return {
+    ...destination,
+    url: signed.data.signedUrl,
+    kind,
+    mimeType: file.type,
+    byteSize: file.size,
+  };
 }

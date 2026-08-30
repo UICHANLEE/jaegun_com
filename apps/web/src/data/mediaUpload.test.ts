@@ -2,15 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mediaMocks = vi.hoisted(() => {
   const state = {
-    intentId: "10000000-0000-4000-8000-000000000001",
-    targetId: "20000000-0000-4000-8000-000000000002",
-    purpose: "message",
-    quarantinePath: "30000000-0000-4000-8000-000000000003/10000000-0000-4000-8000-000000000001/upload.mp4",
-    approvedPath: "40000000-0000-4000-8000-000000000004/messages/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000001.mp4",
-    fileSize: 7 * 1024 * 1024,
-    fileType: "video/mp4",
-    pollRows: [] as Array<Record<string, unknown>>,
-    pollErrors: [] as unknown[],
     tusAutoComplete: true,
     onTusStart: undefined as undefined | (() => void),
   };
@@ -18,8 +9,14 @@ const mediaMocks = vi.hoisted(() => {
     rpc: vi.fn(),
     storageFrom: vi.fn(),
     upload: vi.fn(async () => ({ error: null })),
-    createSignedUrl: vi.fn(async (path: string) => ({ data: { signedUrl: `signed:${path}` }, error: null })),
-    queryAbortSignal: vi.fn(),
+    createSignedUrl: vi.fn(async (path: string): Promise<{
+      data: { signedUrl: string | null };
+      error: Error | null;
+    }> => ({ data: { signedUrl: `signed:${path}` }, error: null })),
+    getSession: vi.fn(async () => ({
+      data: { session: { access_token: "upload-token" } },
+      error: null,
+    })),
     tusStart: vi.fn(),
     tusAbort: vi.fn(async () => undefined),
   };
@@ -29,79 +26,23 @@ const mediaMocks = vi.hoisted(() => {
   return { state, calls, tus };
 });
 
-function intentContract() {
-  return {
-    id: mediaMocks.state.intentId,
-    bucket_id: "community-media-quarantine",
-    quarantine_path: mediaMocks.state.quarantinePath,
-    approved_path: mediaMocks.state.approvedPath,
-    approved_bucket_id: "community-media",
-    expires_at: "2099-01-01T00:00:00.000Z",
-    expected_mime_type: mediaMocks.state.fileType,
-    expected_byte_size: mediaMocks.state.fileSize,
-    status: "quarantine",
-  };
-}
-
-function intentRow(overrides: Record<string, unknown> = {}) {
-  return {
-    id: mediaMocks.state.intentId,
-    purpose: mediaMocks.state.purpose,
-    target_id: mediaMocks.state.targetId,
-    kind: mediaMocks.state.fileType.startsWith("video/") ? "video" : "image",
-    status: "approved",
-    rejection_code: null,
-    approved_bucket_id: "community-media",
-    approved_path: mediaMocks.state.approvedPath,
-    approved_mime_type: mediaMocks.state.fileType,
-    approved_byte_size: mediaMocks.state.fileSize,
-    approved_width: 1920,
-    approved_height: 1080,
-    approved_duration_seconds: 12.5,
-    expires_at: "2099-01-01T00:00:00.000Z",
-    ...overrides,
-  };
-}
-
-vi.mock("./supabase", () => {
-  const query: Record<string, ReturnType<typeof vi.fn>> = {};
-  query.select = vi.fn(() => query);
-  query.eq = vi.fn(() => query);
-  query.abortSignal = vi.fn((signal: AbortSignal) => {
-    mediaMocks.calls.queryAbortSignal(signal);
-    return query;
-  });
-  query.single = vi.fn(async () => {
-    const error = mediaMocks.state.pollErrors.shift();
-    if (error) return { data: null, error };
-    return { data: mediaMocks.state.pollRows.shift() ?? intentRow(), error: null };
-  });
-  return {
-    supabasePublicKey: "sb_publishable_test_public_key_1234567890",
-    supabaseUrl: "https://project.supabase.co",
-    supabase: {
-      auth: {
-        getSession: vi.fn(async () => ({ data: { session: { access_token: "upload-token" } }, error: null })),
-      },
-      rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
-        mediaMocks.calls.rpc(name, args);
-        return name === "create_media_upload_intent"
-          ? { data: intentContract(), error: null }
-          : { data: null, error: new Error("unexpected_rpc") };
+vi.mock("./supabase", () => ({
+  supabasePublicKey: "sb_publishable_test_public_key_1234567890",
+  supabaseUrl: "https://project.supabase.co",
+  supabase: {
+    auth: { getSession: mediaMocks.calls.getSession },
+    rpc: mediaMocks.calls.rpc,
+    storage: {
+      from: vi.fn((bucket: string) => {
+        mediaMocks.calls.storageFrom(bucket);
+        return {
+          upload: mediaMocks.calls.upload,
+          createSignedUrl: mediaMocks.calls.createSignedUrl,
+        };
       }),
-      from: vi.fn(() => query),
-      storage: {
-        from: vi.fn((bucket: string) => {
-          mediaMocks.calls.storageFrom(bucket);
-          return {
-            upload: mediaMocks.calls.upload,
-            createSignedUrl: mediaMocks.calls.createSignedUrl,
-          };
-        }),
-      },
     },
-  };
-});
+  },
+}));
 
 vi.mock("tus-js-client", () => ({
   Upload: class MockUpload {
@@ -116,7 +57,7 @@ vi.mock("tus-js-client", () => ({
         onProgress?: (uploaded: number, total: number) => void;
         onSuccess?: () => void;
       };
-      options.onProgress?.(7, 7);
+      options.onProgress?.(7, 14);
       if (mediaMocks.state.tusAutoComplete) options.onSuccess?.();
     }
 
@@ -126,7 +67,13 @@ vi.mock("tus-js-client", () => ({
   },
 }));
 
-import { uploadCommunityFile, validateMediaFile, validateMediaSignature } from "./mediaUpload";
+import {
+  type CommunityMediaUploadRequest,
+  type MediaUploadPurpose,
+  uploadCommunityFile,
+  validateMediaFile,
+  validateMediaSignature,
+} from "./mediaUpload";
 
 const FILE_HEADERS: Readonly<Record<string, readonly number[]>> = {
   "image/jpeg": [0xff, 0xd8, 0xff, 0xe0],
@@ -134,6 +81,10 @@ const FILE_HEADERS: Readonly<Record<string, readonly number[]>> = {
   "video/mp4": [0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d],
   "video/quicktime": [0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x71, 0x74, 0x20, 0x20],
 };
+const ORGANIZATION_ID = "40000000-0000-4000-8000-000000000004";
+const TARGET_ID = "20000000-0000-4000-8000-000000000002";
+const USER_ID = "30000000-0000-4000-8000-000000000003";
+const CANONICAL_UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function fileOfSize(name: string, type: string, byteSize: number) {
   const file = new File([Uint8Array.from(FILE_HEADERS[type] ?? [1]).buffer], name, { type });
@@ -141,36 +92,47 @@ function fileOfSize(name: string, type: string, byteSize: number) {
   return file;
 }
 
-function configureFile(file: File, purpose = "message") {
-  mediaMocks.state.fileSize = file.size;
-  mediaMocks.state.fileType = file.type;
-  mediaMocks.state.purpose = purpose;
+function expectFinalObjectPath(path: string, parentSegments: readonly string[], extension: string) {
+  const segments = path.split("/");
+  expect(segments.slice(0, -1)).toEqual(parentSegments);
+  const filenameSegments = (segments.at(-1) ?? "").split(".");
+  expect(filenameSegments).toHaveLength(2);
+  expect(filenameSegments[0]).toMatch(CANONICAL_UUID_V4);
+  expect(filenameSegments[1]).toBe(extension);
 }
 
-function uploadRequest(overrides: Record<string, unknown> = {}) {
+function uploadRequest(
+  purpose: MediaUploadPurpose = "message",
+  overrides: Partial<CommunityMediaUploadRequest> = {},
+): CommunityMediaUploadRequest {
+  const targetId = purpose === "avatar"
+    ? USER_ID
+    : purpose === "organization_hero"
+      ? ORGANIZATION_ID
+      : TARGET_ID;
   return {
-    purpose: mediaMocks.state.purpose as "message",
-    targetId: mediaMocks.state.targetId,
-    wait: vi.fn(async () => undefined),
+    purpose,
+    targetId,
+    ...(purpose === "avatar" ? {} : { organizationId: ORGANIZATION_ID }),
     ...overrides,
   };
 }
 
-describe("media upload validation", () => {
+describe("direct private media upload", () => {
   beforeEach(() => {
-    mediaMocks.state.intentId = "10000000-0000-4000-8000-000000000001";
-    mediaMocks.state.targetId = "20000000-0000-4000-8000-000000000002";
-    mediaMocks.state.purpose = "message";
-    mediaMocks.state.quarantinePath = "30000000-0000-4000-8000-000000000003/10000000-0000-4000-8000-000000000001/upload.mp4";
-    mediaMocks.state.approvedPath = "40000000-0000-4000-8000-000000000004/messages/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000001.mp4";
-    mediaMocks.state.fileSize = 7 * 1024 * 1024;
-    mediaMocks.state.fileType = "video/mp4";
-    mediaMocks.state.pollRows = [];
-    mediaMocks.state.pollErrors = [];
     mediaMocks.state.tusAutoComplete = true;
     mediaMocks.state.onTusStart = undefined;
     mediaMocks.tus.options = null;
     for (const mock of Object.values(mediaMocks.calls)) mock.mockClear();
+    mediaMocks.calls.upload.mockResolvedValue({ error: null });
+    mediaMocks.calls.createSignedUrl.mockImplementation(async (path: string) => ({
+      data: { signedUrl: `signed:${path}` },
+      error: null,
+    }));
+    mediaMocks.calls.getSession.mockResolvedValue({
+      data: { session: { access_token: "upload-token" } },
+      error: null,
+    });
   });
 
   it("accepts supported photos and videos within service limits", () => {
@@ -178,187 +140,188 @@ describe("media upload validation", () => {
     expect(validateMediaFile(fileOfSize("video.mp4", "video/mp4", 500 * 1024 * 1024))).toBeNull();
   });
 
-  it("rejects oversized files and MIME types that private Storage does not allow", () => {
+  it("uses canonical UUID fixtures that match the database path contract", () => {
+    expect(ORGANIZATION_ID).toMatch(CANONICAL_UUID_V4);
+    expect(TARGET_ID).toMatch(CANONICAL_UUID_V4);
+    expect(USER_ID).toMatch(CANONICAL_UUID_V4);
+  });
+
+  it("rejects oversized, empty, misleading, and unsupported files", async () => {
+    expect(validateMediaFile(new File([], "empty.jpg", { type: "image/jpeg" }))).toContain("비어 있는");
+    expect(validateMediaFile(fileOfSize("photo.png", "image/jpeg", 100))).toContain("확장자");
     expect(validateMediaFile(fileOfSize("photo.png", "image/png", 15 * 1024 * 1024 + 1))).toContain("15MB");
     expect(validateMediaFile(fileOfSize("video.mov", "video/quicktime", 500 * 1024 * 1024 + 1))).toContain("500MB");
     expect(validateMediaFile(fileOfSize("document.pdf", "application/pdf", 100))).toContain("JPG, PNG");
-    expect(validateMediaFile(fileOfSize("animation.gif", "image/gif", 100))).toContain("JPG, PNG");
-    expect(validateMediaFile(fileOfSize("vector.svg", "image/svg+xml", 100))).toContain("JPG, PNG");
-  });
-
-  it("rejects empty files, misleading extensions, and forged MIME metadata", async () => {
-    expect(validateMediaFile(new File([], "empty.jpg", { type: "image/jpeg" }))).toContain("비어 있는");
-    expect(validateMediaFile(fileOfSize("photo.png", "image/jpeg", 100))).toContain("확장자");
     expect(await validateMediaSignature(new File([
       Uint8Array.from(FILE_HEADERS["image/png"]).buffer,
     ], "forged.jpg", { type: "image/jpeg" }))).toContain("파일 내용");
   });
 
-  it("creates an intent, uploads only to quarantine, polls, then signs only the approved object", async () => {
+  it.each([
+    ["post", "community-media", [ORGANIZATION_ID, "posts", TARGET_ID]],
+    ["message", "community-media", [ORGANIZATION_ID, "messages", TARGET_ID]],
+    ["application_evidence", "community-media", [ORGANIZATION_ID, "applications", TARGET_ID]],
+    ["organization_hero", "community-media", [ORGANIZATION_ID, "organization"]],
+    ["avatar", "avatars", [USER_ID]],
+  ] as const)("uploads %s directly to its final private path", async (purpose, bucket, parentSegments) => {
     const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
-    configureFile(file);
-    mediaMocks.state.quarantinePath = "user/intent/upload.jpg";
-    mediaMocks.state.approvedPath = "org/messages/chat/intent.jpg";
-    mediaMocks.state.pollRows = [
-      intentRow({ status: "scanning", approved_mime_type: null, approved_byte_size: null }),
-      intentRow({
-        approved_mime_type: "image/webp",
-        approved_byte_size: 640,
-        approved_width: 800,
-        approved_height: 600,
-        approved_duration_seconds: null,
-      }),
-    ];
+    const onObjectPathCreated = vi.fn();
     const progress = vi.fn();
-    const onIntentCreated = vi.fn();
 
-    await expect(uploadCommunityFile(file, uploadRequest({ onIntentCreated }), progress)).resolves.toEqual({
-      intentId: mediaMocks.state.intentId,
-      bucket: "community-media",
-      path: mediaMocks.state.approvedPath,
-      url: `signed:${mediaMocks.state.approvedPath}`,
+    const uploaded = await uploadCommunityFile(
+      file,
+      uploadRequest(purpose, { onObjectPathCreated }),
+      progress,
+    );
+    const path = onObjectPathCreated.mock.calls[0]?.[0] as string;
+
+    expectFinalObjectPath(path, parentSegments, "jpg");
+    expect(uploaded).toEqual({
+      bucket,
+      path,
+      url: `signed:${path}`,
       kind: "image",
-      mimeType: "image/webp",
-      byteSize: 640,
-      width: 800,
-      height: 600,
-      durationSeconds: undefined,
+      mimeType: "image/jpeg",
+      byteSize: 1_024,
     });
-
-    expect(mediaMocks.calls.rpc).toHaveBeenCalledWith("create_media_upload_intent", {
-      p_purpose: "message",
-      p_target_id: mediaMocks.state.targetId,
-      p_kind: "image",
-      p_expected_mime_type: "image/jpeg",
-      p_expected_byte_size: 1_024,
-    });
-    expect(onIntentCreated).toHaveBeenCalledWith(mediaMocks.state.approvedPath);
-    expect(mediaMocks.calls.upload).toHaveBeenCalledWith(
-      mediaMocks.state.quarantinePath,
+    expect(mediaMocks.calls.upload).toHaveBeenLastCalledWith(
+      path,
       file,
       { contentType: "image/jpeg", upsert: false },
     );
-    expect(mediaMocks.calls.storageFrom.mock.calls.map(([bucket]) => bucket)).toEqual([
-      "community-media-quarantine",
-      "community-media",
-    ]);
-    expect(mediaMocks.calls.createSignedUrl).toHaveBeenCalledWith(mediaMocks.state.approvedPath, 3600);
+    expect(mediaMocks.calls.createSignedUrl).toHaveBeenLastCalledWith(path, 3_600);
+    expect(mediaMocks.calls.storageFrom).toHaveBeenNthCalledWith(
+      mediaMocks.calls.storageFrom.mock.calls.length - 1,
+      bucket,
+    );
+    expect(mediaMocks.calls.storageFrom).toHaveBeenLastCalledWith(bucket);
     expect(progress).toHaveBeenLastCalledWith(1);
   });
 
-  it("uses the intent quarantine destination for TUS and never resumes a stale upload URL", async () => {
+  it("never creates an intent or writes to quarantine", async () => {
+    const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
+
+    await uploadCommunityFile(file, uploadRequest("post"), vi.fn());
+
+    expect(mediaMocks.calls.rpc).not.toHaveBeenCalled();
+    expect(mediaMocks.calls.storageFrom).not.toHaveBeenCalledWith("community-media-quarantine");
+  });
+
+  it("uses the final community-media path for large resumable uploads", async () => {
     const file = fileOfSize("large-video.mp4", "video/mp4", 7 * 1024 * 1024);
-    configureFile(file);
+    const onObjectPathCreated = vi.fn();
     const progress = vi.fn();
 
-    await uploadCommunityFile(file, uploadRequest(), progress);
+    await uploadCommunityFile(file, uploadRequest("message", { onObjectPathCreated }), progress);
 
+    const path = onObjectPathCreated.mock.calls[0]?.[0] as string;
     const options = mediaMocks.tus.options as {
+      endpoint: string;
+      headers: Record<string, string>;
       metadata: Record<string, string>;
       storeFingerprintForResuming: boolean;
+      removeFingerprintOnSuccess: boolean;
     };
+    expectFinalObjectPath(path, [ORGANIZATION_ID, "messages", TARGET_ID], "mp4");
     expect(mediaMocks.calls.tusStart).toHaveBeenCalledTimes(1);
+    expect(options.endpoint).toBe("https://project.supabase.co/storage/v1/upload/resumable");
+    expect(options.headers).toMatchObject({ authorization: "Bearer upload-token" });
     expect(options.storeFingerprintForResuming).toBe(false);
+    expect(options.removeFingerprintOnSuccess).toBe(true);
     expect(options.metadata).toMatchObject({
-      bucketName: "community-media-quarantine",
-      objectName: mediaMocks.state.quarantinePath,
+      bucketName: "community-media",
+      objectName: path,
       contentType: "video/mp4",
     });
+    expect(progress).toHaveBeenCalledWith(0.5);
     expect(progress).toHaveBeenLastCalledWith(1);
     expect(mediaMocks.calls.storageFrom).toHaveBeenCalledTimes(1);
     expect(mediaMocks.calls.storageFrom).toHaveBeenCalledWith("community-media");
   });
 
-  it("does not sign or expose quarantine when the scanner rejects the file", async () => {
-    const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
-    configureFile(file);
-    mediaMocks.state.quarantinePath = "user/intent/upload.jpg";
-    mediaMocks.state.approvedPath = "org/messages/chat/intent.jpg";
-    mediaMocks.state.pollRows = [intentRow({
-      status: "rejected",
-      rejection_code: "malware_detected",
-      approved_mime_type: null,
-      approved_byte_size: null,
-    })];
-
-    await expect(uploadCommunityFile(file, uploadRequest(), vi.fn())).rejects.toThrow("안전하지 않은 파일");
-    expect(mediaMocks.calls.createSignedUrl).not.toHaveBeenCalled();
-    expect(mediaMocks.calls.storageFrom).toHaveBeenCalledTimes(1);
-    expect(mediaMocks.calls.storageFrom).toHaveBeenCalledWith("community-media-quarantine");
-  });
-
-  it("stops polling at a deterministic bounded deadline without real timers", async () => {
-    const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
-    configureFile(file);
-    mediaMocks.state.quarantinePath = "user/intent/upload.jpg";
-    mediaMocks.state.approvedPath = "org/messages/chat/intent.jpg";
-    mediaMocks.state.pollRows = Array.from({ length: 4 }, () => intentRow({
-      status: "scanning",
-      approved_mime_type: null,
-      approved_byte_size: null,
-    }));
-    let currentTime = 1_000;
-    const wait = vi.fn(async (milliseconds: number) => { currentTime += milliseconds; });
-
-    await expect(uploadCommunityFile(file, uploadRequest({
-      timeoutMs: 25,
-      pollIntervalMs: 10,
-      now: () => currentTime,
-      wait,
-    }), vi.fn())).rejects.toThrow("예상보다 오래");
-
-    expect(wait).toHaveBeenCalledTimes(3);
-    expect(wait.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([10, 10, 5]);
-    expect(mediaMocks.calls.createSignedUrl).not.toHaveBeenCalled();
-  });
-
-  it("aborts an in-flight approval wait without signing an object", async () => {
-    const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
-    configureFile(file);
-    mediaMocks.state.quarantinePath = "user/intent/upload.jpg";
-    mediaMocks.state.approvedPath = "org/messages/chat/intent.jpg";
-    mediaMocks.state.pollRows = [intentRow({
-      status: "scanning",
-      approved_mime_type: null,
-      approved_byte_size: null,
-    })];
-    const controller = new AbortController();
-    const wait = vi.fn(async () => { controller.abort(); });
-
-    await expect(uploadCommunityFile(file, uploadRequest({ signal: controller.signal, wait }), vi.fn()))
-      .rejects.toMatchObject({ name: "AbortError" });
-    expect(mediaMocks.calls.createSignedUrl).not.toHaveBeenCalled();
-    expect(mediaMocks.calls.queryAbortSignal).toHaveBeenCalledWith(controller.signal);
-  });
-
-  it("aborts an in-flight TUS upload without polling or signing", async () => {
+  it("aborts an in-flight TUS upload and leaves the path available for cleanup", async () => {
     const file = fileOfSize("large-video.mp4", "video/mp4", 7 * 1024 * 1024);
-    configureFile(file);
-    mediaMocks.state.tusAutoComplete = false;
     const controller = new AbortController();
+    const onObjectPathCreated = vi.fn();
     let notifyStarted!: () => void;
     const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+    mediaMocks.state.tusAutoComplete = false;
     mediaMocks.state.onTusStart = notifyStarted;
 
-    const upload = uploadCommunityFile(file, uploadRequest({ signal: controller.signal }), vi.fn());
+    const upload = uploadCommunityFile(
+      file,
+      uploadRequest("message", { signal: controller.signal, onObjectPathCreated }),
+      vi.fn(),
+    );
     await started;
     controller.abort();
 
     await expect(upload).rejects.toMatchObject({ name: "AbortError" });
+    expect(onObjectPathCreated).toHaveBeenCalledTimes(1);
     expect(mediaMocks.calls.tusAbort).toHaveBeenCalledTimes(1);
     expect(mediaMocks.calls.createSignedUrl).not.toHaveBeenCalled();
-    expect(mediaMocks.calls.queryAbortSignal).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the server returns an unsafe quarantine path", async () => {
+  it("checks abort again after a small upload so the caller can clean partial bytes", async () => {
     const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
-    configureFile(file);
-    mediaMocks.state.quarantinePath = "../approved/upload.jpg";
-    mediaMocks.state.approvedPath = "org/messages/chat/intent.jpg";
+    const controller = new AbortController();
+    const onObjectPathCreated = vi.fn();
+    mediaMocks.calls.upload.mockImplementationOnce(async () => {
+      controller.abort();
+      return { error: null };
+    });
 
-    await expect(uploadCommunityFile(file, uploadRequest(), vi.fn())).rejects.toThrow("요청과 일치하지 않습니다");
+    await expect(uploadCommunityFile(
+      file,
+      uploadRequest("post", { signal: controller.signal, onObjectPathCreated }),
+      vi.fn(),
+    )).rejects.toMatchObject({ name: "AbortError" });
+    expect(onObjectPathCreated).toHaveBeenCalledTimes(1);
+    expect(mediaMocks.calls.createSignedUrl).not.toHaveBeenCalled();
+  });
+
+  it("keeps a cleanup handle when signing fails after bytes are stored", async () => {
+    const file = fileOfSize("photo.jpg", "image/jpeg", 1_024);
+    const onObjectPathCreated = vi.fn();
+    mediaMocks.calls.createSignedUrl.mockResolvedValueOnce({
+      data: { signedUrl: null },
+      error: new Error("signing failed"),
+    });
+
+    await expect(uploadCommunityFile(
+      file,
+      uploadRequest("post", { onObjectPathCreated }),
+      vi.fn(),
+    )).rejects.toThrow("signing failed");
+    expect(onObjectPathCreated).toHaveBeenCalledTimes(1);
+    expect(mediaMocks.calls.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed for invalid scopes and image-only destinations", async () => {
+    const photo = fileOfSize("photo.jpg", "image/jpeg", 1_024);
+    const video = fileOfSize("video.mp4", "video/mp4", 1_024);
+
+    await expect(uploadCommunityFile(
+      photo,
+      uploadRequest("post", { organizationId: "../other" }),
+      vi.fn(),
+    )).rejects.toThrow("교회 정보");
+    await expect(uploadCommunityFile(
+      photo,
+      uploadRequest("message", { targetId: "../other" }),
+      vi.fn(),
+    )).rejects.toThrow("업로드 대상");
+    await expect(uploadCommunityFile(
+      video,
+      uploadRequest("organization_hero"),
+      vi.fn(),
+    )).rejects.toThrow("사진 파일만");
+    await expect(uploadCommunityFile(
+      fileOfSize("avatar.jpg", "image/jpeg", 5 * 1024 * 1024 + 1),
+      uploadRequest("avatar"),
+      vi.fn(),
+    )).rejects.toThrow("5MB");
     expect(mediaMocks.calls.upload).not.toHaveBeenCalled();
     expect(mediaMocks.calls.tusStart).not.toHaveBeenCalled();
-    expect(mediaMocks.calls.createSignedUrl).not.toHaveBeenCalled();
   });
 });

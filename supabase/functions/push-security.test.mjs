@@ -84,8 +84,11 @@ test("encrypts tokens with authenticated AES-GCM and detects tampering", async (
     /push_token_decryption_failed/,
   );
 
-  const last = encrypted.ciphertext.at(-1);
-  const tampered = `${encrypted.ciphertext.slice(0, -1)}${last === "A" ? "B" : "A"}`;
+  const envelope = encrypted.ciphertext.split(".");
+  const tamperedBytes = Buffer.from(envelope[3], "base64url");
+  tamperedBytes[0] ^= 0x01;
+  envelope[3] = tamperedBytes.toString("base64url");
+  const tampered = envelope.join(".");
   await assert.rejects(decryptPushToken(tampered, "android", 7, keys));
 });
 

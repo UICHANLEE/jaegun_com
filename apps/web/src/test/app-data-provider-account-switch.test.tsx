@@ -33,6 +33,10 @@ const remote = vi.hoisted(() => {
     data: { status: "draft", removable_paths: args.p_storage_paths, protected_paths: [], cleanup_queued: true },
     error: null,
   });
+  let abandonDirectHandler: (args: Record<string, unknown>) => Promise<Result> = async () => ({
+    data: { cleanup_queued: true },
+    error: null,
+  });
 
   const user = (id: string) => ({
     id,
@@ -153,11 +157,13 @@ const remote = vi.hoisted(() => {
     set publishHandler(value: typeof publishHandler) { publishHandler = value; },
     set saveHandler(value: typeof saveHandler) { saveHandler = value; },
     set prepareCleanupHandler(value: typeof prepareCleanupHandler) { prepareCleanupHandler = value; },
+    set abandonDirectHandler(value: typeof abandonDirectHandler) { abandonDirectHandler = value; },
     reset() {
       currentUserId = "user-a";
       authCallback = null;
       calls.length = 0;
       storageRemove.mockClear();
+      storageRemove.mockImplementation(async () => ({ data: null, error: null }));
       upload.mockClear();
       upload.mockImplementation(async (_file: File, path: string) => ({ path, url: `https://media.test/${path}` }));
       sendHandler = async () => ({ data: [], error: null });
@@ -171,6 +177,7 @@ const remote = vi.hoisted(() => {
         data: { status: "draft", removable_paths: args.p_storage_paths, protected_paths: [], cleanup_queued: true },
         error: null,
       });
+      abandonDirectHandler = async () => ({ data: { cleanup_queued: true }, error: null });
     },
     switchUser(id: string) {
       currentUserId = id;
@@ -202,6 +209,7 @@ const remote = vi.hoisted(() => {
       if (name === "publish_owned_post") return publishHandler(args);
       if (name === "reconcile_post_operation") return Promise.resolve({ data: { status: "draft" }, error: null });
       if (name === "prepare_post_media_cleanup") return prepareCleanupHandler(args);
+      if (name === "abandon_direct_media_objects") return abandonDirectHandler(args);
       if (name === "save_owned_post_draft") {
         if (saveHandler) return saveHandler(args);
         return Promise.resolve({
@@ -254,14 +262,14 @@ vi.mock("../data/mediaUpload", () => ({
   uploadCommunityFile: async (file: File, request: {
     purpose: "post" | "message";
     targetId: string;
-    onIntentCreated?: (approvedPath: string) => void;
+    organizationId?: string;
+    onObjectPathCreated?: (objectPath: string) => void;
   }) => {
     const directory = request.purpose === "post" ? "posts" : "messages";
-    const intendedPath = `org-1/${directory}/${request.targetId}/${file.name}`;
-    request.onIntentCreated?.(intendedPath);
+    const intendedPath = `${request.organizationId ?? "org-1"}/${directory}/${request.targetId}/${file.name}`;
+    request.onObjectPathCreated?.(intendedPath);
     const uploaded = await remote.upload(file, intendedPath);
     return {
-      intentId: `intent-${file.name}`,
       bucket: "community-media" as const,
       path: uploaded.path,
       url: uploaded.url,
@@ -345,6 +353,118 @@ describe("AppDataProvider account-switch operation boundaries", () => {
       expect(JSON.parse(window.localStorage.getItem("jaegun-draft-cleanup-v1") ?? "[]")).toEqual([]);
     });
     expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
+  });
+
+  it("chunks direct cleanup and falls back to the server queue when Storage delete is denied", async () => {
+    const paths = Array.from({ length: 21 }, (_, index) =>
+      `40000000-0000-4000-8000-000000000004/messages/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-${String(index).padStart(12, "0")}.jpg`);
+    window.localStorage.setItem("jaegun-storage-cleanup-v1", JSON.stringify([{
+      userId: "user-a",
+      paths,
+    }]));
+    remote.storageRemove.mockResolvedValue({ data: null, error: new Error("storage delete denied") });
+
+    await renderLoadedProvider();
+
+    await waitFor(() => expect(
+      remote.calls.filter((call) => call.name === "abandon_direct_media_objects"),
+    ).toHaveLength(2));
+    expect(remote.storageRemove).toHaveBeenNthCalledWith(1, paths.slice(0, 20));
+    expect(remote.storageRemove).toHaveBeenNthCalledWith(2, paths.slice(20));
+    const fallbackCalls = remote.calls.filter((call) => call.name === "abandon_direct_media_objects");
+    expect(fallbackCalls.map((call) => call.args)).toEqual([
+      { p_bucket_id: "community-media", p_storage_paths: paths.slice(0, 20) },
+      { p_bucket_id: "community-media", p_storage_paths: paths.slice(20) },
+    ]);
+    await waitFor(() => expect(
+      JSON.parse(window.localStorage.getItem("jaegun-storage-cleanup-v1") ?? "[]"),
+    ).toEqual([]));
+  });
+
+  it("does not run the cleanup fallback as a different account after the epoch changes", async () => {
+    const path = "40000000-0000-4000-8000-000000000004/messages/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000001.jpg";
+    const removal = deferred<{ data: null; error: Error | null }>();
+    window.localStorage.setItem("jaegun-storage-cleanup-v1", JSON.stringify([{
+      userId: "user-a",
+      paths: [path],
+    }]));
+    remote.storageRemove.mockImplementationOnce(() => removal.promise);
+
+    await renderLoadedProvider();
+    await waitFor(() => expect(remote.storageRemove).toHaveBeenCalledWith([path]));
+    fireEvent.click(screen.getByRole("button", { name: "switch b" }));
+    await waitFor(() => expect(screen.getByTestId("viewer")).toHaveTextContent("user-b"));
+    await act(async () => removal.resolve({ data: null, error: new Error("storage delete denied") }));
+
+    await waitFor(() => expect(
+      JSON.parse(window.localStorage.getItem("jaegun-storage-cleanup-v1") ?? "[]"),
+    ).toEqual([{ userId: "user-a", paths: [path] }]));
+    expect(remote.calls.filter((call) => call.name === "abandon_direct_media_objects")).toHaveLength(0);
+  });
+
+  it("keeps the local retry when both direct deletion and server queueing fail", async () => {
+    const path = "40000000-0000-4000-8000-000000000004/messages/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000001.jpg";
+    window.localStorage.setItem("jaegun-storage-cleanup-v1", JSON.stringify([{
+      userId: "user-a",
+      paths: [path],
+    }]));
+    remote.storageRemove.mockResolvedValue({ data: null, error: new Error("storage delete denied") });
+    remote.abandonDirectHandler = async () => ({
+      data: null,
+      error: new Error("server cleanup unavailable"),
+    });
+
+    await renderLoadedProvider();
+
+    await waitFor(() => expect(
+      remote.calls.filter((call) => call.name === "abandon_direct_media_objects"),
+    ).toHaveLength(1));
+    expect(JSON.parse(window.localStorage.getItem("jaegun-storage-cleanup-v1") ?? "[]"))
+      .toEqual([{ userId: "user-a", paths: [path] }]);
+  });
+
+  it("accepts idempotent fallback counts that cover the complete chunk", async () => {
+    const path = "40000000-0000-4000-8000-000000000004/messages/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000001.jpg";
+    window.localStorage.setItem("jaegun-storage-cleanup-v1", JSON.stringify([{
+      userId: "user-a",
+      paths: [path],
+    }]));
+    remote.storageRemove.mockResolvedValue({ data: null, error: new Error("storage delete denied") });
+    remote.abandonDirectHandler = async () => ({
+      data: { queued_count: 0, already_queued_count: 1 },
+      error: null,
+    });
+
+    await renderLoadedProvider();
+
+    await waitFor(() => expect(
+      remote.calls.filter((call) => call.name === "abandon_direct_media_objects"),
+    ).toHaveLength(1));
+    await waitFor(() => expect(
+      JSON.parse(window.localStorage.getItem("jaegun-storage-cleanup-v1") ?? "[]"),
+    ).toEqual([]));
+  });
+
+  it.each([
+    ["missing", { queued_count: 1 }],
+    ["partial", { queued_count: 0, already_queued_count: 0 }],
+    ["malformed", { queued_count: "1", already_queued_count: 0 }],
+  ] as const)("keeps the local retry for %s fallback counts", async (_case, payload) => {
+    const path = "40000000-0000-4000-8000-000000000004/messages/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000001.jpg";
+    window.localStorage.setItem("jaegun-storage-cleanup-v1", JSON.stringify([{
+      userId: "user-a",
+      paths: [path],
+    }]));
+    remote.storageRemove.mockResolvedValue({ data: null, error: new Error("storage delete denied") });
+    remote.abandonDirectHandler = async () => ({ data: payload, error: null });
+
+    await renderLoadedProvider();
+
+    await waitFor(() => expect(
+      remote.calls.filter((call) => call.name === "abandon_direct_media_objects"),
+    ).toHaveLength(1));
+    expect(JSON.parse(window.localStorage.getItem("jaegun-storage-cleanup-v1") ?? "[]"))
+      .toEqual([{ userId: "user-a", paths: [path] }]);
   });
 
   it("preserves A reconciliation and never cleans attachments when B receives an empty result", async () => {
@@ -454,6 +574,9 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     expect(saveCalls).toBe(3);
     expect(remote.calls.filter((call) => call.name === "prepare_post_media_cleanup")).toHaveLength(1);
     expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
+    expect(remote.storageRemove).toHaveBeenCalledWith(
+      remote.calls.find((call) => call.name === "prepare_post_media_cleanup")?.args.p_storage_paths,
+    );
     expect(remote.upload).toHaveBeenCalledTimes(2);
   });
 
@@ -483,11 +606,12 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     expect(remote.calls.filter((call) => call.name === "prepare_post_media_cleanup")[0]?.args.p_storage_paths)
       .toEqual(firstPaths);
     expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);
+    expect(remote.storageRemove).toHaveBeenCalledWith(firstPaths);
     expect(remote.upload).toHaveBeenCalledTimes(2);
     expect((remote.upload.mock.calls[1]?.[0] as File).name).toBe("replacement.jpg");
   });
 
-  it("inserts post media with scanner-authoritative metadata", async () => {
+  it("inserts post media with the direct upload metadata", async () => {
     remote.upload.mockImplementation(async (_file: File, path: string) => ({
       path,
       url: `https://media.test/${path}`,
@@ -512,7 +636,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     }));
   });
 
-  it("builds message media input from scanner-authoritative metadata", async () => {
+  it("builds message media input without claiming a scanner approval", async () => {
     remote.upload.mockImplementation(async (_file: File, path: string) => ({
       path,
       url: `https://media.test/${path}`,
@@ -537,8 +661,6 @@ describe("AppDataProvider account-switch operation boundaries", () => {
         width: 320,
         height: 240,
         duration_seconds: null,
-        scan_approved: true,
-        upload_intent_id: "intent-photo.jpg",
       },
     }));
   });

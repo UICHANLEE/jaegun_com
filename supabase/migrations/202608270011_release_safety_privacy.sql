@@ -357,9 +357,10 @@ comment on table private.account_deletion_cleanup_items is
 
 revoke all on table private.account_deletion_cleanup_items from public, anon, authenticated;
 
--- Media is uploaded into a non-readable quarantine bucket. A service-side scanner
--- validates magic bytes, decodes dimensions/duration, strips metadata/transcodes,
--- copies the safe derivative to approved_path, then records its decision.
+-- Dormant future scanner foundation. Production remains in direct-upload mode
+-- below until an isolated scanner is operated and a later migration removes
+-- the compatibility policies. Scanner-mode originals use this non-readable
+-- quarantine bucket and only safe derivatives may be recorded as approved.
 insert into storage.buckets (
   id,
   name,
@@ -502,8 +503,9 @@ create table public.media_scan_records (
 comment on table public.media_scan_records is
   'Append-only scanner evidence. Only service_record_media_scan may write it.';
 
--- Approved bucket writes are service-only, so abandoned/expired objects must
--- also be removed by a service worker instead of a browser Storage DELETE.
+-- Intent-mode abandoned/expired objects are removed by a service worker.
+-- Direct-mode clients retain exact owner-scoped deletion for unreferenced
+-- approved objects during the compatibility period.
 create table private.media_cleanup_items (
   id uuid primary key default gen_random_uuid(),
   intent_id uuid references public.media_upload_intents(id) on delete set null,
@@ -539,6 +541,59 @@ revoke all on table private.media_cleanup_items from public, anon, authenticated
 
 comment on table private.media_cleanup_items is
   'Service-only Storage cleanup queue for abandoned, expired, or rejected upload intents.';
+
+-- Direct-upload compatibility cannot rely on the future scanner-intent ledger
+-- for abuse controls. This private reservation ledger is populated from the
+-- Storage INSERT RLS predicate itself, so old clients receive the same upload
+-- contract while rate and byte quotas remain backend authoritative.
+create table private.direct_media_upload_reservations (
+  bucket_id text not null check (bucket_id in ('community-media', 'avatars')),
+  storage_path text not null check (char_length(storage_path) between 1 and 1000),
+  uploader_id uuid not null references public.profiles(id) on delete cascade,
+  byte_size bigint not null check (byte_size > 0),
+  created_at timestamptz not null default pg_catalog.clock_timestamp(),
+  last_seen_at timestamptz not null default pg_catalog.clock_timestamp(),
+  materialized_at timestamptz,
+  primary key (bucket_id, storage_path)
+);
+
+create index direct_media_upload_reservations_user_daily_idx
+  on private.direct_media_upload_reservations (uploader_id, created_at desc);
+
+revoke all on table private.direct_media_upload_reservations
+  from public, anon, authenticated;
+
+comment on table private.direct_media_upload_reservations is
+  'Private idempotency/rate ledger populated only while authorizing direct Storage INSERTs.';
+
+create or replace function private.mark_direct_media_materialized()
+returns trigger
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if new.bucket_id in ('community-media', 'avatars') then
+    update private.direct_media_upload_reservations as reservation
+    set materialized_at = coalesce(reservation.materialized_at, pg_catalog.clock_timestamp()),
+        last_seen_at = pg_catalog.transaction_timestamp()
+    where reservation.bucket_id = new.bucket_id
+      and reservation.storage_path = new.name
+      and (
+        (
+          reservation.uploader_id::text = new.owner_id
+          and (new.owner is null or reservation.uploader_id = new.owner)
+        )
+        or (new.owner_id is null and reservation.uploader_id = new.owner)
+      );
+  end if;
+  return new;
+end;
+$$;
+
+create trigger storage_objects_mark_direct_media_materialized
+after insert on storage.objects
+for each row execute function private.mark_direct_media_materialized();
 
 create table public.content_reports (
   id uuid primary key default gen_random_uuid(),
@@ -862,18 +917,68 @@ begin
 end;
 $$;
 
-create or replace function private.can_write_quarantine_media(
-  p_name text,
+-- Every authenticated media mutation and account-erasure claim takes this
+-- user-scoped transaction lock first. The active-state check then closes the
+-- stale-JWT window after a deletion worker freezes an account.
+create or replace function private.lock_active_media_uploader(
   p_actor_id uuid
 )
 returns boolean
-language sql
-stable
+language plpgsql
+volatile
 security definer
 set search_path = pg_catalog
 as $$
-  select p_actor_id is not null
-    and private.try_uuid(pg_catalog.split_part(p_name, '/', 1)) = p_actor_id
+declare
+  v_active boolean;
+begin
+  if p_actor_id is null then
+    return false;
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('media-uploader:' || p_actor_id::text, 0)
+  );
+
+  select exists (
+    select 1
+    from public.profiles as profile
+    where profile.id = p_actor_id
+      and profile.deactivated_at is null
+      and not exists (
+        select 1
+        from public.account_deletion_requests as deletion_request
+        where deletion_request.user_id = p_actor_id
+          and deletion_request.status in (
+            'processing', 'awaiting_identity_deletion', 'completed'
+          )
+      )
+  ) into v_active;
+  return coalesce(v_active, false);
+end;
+$$;
+
+create or replace function private.can_write_quarantine_media(
+  p_name text,
+  p_actor_id uuid,
+  p_metadata jsonb
+)
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_size_text text := p_metadata ->> 'size';
+begin
+  if p_actor_id is null or auth.uid() is distinct from p_actor_id then
+    return false;
+  end if;
+  if not private.lock_active_media_uploader(p_actor_id) then
+    return false;
+  end if;
+  return private.try_uuid(pg_catalog.split_part(p_name, '/', 1)) = p_actor_id
     and exists (
       select 1
       from public.media_upload_intents as intent
@@ -884,7 +989,918 @@ as $$
         -- delete the bytes being inspected (TOCTOU boundary).
         and intent.status = 'quarantine'
         and intent.expires_at > pg_catalog.clock_timestamp()
+        -- Storage metadata is authoritative. A tiny intent must not reserve a
+        -- path that is later filled with a larger or differently typed object.
+        and pg_catalog.lower(coalesce(p_metadata ->> 'mimetype', '')) =
+          pg_catalog.lower(intent.expected_mime_type)
+        and v_size_text ~ '^[0-9]{1,18}$'
+        and v_size_text::bigint = intent.expected_byte_size
     );
+exception
+  when invalid_text_representation or numeric_value_out_of_range then
+    return false;
+end;
+$$;
+
+create or replace function private.direct_media_path_shape_allowed(
+  p_bucket_id text,
+  p_name text,
+  p_actor_id uuid
+)
+returns boolean
+language plpgsql
+immutable
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_segments text[];
+  v_leaf text;
+  v_leaf_stem text;
+begin
+  if p_actor_id is null
+    or p_name is null
+    or p_name = ''
+    or p_name like '/%'
+    or p_name like '%/'
+    or pg_catalog.strpos(p_name, '\\') > 0 then
+    return false;
+  end if;
+
+  v_segments := pg_catalog.string_to_array(p_name, '/');
+  if pg_catalog.array_position(v_segments, '') is not null
+    or pg_catalog.array_position(v_segments, '.') is not null
+    or pg_catalog.array_position(v_segments, '..') is not null then
+    return false;
+  end if;
+
+  if p_bucket_id = 'avatars' then
+    if pg_catalog.cardinality(v_segments) <> 2
+      or private.try_uuid(v_segments[1]) is distinct from p_actor_id then
+      return false;
+    end if;
+    v_leaf := v_segments[2];
+  elsif p_bucket_id = 'community-media' then
+    if private.try_uuid(v_segments[1]) is null then
+      return false;
+    end if;
+    if v_segments[2] = 'organization' then
+      if pg_catalog.cardinality(v_segments) <> 3 then
+        return false;
+      end if;
+      v_leaf := v_segments[3];
+    elsif v_segments[2] in ('posts', 'messages', 'applications') then
+      if pg_catalog.cardinality(v_segments) <> 4
+        or private.try_uuid(v_segments[3]) is null then
+        return false;
+      end if;
+      v_leaf := v_segments[4];
+    else
+      return false;
+    end if;
+  else
+    return false;
+  end if;
+
+  if pg_catalog.length(v_leaf) - pg_catalog.length(pg_catalog.replace(v_leaf, '.', '')) <> 1 then
+    return false;
+  end if;
+  v_leaf_stem := pg_catalog.split_part(v_leaf, '.', 1);
+  return private.try_uuid(v_leaf_stem) is not null
+    and pg_catalog.split_part(v_leaf, '.', 2) <> '';
+end;
+$$;
+
+create or replace function private.media_object_path_metadata_allowed(
+  p_bucket_id text,
+  p_name text,
+  p_metadata jsonb
+)
+returns boolean
+language plpgsql
+immutable
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_extension text;
+  v_mime_type text := pg_catalog.lower(coalesce(p_metadata ->> 'mimetype', ''));
+  v_size_text text := p_metadata ->> 'size';
+  v_byte_size bigint;
+begin
+  if p_bucket_id not in ('community-media', 'avatars')
+    or p_name is null
+    or p_name = ''
+    or p_name like '/%'
+    or pg_catalog.strpos(p_name, '\\') > 0
+    or v_size_text is null
+    or v_size_text !~ '^[0-9]+$' then
+    return false;
+  end if;
+
+  begin
+    v_byte_size := v_size_text::bigint;
+  exception
+    when numeric_value_out_of_range then
+      return false;
+  end;
+  v_extension := pg_catalog.lower(
+    pg_catalog.reverse(pg_catalog.split_part(pg_catalog.reverse(p_name), '.', 1))
+  );
+
+  if p_bucket_id = 'avatars'
+    and (v_mime_type not like 'image/%' or v_byte_size < 1 or v_byte_size > 5242880) then
+    return false;
+  end if;
+  if p_bucket_id = 'community-media'
+    and not private.community_object_size_allowed(p_metadata) then
+    return false;
+  end if;
+
+  return case v_mime_type
+    when 'image/jpeg' then v_extension in ('jpg', 'jpeg')
+    when 'image/png' then v_extension = 'png'
+    when 'image/webp' then v_extension = 'webp'
+    when 'image/avif' then v_extension = 'avif'
+    when 'image/heic' then v_extension = 'heic'
+    when 'image/heif' then v_extension = 'heif'
+    when 'video/mp4' then p_bucket_id = 'community-media' and v_extension in ('mp4', 'm4v')
+    when 'video/quicktime' then p_bucket_id = 'community-media' and v_extension = 'mov'
+    when 'video/webm' then p_bucket_id = 'community-media' and v_extension = 'webm'
+    else false
+  end;
+end;
+$$;
+
+-- Existing pre-011 objects can have a legacy filename suffix, but attachment
+-- still requires an exact safe MIME and byte ceiling from Storage metadata.
+-- New INSERT authorization additionally calls the path/extension predicate
+-- above and therefore cannot create another noncanonical object.
+create or replace function private.legacy_media_object_metadata_safe(
+  p_bucket_id text,
+  p_metadata jsonb
+)
+returns boolean
+language plpgsql
+immutable
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_mime_type text := pg_catalog.lower(coalesce(p_metadata ->> 'mimetype', ''));
+  v_size_text text := p_metadata ->> 'size';
+  v_byte_size bigint;
+begin
+  if p_bucket_id not in ('community-media', 'avatars')
+    or v_size_text is null
+    or v_size_text !~ '^[0-9]{1,18}$' then
+    return false;
+  end if;
+  v_byte_size := v_size_text::bigint;
+  if v_mime_type in (
+      'image/jpeg', 'image/png', 'image/webp', 'image/avif',
+      'image/heic', 'image/heif'
+    ) then
+    return v_byte_size between 1 and case
+      when p_bucket_id = 'avatars' then 5242880
+      else 15728640
+    end;
+  end if;
+  return p_bucket_id = 'community-media'
+    and v_mime_type in ('video/mp4', 'video/quicktime', 'video/webm')
+    and v_byte_size between 1 and 524288000;
+exception
+  when numeric_value_out_of_range then
+    return false;
+end;
+$$;
+
+-- Backfill canonical owner-bound objects that predate this migration. Their
+-- original creation time does not consume today's throughput quota, while a
+-- materialized reservation prevents delete/re-upload path recycling.
+insert into private.direct_media_upload_reservations (
+  bucket_id,
+  storage_path,
+  uploader_id,
+  byte_size,
+  created_at,
+  last_seen_at,
+  materialized_at
+)
+select
+  object.bucket_id,
+  object.name,
+  coalesce(object.owner, private.try_uuid(object.owner_id)),
+  (object.metadata ->> 'size')::bigint,
+  coalesce(object.created_at, pg_catalog.clock_timestamp()),
+  coalesce(object.updated_at, object.created_at, pg_catalog.clock_timestamp()),
+  coalesce(object.updated_at, object.created_at, pg_catalog.clock_timestamp())
+from storage.objects as object
+where object.bucket_id in ('community-media', 'avatars')
+  and coalesce(object.owner, private.try_uuid(object.owner_id)) is not null
+  and (
+    object.owner is null
+    or object.owner_id is null
+    or object.owner::text = object.owner_id
+  )
+  and exists (
+    select 1
+    from public.profiles as profile
+    where profile.id = coalesce(object.owner, private.try_uuid(object.owner_id))
+  )
+  and private.direct_media_path_shape_allowed(
+    object.bucket_id,
+    object.name,
+    coalesce(object.owner, private.try_uuid(object.owner_id))
+  )
+  and private.legacy_media_object_metadata_safe(object.bucket_id, object.metadata)
+on conflict (bucket_id, storage_path) do nothing;
+
+-- Retained-byte accounting is shared by scanner-intent and direct modes.
+-- Active intent bytes are reservations; Storage objects already represented by
+-- either intent path are excluded so a quarantine/derivative is counted once.
+create or replace function private.retained_media_bytes_for_user(
+  p_user_id uuid
+)
+returns bigint
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $$
+  select
+    coalesce((
+      select sum(coalesce(intent.approved_byte_size, intent.expected_byte_size))::bigint
+      from public.media_upload_intents as intent
+      where intent.uploader_id = p_user_id
+        and intent.status in ('quarantine', 'scanning', 'approved', 'attached')
+    ), 0)
+    + coalesce((
+      -- Storage INSERT and this reservation normally commit atomically. Keep
+      -- the bounded unmaterialized window in retained quota as well because
+      -- the policy entrypoint is callable during resumable-upload retries.
+      select sum(reservation.byte_size)::bigint
+      from private.direct_media_upload_reservations as reservation
+      where reservation.uploader_id = p_user_id
+        and reservation.materialized_at is null
+        and reservation.last_seen_at >= pg_catalog.clock_timestamp() - interval '1 hour'
+        and not exists (
+          select 1
+          from storage.objects as object
+          where object.bucket_id = reservation.bucket_id
+            and object.name = reservation.storage_path
+        )
+    ), 0)
+    + coalesce((
+      select sum(case
+        when object.metadata ->> 'size' ~ '^[0-9]{1,18}$'
+          then (object.metadata ->> 'size')::bigint
+        else 0
+      end)::bigint
+      from storage.objects as object
+      where object.bucket_id in (
+          'avatars', 'community-media', 'community-media-quarantine'
+        )
+        and (
+          (
+            object.owner_id = p_user_id::text
+            and (object.owner is null or object.owner = p_user_id)
+          )
+          or (object.owner_id is null and object.owner = p_user_id)
+        )
+        and not exists (
+          select 1
+          from public.media_upload_intents as intent
+          where intent.uploader_id = p_user_id
+            and intent.status in ('quarantine', 'scanning', 'approved', 'attached')
+            and (
+              (
+                object.bucket_id = 'community-media-quarantine'
+                and object.name = intent.quarantine_path
+              )
+              or (
+                object.bucket_id = intent.approved_bucket_id
+                and object.name = intent.approved_path
+              )
+            )
+        )
+    ), 0);
+$$;
+
+create or replace function private.retained_media_bytes_for_organization(
+  p_organization_id uuid
+)
+returns bigint
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $$
+  select
+    coalesce((
+      select sum(coalesce(intent.approved_byte_size, intent.expected_byte_size))::bigint
+      from public.media_upload_intents as intent
+      where intent.organization_id = p_organization_id
+        and intent.status in ('quarantine', 'scanning', 'approved', 'attached')
+    ), 0)
+    + coalesce((
+      select sum(reservation.byte_size)::bigint
+      from private.direct_media_upload_reservations as reservation
+      where reservation.bucket_id = 'community-media'
+        and private.try_uuid(
+          pg_catalog.split_part(reservation.storage_path, '/', 1)
+        ) = p_organization_id
+        and reservation.materialized_at is null
+        and reservation.last_seen_at >= pg_catalog.clock_timestamp() - interval '1 hour'
+        and not exists (
+          select 1
+          from storage.objects as object
+          where object.bucket_id = reservation.bucket_id
+            and object.name = reservation.storage_path
+        )
+    ), 0)
+    + coalesce((
+      -- A rejected/expired intent has already consumed ingress and may leave
+      -- quarantine bytes while the cleanup worker is delayed. Count those
+      -- actual bytes against the organization backlog without double-counting
+      -- active intent reservations above.
+      select sum(case
+        when object.metadata ->> 'size' ~ '^[0-9]{1,18}$'
+          then (object.metadata ->> 'size')::bigint
+        else 0
+      end)::bigint
+      from public.media_upload_intents as intent
+      join storage.objects as object
+        on object.bucket_id = 'community-media-quarantine'
+       and object.name = intent.quarantine_path
+      where intent.organization_id = p_organization_id
+        and intent.status in ('rejected', 'expired')
+    ), 0)
+    + coalesce((
+      select sum(case
+        when object.metadata ->> 'size' ~ '^[0-9]{1,18}$'
+          then (object.metadata ->> 'size')::bigint
+        else 0
+      end)::bigint
+      from storage.objects as object
+      where object.bucket_id = 'community-media'
+        and private.try_uuid(pg_catalog.split_part(object.name, '/', 1)) = p_organization_id
+        and not exists (
+          select 1
+          from public.media_upload_intents as intent
+          where intent.organization_id = p_organization_id
+            and intent.status in ('quarantine', 'scanning', 'approved', 'attached')
+            and object.bucket_id = intent.approved_bucket_id
+            and object.name = intent.approved_path
+        )
+    ), 0);
+$$;
+
+create or replace function private.can_write_direct_media_object(
+  p_bucket_id text,
+  p_name text,
+  p_actor_id uuid
+)
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $$
+begin
+  if p_actor_id is null or auth.uid() is distinct from p_actor_id then
+    return false;
+  end if;
+  if not private.lock_active_media_uploader(p_actor_id) then
+    return false;
+  end if;
+  return private.direct_media_path_shape_allowed(p_bucket_id, p_name, p_actor_id)
+    and case p_bucket_id
+      when 'community-media' then private.can_write_community_media(p_name, p_actor_id)
+      when 'avatars' then private.can_write_avatar_object(p_name, p_actor_id)
+      else false
+    end
+    and not exists (
+      select 1
+      from public.media_upload_intents as intent
+      where intent.approved_bucket_id = p_bucket_id
+        and intent.approved_path = p_name
+    );
+end;
+$$;
+
+create or replace function private.direct_media_path_attachable(
+  p_bucket_id text,
+  p_name text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $$
+  select p_bucket_id is not null
+    and p_name is not null
+    and not exists (
+      select 1
+      from private.media_cleanup_items as cleanup
+      where cleanup.bucket_id = p_bucket_id
+        and cleanup.storage_path = p_name
+    )
+    and not exists (
+      select 1
+      from private.account_deletion_cleanup_items as cleanup
+      where cleanup.bucket_id = p_bucket_id
+        and cleanup.storage_path = p_name
+    );
+$$;
+
+-- This volatile predicate is called by Storage INSERT/UPDATE WITH CHECK. Its
+-- reservation write is part of the same transaction as storage.objects, so a
+-- rejected upload cannot consume quota while repeated policy evaluation in
+-- one transaction remains idempotent.
+create or replace function private.authorize_direct_media_upload(
+  p_bucket_id text,
+  p_name text,
+  p_actor_id uuid,
+  p_metadata jsonb
+)
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_now timestamptz := pg_catalog.clock_timestamp();
+  v_transaction_started_at timestamptz := pg_catalog.transaction_timestamp();
+  v_byte_size bigint;
+  v_existing_size bigint := 0;
+  v_daily_bytes bigint := 0;
+  v_retained_user_bytes bigint := 0;
+  v_retained_org_bytes bigint := 0;
+  v_organization_id uuid;
+  v_reservation private.direct_media_upload_reservations%rowtype;
+begin
+  if p_actor_id is null or auth.uid() is distinct from p_actor_id then
+    return false;
+  end if;
+  if not private.lock_active_media_uploader(p_actor_id)
+    or not private.direct_media_path_shape_allowed(p_bucket_id, p_name, p_actor_id)
+    or not private.direct_media_path_attachable(p_bucket_id, p_name)
+    or not private.media_object_path_metadata_allowed(p_bucket_id, p_name, p_metadata)
+    or (
+      p_bucket_id = 'community-media'
+      and pg_catalog.split_part(p_name, '/', 2) in ('organization', 'applications')
+      and pg_catalog.lower(coalesce(p_metadata ->> 'mimetype', '')) not like 'image/%'
+    )
+    or not (case p_bucket_id
+      when 'community-media' then private.can_write_community_media(p_name, p_actor_id)
+      when 'avatars' then private.can_write_avatar_object(p_name, p_actor_id)
+      else false
+    end)
+    or exists (
+      select 1
+      from public.media_upload_intents as intent
+      where intent.approved_bucket_id = p_bucket_id
+        and intent.approved_path = p_name
+    ) then
+    return false;
+  end if;
+
+  v_byte_size := (p_metadata ->> 'size')::bigint;
+  v_organization_id := case
+    when p_bucket_id = 'community-media'
+      then private.try_uuid(pg_catalog.split_part(p_name, '/', 1))
+    else null
+  end;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('media-object:' || p_bucket_id || ':' || p_name, 0)
+  );
+
+  delete from private.direct_media_upload_reservations as stale
+  where stale.uploader_id = p_actor_id
+    and stale.materialized_at is null
+    and stale.created_at < v_now - interval '1 hour'
+    and not exists (
+      select 1
+      from storage.objects as object
+      where object.bucket_id = stale.bucket_id
+        and object.name = stale.storage_path
+    )
+    and not exists (
+      select 1
+      from private.media_cleanup_items as cleanup
+      where cleanup.bucket_id = stale.bucket_id
+        and cleanup.storage_path = stale.storage_path
+    )
+    and not exists (
+      select 1
+      from private.account_deletion_cleanup_items as cleanup
+      where cleanup.bucket_id = stale.bucket_id
+        and cleanup.storage_path = stale.storage_path
+    );
+
+  select reservation.* into v_reservation
+  from private.direct_media_upload_reservations as reservation
+  where reservation.bucket_id = p_bucket_id
+    and reservation.storage_path = p_name
+  for update;
+  if found
+    and v_reservation.uploader_id = p_actor_id
+    and v_reservation.byte_size = v_byte_size
+    and v_reservation.materialized_at is null
+    and (
+      v_reservation.last_seen_at >= v_transaction_started_at
+      or v_reservation.created_at >= v_now - interval '1 hour'
+    ) then
+    update private.direct_media_upload_reservations
+    set last_seen_at = v_transaction_started_at
+    where bucket_id = p_bucket_id
+      and storage_path = p_name;
+    return true;
+  end if;
+  -- UUID object paths are single-use. A committed reservation may never be
+  -- recycled after delete: old signed URLs and a response-lost cleanup retry
+  -- must not resolve to newly uploaded bytes. The only exception above is a
+  -- repeated policy evaluation inside the transaction that created it.
+  if found then
+    return false;
+  end if;
+
+  select coalesce(case
+    when object.metadata ->> 'size' ~ '^[0-9]{1,18}$'
+      then (object.metadata ->> 'size')::bigint
+    else 0
+  end, 0)::bigint
+  into v_existing_size
+  from storage.objects as object
+  where object.bucket_id = p_bucket_id
+    and object.name = p_name
+    and (
+      (
+        object.owner_id = p_actor_id::text
+        and (object.owner is null or object.owner = p_actor_id)
+      )
+      or (object.owner_id is null and object.owner = p_actor_id)
+    )
+  for share;
+  v_existing_size := coalesce(v_existing_size, 0);
+
+  if (
+    coalesce((
+      select count(*)
+      from private.direct_media_upload_reservations as reservation
+      where reservation.uploader_id = p_actor_id
+        and reservation.created_at >= v_now - interval '24 hours'
+    ), 0)
+    + coalesce((
+      select count(*)
+      from public.media_upload_intents as intent
+      where intent.uploader_id = p_actor_id
+        and intent.created_at >= v_now - interval '24 hours'
+    ), 0)
+  ) >= 120 then
+    raise exception 'daily_media_upload_count_exceeded' using errcode = '54000';
+  end if;
+
+  perform private.consume_rate_limit(p_actor_id, 'uploads', 12, 600, 1);
+
+  select
+    coalesce((
+      select sum(reservation.byte_size)::bigint
+      from private.direct_media_upload_reservations as reservation
+      where reservation.uploader_id = p_actor_id
+        and reservation.created_at >= v_now - interval '24 hours'
+        and not (
+          reservation.bucket_id = p_bucket_id
+          and reservation.storage_path = p_name
+        )
+    ), 0)
+    + coalesce((
+      select sum(intent.expected_byte_size)::bigint
+      from public.media_upload_intents as intent
+      where intent.uploader_id = p_actor_id
+        and intent.created_at >= v_now - interval '24 hours'
+    ), 0)
+  into v_daily_bytes;
+  if v_daily_bytes + v_byte_size > 1073741824 then
+    raise exception 'daily_media_quota_exceeded' using errcode = '54000';
+  end if;
+
+  v_retained_user_bytes := private.retained_media_bytes_for_user(p_actor_id);
+
+  if v_retained_user_bytes + greatest(v_byte_size - v_existing_size, 0::bigint)
+      > 5368709120 then
+    raise exception 'user_media_quota_exceeded' using errcode = '54000';
+  end if;
+
+  if v_organization_id is not null then
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'media-org-quota:' || v_organization_id::text,
+        0
+      )
+    );
+    v_retained_org_bytes := private.retained_media_bytes_for_organization(
+      v_organization_id
+    );
+
+    if v_retained_org_bytes + greatest(v_byte_size - v_existing_size, 0::bigint)
+        > 107374182400 then
+      raise exception 'organization_media_quota_exceeded' using errcode = '54000';
+    end if;
+  end if;
+
+  insert into private.direct_media_upload_reservations (
+    bucket_id, storage_path, uploader_id, byte_size, created_at, last_seen_at
+  )
+  values (
+    p_bucket_id, p_name, p_actor_id, v_byte_size, v_now, v_transaction_started_at
+  )
+  on conflict (bucket_id, storage_path) do update
+  set byte_size = excluded.byte_size,
+      created_at = excluded.created_at,
+      last_seen_at = excluded.last_seen_at
+  where private.direct_media_upload_reservations.uploader_id = excluded.uploader_id;
+
+  return found;
+end;
+$$;
+
+create or replace function private.media_path_is_referenced(
+  p_bucket_id text,
+  p_name text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog
+as $$
+  select case p_bucket_id
+    when 'avatars' then exists (
+      select 1 from public.profiles as profile
+      where profile.avatar_path = p_name
+    )
+    when 'community-media' then
+      exists (
+        select 1 from public.post_media as media
+        where media.storage_path = p_name
+      )
+      or exists (
+        select 1 from public.messages as message
+        where message.media_path = p_name
+      )
+      or exists (
+        select 1 from public.membership_applications as application
+        where application.evidence_path = p_name
+      )
+      or exists (
+        select 1 from public.organizations as organization
+        where organization.hero_path = p_name
+      )
+    else false
+  end;
+$$;
+
+-- Every attach/delete/cleanup path lookup must remain indexed as message
+-- history grows. These indexes are partial because null is the common case.
+create index if not exists profiles_avatar_path_lookup_idx
+  on public.profiles (avatar_path)
+  where avatar_path is not null;
+create index if not exists messages_media_path_lookup_idx
+  on public.messages (media_path)
+  where media_path is not null;
+create index if not exists membership_applications_evidence_path_lookup_idx
+  on public.membership_applications (evidence_path)
+  where evidence_path is not null;
+create index if not exists organizations_hero_path_lookup_idx
+  on public.organizations (hero_path)
+  where hero_path is not null;
+
+create or replace function private.can_mutate_direct_media_object(
+  p_bucket_id text,
+  p_name text,
+  p_actor_id uuid
+)
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_allowed boolean;
+  v_owned boolean;
+begin
+  if p_bucket_id is null or p_name is null then
+    return false;
+  end if;
+  if p_actor_id is null or auth.uid() is distinct from p_actor_id then
+    return false;
+  end if;
+  if not private.lock_active_media_uploader(p_actor_id) then
+    return false;
+  end if;
+  -- Attachment validators take the same transaction-scoped key before
+  -- checking/locking storage.objects. A concurrent overwrite/delete therefore
+  -- cannot pass an old "unreferenced" snapshot and resume after attachment.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('media-object:' || p_bucket_id || ':' || p_name, 0)
+  );
+
+  v_owned := false;
+  select true into v_owned
+  from storage.objects as object
+  where object.bucket_id = p_bucket_id
+    and object.name = p_name
+    and (
+      (
+        object.owner_id = p_actor_id::text
+        and (object.owner is null or object.owner = p_actor_id)
+      )
+      or (object.owner_id is null and object.owner = p_actor_id)
+    )
+  for share;
+  v_owned := coalesce(v_owned, false);
+
+  select v_owned
+    and private.direct_media_path_shape_allowed(p_bucket_id, p_name, p_actor_id)
+    and private.direct_media_path_attachable(p_bucket_id, p_name)
+    and not private.media_path_is_referenced(p_bucket_id, p_name)
+    and not exists (
+      select 1
+      from public.media_upload_intents as intent
+      where intent.approved_bucket_id = p_bucket_id
+        and intent.approved_path = p_name
+    )
+    and case p_bucket_id
+      when 'community-media' then private.can_write_community_media(p_name, p_actor_id)
+      when 'avatars' then private.can_write_avatar_object(p_name, p_actor_id)
+      else false
+    end
+  into v_allowed;
+  return coalesce(v_allowed, false);
+end;
+$$;
+
+-- Direct uploads remain the production path until an isolated scanner is
+-- operated. Attachment writes must still prove that the exact approved-bucket
+-- object exists, belongs to the authenticated uploader, and has bounded
+-- Storage metadata. This keeps legacy and direct-mode clients compatible
+-- without accepting a client-forged path or media metadata row.
+create or replace function private.require_owned_media_object(
+  p_bucket_id text,
+  p_storage_path text,
+  p_uploader_id uuid,
+  p_expected_kind public.media_kind,
+  p_expected_mime_type text default null,
+  p_expected_byte_size bigint default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_metadata jsonb;
+  v_mime_type text;
+  v_byte_size_text text;
+  v_byte_size bigint;
+  v_actual_kind public.media_kind;
+  v_legacy_authorized boolean;
+  v_strict_authorized boolean;
+begin
+  if p_bucket_id not in ('community-media', 'avatars')
+    or p_storage_path is null
+    or p_uploader_id is null then
+    raise exception 'direct_media_object_required' using errcode = '42501';
+  end if;
+  if not private.lock_active_media_uploader(p_uploader_id) then
+    raise exception 'media_uploader_inactive' using errcode = '42501';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'media-object:' || p_bucket_id || ':' || p_storage_path,
+      0
+    )
+  );
+
+  select object.metadata into v_metadata
+  from storage.objects as object
+  where object.bucket_id = p_bucket_id
+    and object.name = p_storage_path
+    and (
+      (
+        object.owner_id = p_uploader_id::text
+        and (object.owner is null or object.owner = p_uploader_id)
+      )
+      or (object.owner_id is null and object.owner = p_uploader_id)
+    )
+  for share;
+
+  if not found then
+    raise exception 'direct_media_object_required' using errcode = '42501';
+  end if;
+
+  if not private.direct_media_path_attachable(p_bucket_id, p_storage_path) then
+    raise exception 'direct_media_cleanup_pending' using errcode = '55000';
+  end if;
+  if not private.legacy_media_object_metadata_safe(p_bucket_id, v_metadata) then
+    raise exception 'direct_media_metadata_invalid' using errcode = '23514';
+  end if;
+
+  v_strict_authorized := private.can_write_direct_media_object(
+      p_bucket_id, p_storage_path, p_uploader_id
+    ) and private.media_object_path_metadata_allowed(
+      p_bucket_id, p_storage_path, v_metadata
+    );
+  v_legacy_authorized := private.direct_media_path_shape_allowed(
+      p_bucket_id, p_storage_path, p_uploader_id
+    )
+    and case p_bucket_id
+      when 'community-media' then private.can_write_community_media(
+        p_storage_path, p_uploader_id
+      )
+      when 'avatars' then private.can_write_avatar_object(
+        p_storage_path, p_uploader_id
+      )
+      else false
+    end
+    and not exists (
+      select 1
+      from public.media_upload_intents as intent
+      where intent.approved_bucket_id = p_bucket_id
+        and intent.approved_path = p_storage_path
+    );
+  if not (coalesce(v_strict_authorized, false) or coalesce(v_legacy_authorized, false)) then
+    raise exception 'direct_media_object_required' using errcode = '42501';
+  end if;
+
+  v_mime_type := pg_catalog.lower(coalesce(v_metadata ->> 'mimetype', ''));
+  v_actual_kind := case
+    when v_mime_type like 'image/%' then 'image'::public.media_kind
+    when v_mime_type like 'video/%' then 'video'::public.media_kind
+    else null
+  end;
+  v_byte_size_text := v_metadata ->> 'size';
+  if v_byte_size_text is null or v_byte_size_text !~ '^[0-9]+$' then
+    raise exception 'direct_media_metadata_invalid' using errcode = '23514';
+  end if;
+  begin
+    v_byte_size := v_byte_size_text::bigint;
+  exception
+    when numeric_value_out_of_range then
+      raise exception 'direct_media_metadata_invalid' using errcode = '23514';
+  end;
+
+  if p_expected_kind is not null and p_expected_kind is distinct from v_actual_kind then
+    raise exception 'direct_media_metadata_mismatch' using errcode = '23514';
+  end if;
+
+  if (
+      v_actual_kind = 'image'::public.media_kind
+      and (
+        v_mime_type not in (
+          'image/jpeg', 'image/png', 'image/webp', 'image/avif',
+          'image/heic', 'image/heif'
+        )
+        or v_byte_size < 1
+        or v_byte_size > case
+          when p_bucket_id = 'avatars' then 5242880
+          else 15728640
+        end
+      )
+    ) or (
+      v_actual_kind = 'video'::public.media_kind
+      and (
+        p_bucket_id <> 'community-media'
+        or v_mime_type not in ('video/mp4', 'video/quicktime', 'video/webm')
+        or v_byte_size < 1
+        or v_byte_size > 524288000
+      )
+    ) then
+    raise exception 'direct_media_metadata_invalid' using errcode = '23514';
+  end if;
+
+  if p_expected_mime_type is not null
+    and pg_catalog.lower(p_expected_mime_type) is distinct from v_mime_type then
+    raise exception 'direct_media_metadata_mismatch' using errcode = '23514';
+  end if;
+  if p_expected_byte_size is not null
+    and p_expected_byte_size is distinct from v_byte_size then
+    raise exception 'direct_media_metadata_mismatch' using errcode = '23514';
+  end if;
+
+  return pg_catalog.jsonb_build_object(
+    'kind', v_actual_kind,
+    'mime_type', v_mime_type,
+    'byte_size', v_byte_size
+  );
+end;
 $$;
 
 create or replace function private.claim_approved_media(
@@ -902,13 +1918,32 @@ as $$
 declare
   v_intent public.media_upload_intents%rowtype;
 begin
+  if not private.lock_active_media_uploader(p_uploader_id) then
+    raise exception 'media_uploader_inactive' using errcode = '42501';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'media-object:' || case
+        when p_purpose = 'avatar' then 'avatars'
+        else 'community-media'
+      end || ':' || p_storage_path,
+      0
+    )
+  );
+
   select * into v_intent
   from public.media_upload_intents as intent
   where intent.approved_path = p_storage_path
   for update;
 
-  if not found
-    or v_intent.uploader_id is distinct from p_uploader_id
+  -- No intent means this is a direct approved-bucket upload. Callers validate
+  -- that path through require_owned_media_object. If an intent does exist, it
+  -- may never fall back to direct mode: every scanner-bound field must match.
+  if not found then
+    return v_intent;
+  end if;
+
+  if v_intent.uploader_id is distinct from p_uploader_id
     or v_intent.purpose is distinct from p_purpose
     or v_intent.target_id is distinct from p_target_id
     or v_intent.status <> 'approved' then
@@ -1234,8 +2269,11 @@ create policy jaegun_quarantine_media_insert
 on storage.objects for insert to authenticated
 with check (
   bucket_id = 'community-media-quarantine'
-  and private.can_write_quarantine_media(name, auth.uid())
-  and private.community_object_size_allowed(metadata)
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.can_write_quarantine_media(name, auth.uid(), metadata)
 );
 
 drop policy if exists jaegun_quarantine_media_update on storage.objects;
@@ -1243,14 +2281,19 @@ create policy jaegun_quarantine_media_update
 on storage.objects for update to authenticated
 using (
   bucket_id = 'community-media-quarantine'
-  and owner_id = auth.uid()::text
-  and private.can_write_quarantine_media(name, auth.uid())
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.can_write_quarantine_media(name, auth.uid(), metadata)
 )
 with check (
   bucket_id = 'community-media-quarantine'
-  and owner_id = auth.uid()::text
-  and private.can_write_quarantine_media(name, auth.uid())
-  and private.community_object_size_allowed(metadata)
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.can_write_quarantine_media(name, auth.uid(), metadata)
 );
 
 drop policy if exists jaegun_quarantine_media_delete on storage.objects;
@@ -1258,23 +2301,72 @@ create policy jaegun_quarantine_media_delete
 on storage.objects for delete to authenticated
 using (
   bucket_id = 'community-media-quarantine'
-  and owner_id = auth.uid()::text
-  and private.can_write_quarantine_media(name, auth.uid())
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.can_write_quarantine_media(name, auth.uid(), metadata)
 );
 
 -- There is intentionally no authenticated SELECT policy on the quarantine
 -- bucket. Scanner/copy workers use service_role; approved derivatives live in
 -- the existing private community-media bucket.
 
--- Clients cannot write/delete approved bytes. All post/message/evidence/hero/
--- avatar objects enter quarantine and only the scanner worker copies a safe
--- derivative into these buckets. This also prevents orphan-storage abuse.
+-- Compatibility mode: approved-bucket direct uploads remain enabled until the
+-- external scanner rollout is explicitly activated by a later migration.
+-- These are the production path/size policies from 003/008. Attachment rows
+-- are additionally bound to an existing uploader-owned object below, so a
+-- forged path cannot be attached through PostgREST or a legacy RPC.
 drop policy if exists jaegun_community_media_insert on storage.objects;
 drop policy if exists jaegun_community_media_update on storage.objects;
 drop policy if exists jaegun_community_media_delete on storage.objects;
 drop policy if exists jaegun_avatars_insert on storage.objects;
 drop policy if exists jaegun_avatars_update on storage.objects;
 drop policy if exists jaegun_avatars_delete on storage.objects;
+
+create policy jaegun_community_media_insert
+on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'community-media'
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.authorize_direct_media_upload(bucket_id, name, auth.uid(), metadata)
+);
+
+create policy jaegun_community_media_delete
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'community-media'
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.can_mutate_direct_media_object(bucket_id, name, auth.uid())
+);
+
+create policy jaegun_avatars_insert
+on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'avatars'
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.authorize_direct_media_upload(bucket_id, name, auth.uid(), metadata)
+);
+
+create policy jaegun_avatars_delete
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'avatars'
+  and (
+    (owner_id = auth.uid()::text and (owner is null or owner = auth.uid()))
+    or (owner_id is null and owner = auth.uid())
+  )
+  and private.can_mutate_direct_media_object(bucket_id, name, auth.uid())
+);
 
 create or replace function private.enforce_conversation_block_boundary()
 returns trigger
@@ -1369,6 +2461,35 @@ declare
   v_intent public.media_upload_intents%rowtype;
 begin
   if tg_op = 'UPDATE' and new.storage_path is not distinct from old.storage_path then
+    select * into v_intent
+    from public.media_upload_intents as intent
+    where intent.approved_path = new.storage_path
+    for update;
+
+    if v_intent.id is not null then
+      if v_intent.uploader_id is distinct from new.uploader_id
+        or v_intent.purpose <> 'post'
+        or v_intent.target_id is distinct from new.post_id
+        or v_intent.status <> 'attached'
+        or v_intent.attached_entity_id is distinct from new.post_id
+        or v_intent.kind is distinct from new.kind
+        or v_intent.approved_mime_type is distinct from new.mime_type
+        or v_intent.approved_byte_size is distinct from new.byte_size
+        or v_intent.approved_width is distinct from new.width
+        or v_intent.approved_height is distinct from new.height
+        or v_intent.approved_duration_seconds is distinct from new.duration_seconds then
+        raise exception 'post_media_metadata_mismatch' using errcode = '23514';
+      end if;
+    else
+      perform private.require_owned_media_object(
+        'community-media',
+        new.storage_path,
+        new.uploader_id,
+        new.kind,
+        new.mime_type,
+        new.byte_size
+      );
+    end if;
     return new;
   end if;
 
@@ -1379,17 +2500,33 @@ begin
     new.uploader_id,
     new.post_id
   );
-  if v_intent.kind is distinct from new.kind
-    or v_intent.approved_mime_type is distinct from new.mime_type
-    or v_intent.approved_byte_size is distinct from new.byte_size then
-    raise exception 'post_media_metadata_mismatch' using errcode = '23514';
+  if v_intent.id is not null then
+    if v_intent.kind is distinct from new.kind
+      or v_intent.approved_mime_type is distinct from new.mime_type
+      or v_intent.approved_byte_size is distinct from new.byte_size
+      or v_intent.approved_width is distinct from new.width
+      or v_intent.approved_height is distinct from new.height
+      or v_intent.approved_duration_seconds is distinct from new.duration_seconds then
+      raise exception 'post_media_metadata_mismatch' using errcode = '23514';
+    end if;
+  else
+    perform private.require_owned_media_object(
+      'community-media',
+      new.storage_path,
+      new.uploader_id,
+      new.kind,
+      new.mime_type,
+      new.byte_size
+    );
   end if;
   return new;
 end;
 $$;
 
 create trigger post_media_require_approved_upload
-before insert or update of storage_path on public.post_media
+before insert or update of post_id, uploader_id, storage_path, kind, mime_type,
+  byte_size, width, height, duration_seconds
+on public.post_media
 for each row execute function private.enforce_approved_post_media();
 
 create or replace function private.enforce_approved_profile_avatar()
@@ -1398,6 +2535,8 @@ language plpgsql
 security definer
 set search_path = pg_catalog
 as $$
+declare
+  v_intent public.media_upload_intents%rowtype;
 begin
   if new.avatar_path is not distinct from old.avatar_path or new.avatar_path is null then
     return new;
@@ -1405,7 +2544,14 @@ begin
   if auth.uid() is null or auth.uid() <> new.id then
     raise exception 'approved_avatar_update_required' using errcode = '42501';
   end if;
-  perform private.claim_approved_media('avatar', new.id, new.avatar_path, auth.uid(), new.id);
+  v_intent := private.claim_approved_media(
+    'avatar', new.id, new.avatar_path, auth.uid(), new.id
+  );
+  if v_intent.id is null then
+    perform private.require_owned_media_object(
+      'avatars', new.avatar_path, auth.uid(), 'image'::public.media_kind
+    );
+  end if;
   return new;
 end;
 $$;
@@ -1420,6 +2566,8 @@ language plpgsql
 security definer
 set search_path = pg_catalog
 as $$
+declare
+  v_intent public.media_upload_intents%rowtype;
 begin
   if new.hero_path is not distinct from old.hero_path or new.hero_path is null then
     return new;
@@ -1427,9 +2575,17 @@ begin
   if auth.uid() is null or not private.can_manage_members(new.id, auth.uid()) then
     raise exception 'approved_organization_hero_required' using errcode = '42501';
   end if;
-  perform private.claim_approved_media(
+  if pg_catalog.strpos(new.hero_path, new.id::text || '/organization/') <> 1 then
+    raise exception 'invalid_organization_hero_path' using errcode = '23514';
+  end if;
+  v_intent := private.claim_approved_media(
     'organization_hero', new.id, new.hero_path, auth.uid(), new.id
   );
+  if v_intent.id is null then
+    perform private.require_owned_media_object(
+      'community-media', new.hero_path, auth.uid(), 'image'::public.media_kind
+    );
+  end if;
   return new;
 end;
 $$;
@@ -1444,6 +2600,8 @@ language plpgsql
 security definer
 set search_path = pg_catalog
 as $$
+declare
+  v_intent public.media_upload_intents%rowtype;
 begin
   if new.evidence_path is not distinct from old.evidence_path or new.evidence_path is null then
     return new;
@@ -1452,9 +2610,17 @@ begin
     or new.status <> 'pending'::public.application_status then
     raise exception 'approved_application_evidence_required' using errcode = '42501';
   end if;
-  perform private.claim_approved_media(
+  if not private.application_evidence_path_matches(new.id, new.evidence_path) then
+    raise exception 'invalid_evidence_path' using errcode = '23514';
+  end if;
+  v_intent := private.claim_approved_media(
     'application_evidence', new.id, new.evidence_path, auth.uid(), new.id
   );
+  if v_intent.id is null then
+    perform private.require_owned_media_object(
+      'community-media', new.evidence_path, auth.uid(), 'image'::public.media_kind
+    );
+  end if;
   return new;
 end;
 $$;
@@ -2310,99 +3476,16 @@ begin
     for update skip locked
     limit p_limit
   loop
-    -- Snapshot every known user-owned Storage path before any profile/Auth row
-    -- can disappear. The queue is idempotent for retries.
-    insert into private.account_deletion_cleanup_items (
-      request_id, bucket_id, storage_path
-    )
-    select v_request.id, 'avatars', profile.avatar_path
-    from public.profiles as profile
-    where profile.id = v_request.user_id
-      and profile.avatar_path is not null
-    on conflict on constraint account_cleanup_item_path_unique do nothing;
-
-    insert into private.account_deletion_cleanup_items (
-      request_id, bucket_id, storage_path
-    )
-    select v_request.id, 'community-media', media.storage_path
-    from public.post_media as media
-    where media.uploader_id = v_request.user_id
-    on conflict on constraint account_cleanup_item_path_unique do nothing;
-
-    insert into private.account_deletion_cleanup_items (
-      request_id, bucket_id, storage_path
-    )
-    select v_request.id, 'community-media', message.media_path
-    from public.messages as message
-    where message.sender_id = v_request.user_id
-      and message.media_path is not null
-    on conflict on constraint account_cleanup_item_path_unique do nothing;
-
-    insert into private.account_deletion_cleanup_items (
-      request_id, bucket_id, storage_path
-    )
-    select v_request.id, 'community-media', application.evidence_path
-    from public.membership_applications as application
-    where application.user_id = v_request.user_id
-      and application.evidence_path is not null
-    on conflict on constraint account_cleanup_item_path_unique do nothing;
-
-    insert into private.account_deletion_cleanup_items (
-      request_id, bucket_id, storage_path
-    )
-    select v_request.id, 'community-media-quarantine', intent.quarantine_path
-    from public.media_upload_intents as intent
-    where intent.uploader_id = v_request.user_id
-    on conflict on constraint account_cleanup_item_path_unique do nothing;
-
-    insert into private.account_deletion_cleanup_items (
-      request_id, bucket_id, storage_path
-    )
-    select v_request.id, intent.approved_bucket_id, intent.approved_path
-    from public.media_upload_intents as intent
-    where intent.uploader_id = v_request.user_id
-      and intent.status in ('approved', 'attached')
-      and not (
-        intent.purpose = 'organization_hero'
-        and intent.status = 'attached'
+    -- Serialize against direct/quarantine Storage writes for this identity,
+    -- then freeze product authority before inventorying owner-bound objects.
+    -- A stale browser JWT blocks on this same key and observes the frozen
+    -- profile/request state when it resumes.
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'media-uploader:' || v_request.user_id::text,
+        0
       )
-    on conflict on constraint account_cleanup_item_path_unique do nothing;
-
-    -- An attached organization hero is now organization-owned content, not a
-    -- personal upload to erase. Supabase Auth refuses to delete a user who is
-    -- still recorded as a Storage object owner, so transfer only the exact
-    -- currently attached hero object while retaining its bytes and DB link.
-    update storage.objects as object
-    set owner = null,
-        owner_id = null,
-        updated_at = v_now
-    from public.media_upload_intents as intent
-    join public.organizations as organization
-      on organization.id = intent.target_id
-     and organization.hero_path = intent.approved_path
-    where intent.uploader_id = v_request.user_id
-      and intent.purpose = 'organization_hero'
-      and intent.status = 'attached'
-      and object.bucket_id = intent.approved_bucket_id
-      and object.name = intent.approved_path
-      and (
-        object.owner_id = v_request.user_id::text
-        or object.owner = v_request.user_id
-      );
-    get diagnostics v_preserved_object_count = row_count;
-    if v_preserved_object_count > 0 then
-      perform private.write_audit(
-        null,
-        'account.storage_ownership_transferred',
-        'account_deletion_request',
-        v_request.id,
-        null,
-        v_request.user_id,
-        pg_catalog.jsonb_build_object(
-          'preserved_organization_hero_count', v_preserved_object_count
-        )
-      );
-    end if;
+    );
 
     update public.account_deletion_requests as deletion_request
     set status = 'processing',
@@ -2412,11 +3495,6 @@ begin
         failure_code = null
     where deletion_request.id = v_request.id;
 
-    -- Freeze product authority immediately. GoTrue does not expose a safe
-    -- user-id-only global sign-out call, so the worker must not mutate
-    -- auth.sessions/refresh_tokens directly. Existing tokens remain unable to
-    -- exercise product authority after profile and membership deactivation;
-    -- Auth Admin identity deletion invalidates them at the final step.
     update public.organization_memberships as membership
     set status = 'revoked'::public.membership_status,
         ended_at = coalesce(membership.ended_at, v_now),
@@ -2452,6 +3530,114 @@ begin
 
     delete from public.push_devices
     where public.push_devices.user_id = v_request.user_id;
+
+    -- Scanner work is dormant today, but an already-created intent must not
+    -- outlive account freeze or later attach through an approved derivative.
+    update public.media_upload_intents as intent
+    set status = 'expired',
+        rejection_code = coalesce(intent.rejection_code, 'account_deletion'),
+        scan_claimed_at = null,
+        scan_lease_token = null,
+        updated_at = v_now
+    where intent.uploader_id = v_request.user_id
+      and intent.attached_at is null
+      and intent.status in ('quarantine', 'scanning', 'approved');
+
+    -- Snapshot only authoritative uploader ownership. Legacy content columns
+    -- are deliberately not trusted here: a forged historic reference must
+    -- never cause one member's deletion to erase another member's bytes.
+
+    insert into private.account_deletion_cleanup_items (
+      request_id, bucket_id, storage_path
+    )
+    select v_request.id, 'community-media-quarantine', intent.quarantine_path
+    from public.media_upload_intents as intent
+    where intent.uploader_id = v_request.user_id
+    on conflict on constraint account_cleanup_item_path_unique do nothing;
+
+    insert into private.account_deletion_cleanup_items (
+      request_id, bucket_id, storage_path
+    )
+    select v_request.id, intent.approved_bucket_id, intent.approved_path
+    from public.media_upload_intents as intent
+    where intent.uploader_id = v_request.user_id
+      and not (
+        intent.purpose = 'organization_hero'
+        and intent.status = 'attached'
+        and exists (
+          select 1
+          from public.organizations as organization
+          where organization.id = intent.target_id
+            and organization.hero_path = intent.approved_path
+        )
+      )
+    on conflict on constraint account_cleanup_item_path_unique do nothing;
+
+    -- Direct-mode uploads do not have media intent rows. Inventory every exact
+    -- approved/quarantine object still owned by the identity, including
+    -- unattached orphans, while retaining only a currently referenced church
+    -- hero. Referenced avatar/post/message/evidence paths above deduplicate
+    -- against this complete owner inventory.
+    insert into private.account_deletion_cleanup_items (
+      request_id, bucket_id, storage_path
+    )
+    select v_request.id, object.bucket_id, object.name
+    from storage.objects as object
+    where object.bucket_id in (
+        'avatars', 'community-media', 'community-media-quarantine'
+      )
+      and (
+        (
+          object.owner_id = v_request.user_id::text
+          and (object.owner is null or object.owner = v_request.user_id)
+        )
+        or (object.owner_id is null and object.owner = v_request.user_id)
+      )
+      and not (
+        object.bucket_id = 'community-media'
+        and exists (
+          select 1
+          from public.organizations as organization
+          where organization.hero_path = object.name
+        )
+      )
+    on conflict on constraint account_cleanup_item_path_unique do nothing;
+
+    -- An attached organization hero is now organization-owned content, not a
+    -- personal upload to erase. Supabase Auth refuses to delete a user who is
+    -- still recorded as a Storage object owner, so transfer only the exact
+    -- currently referenced hero object while retaining its bytes and DB link.
+    -- This intentionally does not depend on a scanner intent: legacy direct
+    -- heroes have none.
+    update storage.objects as object
+    set owner = null,
+        owner_id = null,
+        updated_at = v_now
+    from public.organizations as organization
+    where organization.hero_path is not null
+      and object.bucket_id = 'community-media'
+      and object.name = organization.hero_path
+      and (
+        (
+          object.owner_id = v_request.user_id::text
+          and (object.owner is null or object.owner = v_request.user_id)
+        )
+        or (object.owner_id is null and object.owner = v_request.user_id)
+      );
+    get diagnostics v_preserved_object_count = row_count;
+    if v_preserved_object_count > 0 then
+      perform private.write_audit(
+        null,
+        'account.storage_ownership_transferred',
+        'account_deletion_request',
+        v_request.id,
+        null,
+        v_request.user_id,
+        pg_catalog.jsonb_build_object(
+          'preserved_organization_hero_count', v_preserved_object_count
+        )
+      );
+    end if;
 
     select coalesce(
       pg_catalog.jsonb_agg(
@@ -2538,6 +3724,8 @@ set search_path = pg_catalog
 as $$
 declare
   v_request public.account_deletion_requests%rowtype;
+  v_cleanup jsonb;
+  v_preserved_object_count integer := 0;
 begin
   perform private.require_service_role('finalize_account_anonymization');
   select * into v_request
@@ -2551,13 +3739,158 @@ begin
   if v_request.status <> 'processing' or v_request.user_id is null then
     raise exception 'deletion_request_not_anonymizable' using errcode = '55000';
   end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'media-uploader:' || v_request.user_id::text,
+      0
+    )
+  );
+
+  update public.media_upload_intents as intent
+  set status = 'expired',
+      rejection_code = coalesce(intent.rejection_code, 'account_deletion'),
+      scan_claimed_at = null,
+      scan_lease_token = null,
+      updated_at = pg_catalog.clock_timestamp()
+  where intent.uploader_id = v_request.user_id
+    and intent.attached_at is null
+    and intent.status in ('quarantine', 'scanning', 'approved');
+
+  insert into private.account_deletion_cleanup_items (
+    request_id, bucket_id, storage_path
+  )
+  select p_request_id, 'community-media-quarantine', intent.quarantine_path
+  from public.media_upload_intents as intent
+  join storage.objects as object
+    on object.bucket_id = 'community-media-quarantine'
+   and object.name = intent.quarantine_path
+  where intent.uploader_id = v_request.user_id
+  on conflict on constraint account_cleanup_item_path_unique do update
+  set status = 'pending',
+      attempt_count = 0,
+      last_error_code = null,
+      updated_at = pg_catalog.clock_timestamp()
+  where private.account_deletion_cleanup_items.status in ('deleted', 'not_found');
+
+  insert into private.account_deletion_cleanup_items (
+    request_id, bucket_id, storage_path
+  )
+  select p_request_id, intent.approved_bucket_id, intent.approved_path
+  from public.media_upload_intents as intent
+  join storage.objects as object
+    on object.bucket_id = intent.approved_bucket_id
+   and object.name = intent.approved_path
+  where intent.uploader_id = v_request.user_id
+    and not (
+      intent.purpose = 'organization_hero'
+      and intent.status = 'attached'
+      and exists (
+        select 1
+        from public.organizations as organization
+        where organization.id = intent.target_id
+          and organization.hero_path = intent.approved_path
+      )
+    )
+  on conflict on constraint account_cleanup_item_path_unique do update
+  set status = 'pending',
+      attempt_count = 0,
+      last_error_code = null,
+      updated_at = pg_catalog.clock_timestamp()
+  where private.account_deletion_cleanup_items.status in ('deleted', 'not_found');
+
+  -- Transfer only a still-current organization hero. Everything else that is
+  -- still owned by the identity is re-inventoried immediately before Auth
+  -- deletion, closing response-loss and out-of-band service upload races.
+  update storage.objects as object
+  set owner = null,
+      owner_id = null,
+      updated_at = pg_catalog.clock_timestamp()
+  from public.organizations as organization
+  where organization.hero_path is not null
+    and object.bucket_id = 'community-media'
+    and object.name = organization.hero_path
+    and (
+      (
+        object.owner_id = v_request.user_id::text
+        and (object.owner is null or object.owner = v_request.user_id)
+      )
+      or (object.owner_id is null and object.owner = v_request.user_id)
+    );
+  get diagnostics v_preserved_object_count = row_count;
+  if v_preserved_object_count > 0 then
+    perform private.write_audit(
+      null,
+      'account.storage_ownership_transferred',
+      'account_deletion_request',
+      p_request_id,
+      null,
+      v_request.user_id,
+      pg_catalog.jsonb_build_object(
+        'preserved_organization_hero_count', v_preserved_object_count,
+        'phase', 'finalize_recheck'
+      )
+    );
+  end if;
+
+  insert into private.account_deletion_cleanup_items (
+    request_id, bucket_id, storage_path
+  )
+  select p_request_id, object.bucket_id, object.name
+  from storage.objects as object
+  where object.bucket_id in (
+      'avatars', 'community-media', 'community-media-quarantine'
+    )
+    and (
+      (
+        object.owner_id = v_request.user_id::text
+        and (object.owner is null or object.owner = v_request.user_id)
+      )
+      or (object.owner_id is null and object.owner = v_request.user_id)
+    )
+    and not (
+      object.bucket_id = 'community-media'
+      and exists (
+        select 1
+        from public.organizations as organization
+        where organization.hero_path = object.name
+      )
+    )
+  on conflict on constraint account_cleanup_item_path_unique do update
+  set status = 'pending',
+      attempt_count = 0,
+      last_error_code = null,
+      updated_at = pg_catalog.clock_timestamp()
+  where private.account_deletion_cleanup_items.status in ('deleted', 'not_found');
+
   if exists (
     select 1
     from private.account_deletion_cleanup_items as item
     where item.request_id = p_request_id
       and item.status not in ('deleted', 'not_found')
   ) then
-    raise exception 'storage_cleanup_incomplete' using errcode = '55000';
+    select coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_build_object(
+          'id', item.id,
+          'bucket_id', item.bucket_id,
+          'storage_path', item.storage_path,
+          'status', item.status
+        ) order by item.created_at, item.id
+      ) filter (where item.status not in ('deleted', 'not_found')),
+      '[]'::jsonb
+    ) into v_cleanup
+    from private.account_deletion_cleanup_items as item
+    where item.request_id = p_request_id;
+
+    return pg_catalog.jsonb_build_object(
+      'request_id', p_request_id,
+      'user_id', v_request.user_id,
+      'status', 'processing',
+      'error_code', 'storage_cleanup_incomplete',
+      'next_operation', 'storage_cleanup',
+      'cleanup_items', v_cleanup
+    );
   end if;
 
   update public.profiles
@@ -2608,6 +3941,8 @@ begin
   delete from public.notification_preferences where user_id = v_request.user_id;
   delete from public.privacy_preferences where user_id = v_request.user_id;
   delete from public.conversation_preferences where user_id = v_request.user_id;
+  delete from private.direct_media_upload_reservations
+  where uploader_id = v_request.user_id;
 
   update public.account_deletion_requests
   set status = 'awaiting_identity_deletion'
@@ -3241,6 +4576,9 @@ begin
   if v_actor_id is null then
     raise exception 'authentication_required' using errcode = '42501';
   end if;
+  if not private.lock_active_media_uploader(v_actor_id) then
+    raise exception 'media_uploader_inactive' using errcode = '42501';
+  end if;
   if p_target_id is null or p_purpose not in (
     'post', 'message', 'organization_hero', 'application_evidence', 'avatar'
   ) then
@@ -3305,24 +4643,46 @@ begin
     pg_catalog.hashtextextended('media-quota:' || v_actor_id::text, 0)
   );
 
+  if (
+    coalesce((
+      select count(*)
+      from public.media_upload_intents as intent
+      where intent.uploader_id = v_actor_id
+        and intent.created_at >= pg_catalog.clock_timestamp() - interval '24 hours'
+    ), 0)
+    + coalesce((
+      select count(*)
+      from private.direct_media_upload_reservations as reservation
+      where reservation.uploader_id = v_actor_id
+        and reservation.created_at >= pg_catalog.clock_timestamp() - interval '24 hours'
+    ), 0)
+  ) >= 120 then
+    raise exception 'daily_media_upload_count_exceeded' using errcode = '54000';
+  end if;
+
   select coalesce(sum(intent.expected_byte_size), 0)::bigint into v_daily_bytes
   from public.media_upload_intents as intent
   where intent.uploader_id = v_actor_id
-    and intent.created_at >= pg_catalog.clock_timestamp() - interval '24 hours'
-    and intent.status not in ('rejected', 'expired');
+    and intent.created_at >= pg_catalog.clock_timestamp() - interval '24 hours';
 
-  select coalesce(sum(coalesce(intent.approved_byte_size, intent.expected_byte_size)), 0)::bigint
-  into v_retained_user_bytes
-  from public.media_upload_intents as intent
-  where intent.uploader_id = v_actor_id
-    and intent.status in ('quarantine', 'scanning', 'approved', 'attached');
+  select v_daily_bytes + coalesce(sum(reservation.byte_size), 0)::bigint
+  into v_daily_bytes
+  from private.direct_media_upload_reservations as reservation
+  where reservation.uploader_id = v_actor_id
+    and reservation.created_at >= pg_catalog.clock_timestamp() - interval '24 hours';
+
+  v_retained_user_bytes := private.retained_media_bytes_for_user(v_actor_id);
 
   if v_organization_id is not null then
-    select coalesce(sum(coalesce(intent.approved_byte_size, intent.expected_byte_size)), 0)::bigint
-    into v_retained_org_bytes
-    from public.media_upload_intents as intent
-    where intent.organization_id = v_organization_id
-      and intent.status in ('quarantine', 'scanning', 'approved', 'attached');
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'media-org-quota:' || v_organization_id::text,
+        0
+      )
+    );
+    v_retained_org_bytes := private.retained_media_bytes_for_organization(
+      v_organization_id
+    );
   else
     v_retained_org_bytes := 0;
   end if;
@@ -3429,6 +4789,9 @@ begin
   if v_actor_id is null then
     raise exception 'authentication_required' using errcode = '42501';
   end if;
+  if not private.lock_active_media_uploader(v_actor_id) then
+    raise exception 'media_uploader_inactive' using errcode = '42501';
+  end if;
 
   select count(distinct path)::integer into v_requested_count
   from pg_catalog.unnest(coalesce(p_approved_paths, array[]::text[])) as requested(path)
@@ -3494,6 +4857,130 @@ begin
 end;
 $$;
 
+-- Direct-mode cleanup fallback for clients that can no longer DELETE through
+-- Storage RLS after losing organization authority. Exact Storage ownership (or
+-- an idempotent reservation for a response-lost INSERT) is still required;
+-- ordinary content references and scanner-reserved destinations are protected.
+create or replace function public.abandon_direct_media_objects(
+  p_bucket_id text,
+  p_storage_paths text[]
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_requested text[];
+  v_path text;
+  v_owner uuid;
+  v_owner_id text;
+  v_queued integer := 0;
+  v_already_queued integer := 0;
+begin
+  if v_actor_id is null then
+    raise exception 'authentication_required' using errcode = '42501';
+  end if;
+  if p_bucket_id not in ('community-media', 'avatars')
+    or not private.lock_active_media_uploader(v_actor_id) then
+    raise exception 'direct_media_abandon_forbidden' using errcode = '42501';
+  end if;
+
+  select coalesce(pg_catalog.array_agg(requested.path order by requested.path), '{}'::text[])
+  into v_requested
+  from (
+    select distinct pg_catalog.btrim(path) as path
+    from pg_catalog.unnest(coalesce(p_storage_paths, '{}'::text[])) as supplied(path)
+    where nullif(pg_catalog.btrim(path), '') is not null
+  ) as requested;
+  if pg_catalog.cardinality(v_requested) < 1
+    or pg_catalog.cardinality(v_requested) > 20 then
+    raise exception 'invalid_media_abandon_batch' using errcode = '22023';
+  end if;
+  perform private.consume_rate_limit(v_actor_id, 'media_abandon', 30, 600, 1);
+
+  foreach v_path in array v_requested
+  loop
+    if not private.direct_media_path_shape_allowed(p_bucket_id, v_path, v_actor_id)
+      or exists (
+        select 1
+        from public.media_upload_intents as intent
+        where intent.approved_bucket_id = p_bucket_id
+          and intent.approved_path = v_path
+      ) then
+      raise exception 'direct_media_abandon_forbidden' using errcode = '42501';
+    end if;
+
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'media-object:' || p_bucket_id || ':' || v_path,
+        0
+      )
+    );
+    if private.media_path_is_referenced(p_bucket_id, v_path) then
+      raise exception 'direct_media_still_referenced' using errcode = '55000';
+    end if;
+    if exists (
+      select 1
+      from private.media_cleanup_items as cleanup
+      where cleanup.bucket_id = p_bucket_id
+        and cleanup.storage_path = v_path
+        and cleanup.uploader_id = v_actor_id
+    ) then
+      v_already_queued := v_already_queued + 1;
+      continue;
+    end if;
+
+    v_owner := null;
+    v_owner_id := null;
+    select object.owner, object.owner_id
+    into v_owner, v_owner_id
+    from storage.objects as object
+    where object.bucket_id = p_bucket_id
+      and object.name = v_path
+    for share;
+    if found then
+      if not (
+        (
+          v_owner_id = v_actor_id::text
+          and (v_owner is null or v_owner = v_actor_id)
+        )
+        or (v_owner_id is null and v_owner = v_actor_id)
+      ) then
+        raise exception 'direct_media_abandon_forbidden' using errcode = '42501';
+      end if;
+    elsif not exists (
+      select 1
+      from private.direct_media_upload_reservations as reservation
+      where reservation.bucket_id = p_bucket_id
+        and reservation.storage_path = v_path
+        and reservation.uploader_id = v_actor_id
+    ) then
+      raise exception 'direct_media_abandon_forbidden' using errcode = '42501';
+    end if;
+
+    insert into private.media_cleanup_items (
+      intent_id, uploader_id, bucket_id, storage_path, reason
+    )
+    values (null, v_actor_id, p_bucket_id, v_path, 'user_abandoned')
+    on conflict (bucket_id, storage_path) do nothing;
+    if found then
+      v_queued := v_queued + 1;
+    else
+      v_already_queued := v_already_queued + 1;
+    end if;
+  end loop;
+
+  return pg_catalog.jsonb_build_object(
+    'queued_count', v_queued,
+    'already_queued_count', v_already_queued,
+    'cleanup_queued',
+      v_queued + v_already_queued = pg_catalog.cardinality(v_requested)
+  );
+end;
+$$;
+
 create or replace function public.prepare_post_media_cleanup(
   p_post_id uuid,
   p_expected_author_id uuid,
@@ -3514,17 +5001,23 @@ declare
   v_prefix text;
   v_path text;
   v_intent public.media_upload_intents%rowtype;
+  v_object_owner uuid;
+  v_object_owner_id text;
 begin
   if v_actor_id is null then
     raise exception 'authentication_required' using errcode = '42501';
+  end if;
+  if not private.lock_active_media_uploader(v_actor_id) then
+    raise exception 'media_uploader_inactive' using errcode = '42501';
   end if;
   if p_expected_author_id is null or v_actor_id <> p_expected_author_id then
     raise exception 'post_author_session_changed' using errcode = '42501';
   end if;
   if p_post_id is null or p_storage_paths is null
-    or pg_catalog.cardinality(p_storage_paths) > 100 then
+    or pg_catalog.cardinality(p_storage_paths) > 20 then
     raise exception 'invalid_post_cleanup_request' using errcode = '22023';
   end if;
+  perform private.consume_rate_limit(v_actor_id, 'media_abandon', 30, 600, 1);
 
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('post:' || p_post_id::text, 0)
@@ -3586,6 +5079,9 @@ begin
 
   foreach v_path in array v_removable
   loop
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended('media-object:community-media:' || v_path, 0)
+    );
     select * into v_intent
     from public.media_upload_intents as intent
     where intent.uploader_id = v_actor_id
@@ -3598,6 +5094,11 @@ begin
     for update;
 
     if found then
+      if private.media_path_is_referenced('community-media', v_path) then
+        v_removable := pg_catalog.array_remove(v_removable, v_path);
+        v_protected := pg_catalog.array_append(v_protected, v_path);
+        continue;
+      end if;
       if v_intent.status not in ('rejected', 'expired') then
         update public.media_upload_intents
         set status = 'expired',
@@ -3629,8 +5130,62 @@ begin
       on conflict (bucket_id, storage_path) do nothing;
     else
       -- Rollout compatibility for draft objects created before upload intents:
-      -- exact owned-post prefix validation plus absence from post_media makes
-      -- this legacy approved path safe for the service worker to delete.
+      -- serialize with attach/delete, reject scanner-reserved destinations, and
+      -- never let one manager queue another uploader's bytes for deletion.
+      if not private.direct_media_path_shape_allowed(
+        'community-media', v_path, v_actor_id
+      ) then
+        v_removable := pg_catalog.array_remove(v_removable, v_path);
+        v_protected := pg_catalog.array_append(v_protected, v_path);
+        continue;
+      end if;
+      if private.media_path_is_referenced('community-media', v_path) then
+        v_removable := pg_catalog.array_remove(v_removable, v_path);
+        v_protected := pg_catalog.array_append(v_protected, v_path);
+        continue;
+      end if;
+      if exists (
+        select 1
+        from public.media_upload_intents as reserved
+        where reserved.approved_bucket_id = 'community-media'
+          and reserved.approved_path = v_path
+      ) then
+        v_removable := pg_catalog.array_remove(v_removable, v_path);
+        v_protected := pg_catalog.array_append(v_protected, v_path);
+        continue;
+      end if;
+
+      v_object_owner := null;
+      v_object_owner_id := null;
+      select object.owner, object.owner_id
+      into v_object_owner, v_object_owner_id
+      from storage.objects as object
+      where object.bucket_id = 'community-media'
+        and object.name = v_path
+      for share;
+      if found and not (
+        (
+          v_object_owner_id = v_actor_id::text
+          and (v_object_owner is null or v_object_owner = v_actor_id)
+        )
+        or (v_object_owner_id is null and v_object_owner = v_actor_id)
+      ) then
+        v_removable := pg_catalog.array_remove(v_removable, v_path);
+        v_protected := pg_catalog.array_append(v_protected, v_path);
+        continue;
+      end if;
+      if not found and not exists (
+        select 1
+        from private.direct_media_upload_reservations as reservation
+        where reservation.bucket_id = 'community-media'
+          and reservation.storage_path = v_path
+          and reservation.uploader_id = v_actor_id
+      ) then
+        v_removable := pg_catalog.array_remove(v_removable, v_path);
+        v_protected := pg_catalog.array_append(v_protected, v_path);
+        continue;
+      end if;
+
       insert into private.media_cleanup_items (
         intent_id, uploader_id, bucket_id, storage_path, reason
       )
@@ -3717,7 +5272,23 @@ begin
         from storage.objects as object
         where object.bucket_id = 'community-media-quarantine'
           and object.name = candidate.quarantine_path
-          and object.owner_id = candidate.uploader_id::text
+          and (
+            (
+              object.owner_id = candidate.uploader_id::text
+              and (object.owner is null or object.owner = candidate.uploader_id)
+            )
+            or (
+              object.owner_id is null
+              and object.owner = candidate.uploader_id
+            )
+          )
+          and pg_catalog.lower(coalesce(object.metadata ->> 'mimetype', '')) =
+            pg_catalog.lower(candidate.expected_mime_type)
+          and case
+            when object.metadata ->> 'size' ~ '^[0-9]{1,18}$'
+              then (object.metadata ->> 'size')::bigint
+            else null
+          end = candidate.expected_byte_size
       )
     order by candidate.scan_next_attempt_at, candidate.created_at, candidate.id
     for update skip locked
@@ -3765,6 +5336,8 @@ language plpgsql
 security definer
 set search_path = pg_catalog
 as $$
+declare
+  v_item private.media_cleanup_items%rowtype;
 begin
   perform private.require_service_role('claim_media_cleanup_items');
   if p_limit < 1 or p_limit > 500 then
@@ -3819,30 +5392,47 @@ begin
     and intent.attached_at is null
   on conflict on constraint media_cleanup_items_bucket_id_storage_path_key do nothing;
 
-  return query
-  with candidates as (
-    select item.id
+  for v_item in
+    select item.*
     from private.media_cleanup_items as item
     where item.status in ('pending', 'failed')
       and item.next_attempt_at <= pg_catalog.clock_timestamp()
     order by item.next_attempt_at, item.created_at, item.id
     for update skip locked
     limit p_limit
-  )
-  update private.media_cleanup_items as item
-  set status = 'processing',
-      attempts = item.attempts + 1,
-      claimed_at = pg_catalog.clock_timestamp(),
-      updated_at = pg_catalog.clock_timestamp()
-  from candidates
-  where item.id = candidates.id
-  returning
-    item.id,
-    item.intent_id,
-    item.bucket_id,
-    item.storage_path,
-    item.reason,
-    item.attempts;
+  loop
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(
+        'media-object:' || v_item.bucket_id || ':' || v_item.storage_path,
+        0
+      )
+    );
+    if private.media_path_is_referenced(v_item.bucket_id, v_item.storage_path) then
+      update private.media_cleanup_items as deferred
+      set next_attempt_at = pg_catalog.clock_timestamp() + interval '10 minutes',
+          last_error_code = 'media_path_referenced',
+          updated_at = pg_catalog.clock_timestamp()
+      where deferred.id = v_item.id;
+      continue;
+    end if;
+
+    update private.media_cleanup_items as claimed
+    set status = 'processing',
+        attempts = claimed.attempts + 1,
+        claimed_at = pg_catalog.clock_timestamp(),
+        updated_at = pg_catalog.clock_timestamp()
+    where claimed.id = v_item.id
+    returning * into v_item;
+
+    item_id := v_item.id;
+    intent_id := v_item.intent_id;
+    bucket_id := v_item.bucket_id;
+    storage_path := v_item.storage_path;
+    reason := v_item.reason;
+    attempts := v_item.attempts;
+    return next;
+  end loop;
+  return;
 end;
 $$;
 
@@ -4066,7 +5656,7 @@ begin
 end;
 $$;
 
--- Block-aware conversations and approved-media messaging -------------------
+-- Block-aware conversations and dual-mode media messaging -------------------
 create or replace function public.get_or_create_conversation(p_other_user_id uuid)
 returns uuid
 language plpgsql
@@ -4157,6 +5747,7 @@ declare
   v_sender_name text;
   v_existing_message_id uuid;
   v_intent public.media_upload_intents%rowtype;
+  v_direct_metadata jsonb;
   v_media_metadata jsonb := '{}'::jsonb;
   v_now timestamptz := pg_catalog.clock_timestamp();
 begin
@@ -4223,20 +5814,40 @@ begin
       v_actor_id,
       v_message_id
     );
-    if (p_kind = 'image'::public.message_kind and v_intent.kind <> 'image'::public.media_kind)
-      or (p_kind = 'video'::public.message_kind and v_intent.kind <> 'video'::public.media_kind) then
-      raise exception 'message_media_kind_mismatch' using errcode = '23514';
-    end if;
+    if v_intent.id is null then
+      v_direct_metadata := private.require_owned_media_object(
+        'community-media',
+        p_media_path,
+        v_actor_id,
+        case p_kind
+          when 'image'::public.message_kind then 'image'::public.media_kind
+          else 'video'::public.media_kind
+        end
+      );
+      -- Direct-mode metadata is read from Storage. Caller JSON is deliberately
+      -- ignored so a legacy batch cannot claim that unscanned bytes were
+      -- approved or under-report their size/type.
+      v_media_metadata := (v_direct_metadata - 'kind')
+        || pg_catalog.jsonb_build_object(
+          'scan_approved', false,
+          'legacy_direct', true
+        );
+    else
+      if (p_kind = 'image'::public.message_kind and v_intent.kind <> 'image'::public.media_kind)
+        or (p_kind = 'video'::public.message_kind and v_intent.kind <> 'video'::public.media_kind) then
+        raise exception 'message_media_kind_mismatch' using errcode = '23514';
+      end if;
 
-    v_media_metadata := pg_catalog.jsonb_build_object(
-      'mime_type', v_intent.approved_mime_type,
-      'byte_size', v_intent.approved_byte_size,
-      'width', v_intent.approved_width,
-      'height', v_intent.approved_height,
-      'duration_seconds', v_intent.approved_duration_seconds,
-      'scan_approved', true,
-      'upload_intent_id', v_intent.id
-    );
+      v_media_metadata := pg_catalog.jsonb_build_object(
+        'mime_type', v_intent.approved_mime_type,
+        'byte_size', v_intent.approved_byte_size,
+        'width', v_intent.approved_width,
+        'height', v_intent.approved_height,
+        'duration_seconds', v_intent.approved_duration_seconds,
+        'scan_approved', true,
+        'upload_intent_id', v_intent.id
+      );
+    end if;
   end if;
 
   insert into public.messages (
@@ -4300,9 +5911,10 @@ end;
 $$;
 
 -- Explicitly replace the legacy 008 batch entry point. Each validated item is
--- delegated to the current block-aware/rate-limited/approved-media send_message
+-- delegated to the current block-aware/rate-limited/media-bound send_message
 -- implementation, so the batch remains atomic and cannot preserve forged
--- client media metadata.
+-- client media metadata. Direct uploads use authoritative Storage metadata;
+-- scanner intents remain strict when present.
 create or replace function public.send_message_batch(
   p_conversation_id uuid,
   p_expected_sender_id uuid,
@@ -4429,7 +6041,7 @@ end;
 $$;
 
 comment on function public.send_message_batch(uuid, uuid, jsonb) is
-  'Atomic 1-4 item composer batch; every item uses current block, rate, approved-media, nonce, and generic-notification enforcement.';
+  'Atomic 1-4 item composer batch; every item uses current block, rate, owned direct/scanned media, nonce, and generic-notification enforcement.';
 
 create or replace function public.get_conversation_summaries()
 returns table (
@@ -5331,7 +6943,20 @@ revoke all on function private.users_are_blocked(uuid, uuid) from public, anon, 
 revoke all on function private.user_has_blocked(uuid, uuid) from public, anon, authenticated;
 revoke all on function private.can_moderate_organization(uuid, uuid) from public, anon, authenticated;
 revoke all on function private.consume_rate_limit(uuid, text, integer, integer, integer) from public, anon, authenticated;
-revoke all on function private.can_write_quarantine_media(text, uuid) from public, anon, authenticated;
+revoke all on function private.lock_active_media_uploader(uuid) from public, anon, authenticated;
+revoke all on function private.mark_direct_media_materialized() from public, anon, authenticated;
+revoke all on function private.can_write_quarantine_media(text, uuid, jsonb) from public, anon, authenticated;
+revoke all on function private.direct_media_path_shape_allowed(text, text, uuid) from public, anon, authenticated;
+revoke all on function private.media_object_path_metadata_allowed(text, text, jsonb) from public, anon, authenticated;
+revoke all on function private.legacy_media_object_metadata_safe(text, jsonb) from public, anon, authenticated;
+revoke all on function private.retained_media_bytes_for_user(uuid) from public, anon, authenticated;
+revoke all on function private.retained_media_bytes_for_organization(uuid) from public, anon, authenticated;
+revoke all on function private.can_write_direct_media_object(text, text, uuid) from public, anon, authenticated;
+revoke all on function private.direct_media_path_attachable(text, text) from public, anon, authenticated;
+revoke all on function private.authorize_direct_media_upload(text, text, uuid, jsonb) from public, anon, authenticated;
+revoke all on function private.media_path_is_referenced(text, text) from public, anon, authenticated;
+revoke all on function private.can_mutate_direct_media_object(text, text, uuid) from public, anon, authenticated;
+revoke all on function private.require_owned_media_object(text, text, uuid, public.media_kind, text, bigint) from public, anon, authenticated;
 revoke all on function private.claim_approved_media(text, uuid, text, uuid, uuid) from public, anon, authenticated;
 revoke all on function private.enforce_high_risk_aal2() from public, anon, authenticated;
 revoke all on function private.enforce_leadership_review_aal2() from public, anon, authenticated;
@@ -5348,7 +6973,9 @@ revoke all on function private.next_push_attempt_at(uuid, timestamptz) from publ
 revoke all on function private.enqueue_generic_push_notification() from public, anon, authenticated;
 
 grant execute on function private.can_moderate_organization(uuid, uuid) to authenticated;
-grant execute on function private.can_write_quarantine_media(text, uuid) to authenticated;
+grant execute on function private.can_write_quarantine_media(text, uuid, jsonb) to authenticated;
+grant execute on function private.authorize_direct_media_upload(text, text, uuid, jsonb) to authenticated;
+grant execute on function private.can_mutate_direct_media_object(text, text, uuid) to authenticated;
 grant execute on function private.user_has_blocked(uuid, uuid) to authenticated;
 
 revoke all on function public.list_public_organization_directory(text) from public, anon, authenticated;
@@ -5373,6 +7000,7 @@ revoke all on function public.list_moderation_reports(text, integer) from public
 revoke all on function public.resolve_content_report(uuid, text, text) from public, anon, authenticated;
 revoke all on function public.create_media_upload_intent(text, uuid, public.media_kind, text, bigint) from public, anon, authenticated;
 revoke all on function public.abandon_media_upload_intents(text[]) from public, anon, authenticated;
+revoke all on function public.abandon_direct_media_objects(text, text[]) from public, anon, authenticated;
 revoke all on function public.prepare_post_media_cleanup(uuid, uuid, text[]) from public, anon, authenticated;
 revoke all on function public.get_or_create_conversation(uuid) from public, anon, authenticated;
 revoke all on function public.send_message(uuid, public.message_kind, text, text, jsonb, uuid) from public, anon, authenticated;
@@ -5409,8 +7037,12 @@ grant execute on function public.cancel_account_deletion() to authenticated;
 grant execute on function public.create_content_report(text, uuid, text, text) to authenticated;
 grant execute on function public.list_moderation_reports(text, integer) to authenticated;
 grant execute on function public.resolve_content_report(uuid, text, text) to authenticated;
-grant execute on function public.create_media_upload_intent(text, uuid, public.media_kind, text, bigint) to authenticated;
+-- Scanner intent creation stays ungranted while direct compatibility mode is
+-- active. Existing quarantine policies alone cannot be used without a valid
+-- intent. A later scanner-rollout migration must add source-cleanup and late-
+-- derivative reconciliation before granting this RPC to clients.
 grant execute on function public.abandon_media_upload_intents(text[]) to authenticated;
+grant execute on function public.abandon_direct_media_objects(text, text[]) to authenticated;
 grant execute on function public.prepare_post_media_cleanup(uuid, uuid, text[]) to authenticated;
 grant execute on function public.get_or_create_conversation(uuid) to authenticated;
 grant execute on function public.send_message(uuid, public.message_kind, text, text, jsonb, uuid) to authenticated;

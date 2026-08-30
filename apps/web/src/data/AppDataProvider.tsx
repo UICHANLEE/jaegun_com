@@ -60,7 +60,6 @@ interface PendingMessageBatch {
   textNonce?: string;
   mediaNonces: string[];
   uploads?: Array<{
-    intentId: string;
     bucket: "community-media" | "avatars";
     path: string;
     url: string;
@@ -873,24 +872,65 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       return false;
     }
     const remainingPaths = new Set(uniquePaths);
+    const clearCompletedPaths = (completedPaths: string[]) => {
+      const pending = storageCleanupQueueRef.current.get(userId);
+      if (pending) {
+        for (const path of completedPaths) pending.delete(path);
+        if (pending.size === 0) storageCleanupQueueRef.current.delete(userId);
+        writeStorageCleanupQueue(storageCleanupQueueRef.current);
+      }
+      for (const path of completedPaths) remainingPaths.delete(path);
+    };
     try {
       for (let offset = 0; offset < uniquePaths.length; offset += 20) {
-        const chunk = uniquePaths.slice(offset, offset + 20);
-        const result = await supabase.rpc("abandon_media_upload_intents", {
-          p_approved_paths: chunk,
-        });
-        if (result.error) throw result.error;
         if (!isCleanupActorCurrent()) {
           queueStorageCleanup(userId, Array.from(remainingPaths));
           return false;
         }
-        const pending = storageCleanupQueueRef.current.get(userId);
-        if (pending) {
-          for (const path of chunk) pending.delete(path);
-          if (pending.size === 0) storageCleanupQueueRef.current.delete(userId);
-          writeStorageCleanupQueue(storageCleanupQueueRef.current);
+        const chunk = uniquePaths.slice(offset, offset + 20);
+        let directRemovalFailed = false;
+        try {
+          const directResult = await supabase.storage.from("community-media").remove(chunk);
+          directRemovalFailed = Boolean(directResult.error);
+        } catch {
+          directRemovalFailed = true;
         }
-        for (const path of chunk) remainingPaths.delete(path);
+        if (!isCleanupActorCurrent()) {
+          queueStorageCleanup(userId, Array.from(remainingPaths));
+          return false;
+        }
+        if (directRemovalFailed) {
+          let fallbackResult;
+          try {
+            fallbackResult = await supabase.rpc("abandon_direct_media_objects", {
+              p_bucket_id: "community-media",
+              p_storage_paths: chunk,
+            });
+          } catch {
+            queueStorageCleanup(userId, Array.from(remainingPaths));
+            return false;
+          }
+          if (!isCleanupActorCurrent()) {
+            queueStorageCleanup(userId, Array.from(remainingPaths));
+            return false;
+          }
+          const fallbackPayload = rowOf(fallbackResult.data);
+          const queuedCount = fallbackPayload?.queued_count;
+          const alreadyQueuedCount = fallbackPayload?.already_queued_count;
+          const countConfirmed = typeof queuedCount === "number"
+            && Number.isSafeInteger(queuedCount)
+            && queuedCount >= 0
+            && typeof alreadyQueuedCount === "number"
+            && Number.isSafeInteger(alreadyQueuedCount)
+            && alreadyQueuedCount >= 0
+            && queuedCount + alreadyQueuedCount === chunk.length;
+          if (fallbackResult.error
+            || (fallbackPayload?.cleanup_queued !== true && !countConfirmed)) {
+            queueStorageCleanup(userId, Array.from(remainingPaths));
+            return false;
+          }
+        }
+        clearCompletedPaths(chunk);
       }
       return true;
     } catch {
@@ -975,24 +1015,18 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         clearDraftCleanup(userId, postId);
         return true;
       }
-      // Migration 202608270011 makes this RPC the authoritative draft cleanup:
-      // it detaches media intents and queues both quarantine and approved bytes
-      // for the service worker. Clients cannot delete approved Storage objects.
-      const cleanupQueued = removablePaths.length === 0 || payload.cleanup_queued === true;
-      if (cleanupQueued) {
-        clearStorageCleanupPaths(userId, removablePaths);
-        clearDraftCleanup(userId, postId);
-      } else {
-        queueStorageCleanup(userId, removablePaths);
-        queueDraftCleanup(userId, postId);
-      }
-      return cleanupQueued;
+      const removed = removablePaths.length
+        ? await removeOrQueueStoragePaths(userId, removablePaths, sessionEpoch)
+        : true;
+      if (removed) clearDraftCleanup(userId, postId);
+      else queueDraftCleanup(userId, postId);
+      return removed;
     } catch {
       queueStorageCleanup(userId, uniquePaths);
       queueDraftCleanup(userId, postId);
       return false;
     }
-  }, [clearDraftCleanup, clearStorageCleanupPaths, queueDraftCleanup, queueStorageCleanup]);
+  }, [clearDraftCleanup, clearStorageCleanupPaths, queueDraftCleanup, queueStorageCleanup, removeOrQueueStoragePaths]);
 
   const flushPostCleanupQueues = useCallback(async (userId: string) => {
     const sessionEpoch = remoteSessionEpochRef.current;
@@ -2190,7 +2224,8 @@ export function AppDataProvider({ children }: PropsWithChildren) {
             {
               purpose: "post",
               targetId: String(postRow.id),
-              onIntentCreated: (approvedPath) => attemptedObjectPaths.push(approvedPath),
+              organizationId: membership.organizationId,
+              onObjectPathCreated: (objectPath) => attemptedObjectPaths.push(objectPath),
             },
             (fileProgress) => onProgress?.((index + fileProgress) / draft.files.length),
           );
@@ -2688,7 +2723,8 @@ export function AppDataProvider({ children }: PropsWithChildren) {
             const uploaded = await uploadCommunityFile(file, {
               purpose: "message",
               targetId: conversationId,
-              onIntentCreated: (approvedPath) => attemptedObjectPaths.push(approvedPath),
+              organizationId,
+              onObjectPathCreated: (objectPath) => attemptedObjectPaths.push(objectPath),
             }, () => undefined);
             uploadedFiles.push({ file, uploaded, nonce: pendingBatch.mediaNonces[index] });
           }
@@ -2714,8 +2750,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
               width: uploaded.width ?? null,
               height: uploaded.height ?? null,
               duration_seconds: uploaded.durationSeconds ?? null,
-              scan_approved: true,
-              upload_intent_id: uploaded.intentId,
             },
             client_nonce: nonce,
           })),
