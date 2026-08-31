@@ -8,6 +8,7 @@ import { useAppData } from "./data/AppDataProvider";
 import { canManageDepartmentOfficers } from "./data/departmentGovernance";
 import { isSupabaseConfigured } from "./data/supabase";
 import { isSupportContactConfigured } from "./data/runtimeConfig";
+import { NativeConnectivityBanner } from "./native/NativeConnectivityBanner";
 
 const LoginPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.LoginPage })));
 const ForgotPasswordPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.ForgotPasswordPage })));
@@ -51,6 +52,7 @@ const OverseasTransferPage = lazy(() => import("./pages/SafetyPrivacyPages").the
 const LegalTermsPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.LegalTermsPage })));
 const CommunityPolicyPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.CommunityPolicyPage })));
 const PublicAccountDeletionPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.PublicAccountDeletionPage })));
+const PublicSupportPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.PublicSupportPage })));
 
 function ManagerOnly({ children }: { children: ReactNode }) {
   const { viewer } = useAppData();
@@ -148,6 +150,8 @@ function SignedOutRoutes() {
     <Routes>
       <Route index element={<Navigate to="/auth" replace />} />
       <Route path="/auth" element={<LoginPage />} />
+      <Route path="/auth/callback/signup" element={<LoginPage />} />
+      <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
@@ -161,6 +165,7 @@ function SignedOutRoutes() {
       <Route path="/legal/community" element={<CommunityPolicyPage />} />
       <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
+      <Route path="/support" element={<PublicSupportPage />} />
       <Route path="/onboarding" element={<Navigate to="/auth" replace />} />
       <Route path="/pending" element={<Navigate to="/auth" replace />} />
       <Route path="/app/*" element={<Navigate to="/auth" replace />} />
@@ -177,6 +182,8 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route index element={accountStatePage} />
       <Route path="/onboarding" element={accountStatePage} />
       <Route path="/pending" element={accountStatePage} />
+      <Route path="/auth/callback/signup" element={accountStatePage} />
+      <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
       <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
@@ -189,6 +196,7 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route path="/legal/community" element={<CommunityPolicyPage />} />
       <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
+      <Route path="/support" element={<PublicSupportPage />} />
       <Route path="/auth" element={<Navigate to="/" replace />} />
       <Route path="/forgot-password" element={<Navigate to="/" replace />} />
       <Route path="/app/*" element={accountStatePage} />
@@ -213,6 +221,9 @@ function ConsentRequiredRoutes() {
         <Route path="/legal/community" element={<CommunityPolicyPage />} />
         <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
         <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
+        <Route path="/support" element={<PublicSupportPage />} />
+        <Route path="/auth/callback/signup" element={<Navigate to="/app/privacy" replace />} />
+        <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
         <Route path="/app/privacy" element={<PrivacyConsentPage />} />
         <Route path="/app/account" element={<AccountDeletionPage />} />
         <Route path="*" element={<Navigate to="/app/privacy" replace state={{ consentRequired: true }} />} />
@@ -229,6 +240,8 @@ function AuthenticatedRoutes() {
           <Route index element={<RoleLandingRedirect />} />
           <Route path="/auth" element={<RoleLandingRedirect />} />
           <Route path="/forgot-password" element={<RoleLandingRedirect />} />
+          <Route path="/auth/callback/signup" element={<RoleLandingRedirect />} />
+          <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
           <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
@@ -241,6 +254,7 @@ function AuthenticatedRoutes() {
           <Route path="/legal/community" element={<CommunityPolicyPage />} />
           <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
           <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
+          <Route path="/support" element={<PublicSupportPage />} />
           <Route path="/app/mfa-challenge" element={<MfaChallengePage />} />
           <Route element={<AppShell />}>
             <Route path="/app/home" element={<MemberHomePage />} />
@@ -304,6 +318,7 @@ export default function App() {
 
   return (
     <AppErrorBoundary>
+      <NativeConnectivityBanner />
       <Suspense fallback={<LoadingScreen />}>
         <ScrollToTop />
         <AppRoutes />

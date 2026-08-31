@@ -394,11 +394,13 @@ fieldset {
 
 .loading-screen {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 18px;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
 }
 
 .loading-screen img {
@@ -417,7 +419,7 @@ fieldset {
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 28px 20px;
+  padding: max(28px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom));
   background:
     radial-gradient(circle at 20% 10%, rgba(105, 170, 57, 0.12), transparent 34%),
     radial-gradient(circle at 90% 85%, rgba(36, 137, 200, 0.12), transparent 38%),
@@ -701,6 +703,7 @@ fieldset {
 /* Authentication and onboarding */
 .auth-page {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--paper);
 }
 
@@ -710,10 +713,11 @@ fieldset {
 
 .auth-panel {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 28px 20px 44px;
+  padding: calc(28px + env(safe-area-inset-top)) 20px calc(44px + env(safe-area-inset-bottom));
 }
 
 .auth-panel__inner {
@@ -722,7 +726,7 @@ fieldset {
 
 .auth-panel__mobile-brand {
   position: absolute;
-  top: 24px;
+  top: calc(24px + env(safe-area-inset-top));
   left: 22px;
 }
 
@@ -3114,6 +3118,34 @@ fieldset {
   .governance-hero__path { align-content: center; }
   .governance-scope-panel,
   .governance-section { padding: 20px; }
+}
+
+.native-connectivity-banner {
+  position: fixed;
+  z-index: 1100;
+  top: 0;
+  right: 0;
+  left: 0;
+  min-height: calc(44px + env(safe-area-inset-top));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: calc(9px + env(safe-area-inset-top)) 16px 9px;
+  color: #fff;
+  background: #7d2e1f;
+  box-shadow: 0 8px 24px rgba(53, 19, 13, .22);
+  font-size: .74rem;
+  font-weight: 750;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+
+.native-connectivity-banner > svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
 }
 
 @media (prefers-reduced-motion: reduce) {

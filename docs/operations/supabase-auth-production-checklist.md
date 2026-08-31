@@ -15,7 +15,8 @@
 - 이메일 확인을 필수로 하고 운영 전용 SMTP를 연결한다. 기본 시험용 메일 발송기는 운영에 사용하지 않는다.
 - 가입, 로그인, 비밀번호 재설정에 CAPTCHA를 연결하고 Auth rate limit을 실제 트래픽 기준으로 조정한다.
 - 계정 존재 여부를 드러내지 않는 동일한 성공·실패 문구와 응답 시간을 유지한다.
-- 허용 Redirect URL은 운영·검증된 Preview·로컬 개발의 정확한 URL만 등록하며 wildcard를 쓰지 않는다.
+- 운영 Redirect URL은 `/reset-password`, `/auth/callback/signup`, `/auth/callback/recovery`의 정확한 경로만 등록한다. 네이티브 PKCE 상관관계 값에는 각 callback의 `?sb_flow_id=*` 패턴을 추가하되, `*`를 scheme·host·path 또는 다른 query에 사용하지 않는다. 클라이언트는 `sb_flow_id`의 형식과 유일성, 추가 query 부재를 다시 검증한다.
+- Preview·로컬 개발은 실제 검증 대상의 정확한 URL만 별도로 등록하며 wildcard host/path를 쓰지 않는다.
 
 ## 릴리스 시험
 

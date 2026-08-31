@@ -184,7 +184,9 @@ export function DepartmentOfficerManagementPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [demoAssignments, setDemoAssignments] = useState<DemoAssignments>(() => (
-    initialDemoAssignments(members, defaultOrganizationId, serviceYear)
+    import.meta.env.DEV
+      ? initialDemoAssignments(members, defaultOrganizationId, serviceYear)
+      : {}
   ));
 
   const organization = organizations.find((item) => item.id === organizationId);
@@ -214,7 +216,7 @@ export function DepartmentOfficerManagementPage() {
     setLoading(true);
     setLoadError(null);
     setDepartments([]);
-    const request = mode === "demo"
+    const request = import.meta.env.DEV && mode === "demo"
       ? Promise.resolve(buildDemoDepartments(organizationId, selectedYear, demoAssignments))
       : listChurchDepartments({ organizationId, serviceYear: selectedYear, signal });
     return request.then((next) => {
@@ -252,7 +254,7 @@ export function DepartmentOfficerManagementPage() {
     setCandidateLoading(true);
     setCandidateError(null);
     setCandidates([]);
-    const request = mode === "demo"
+    const request = import.meta.env.DEV && mode === "demo"
       ? Promise.resolve(demoCandidates(members, organizationId, candidateSearch))
       : listDepartmentOfficeCandidates({
         departmentId: selectedDepartment.id,
@@ -298,7 +300,7 @@ export function DepartmentOfficerManagementPage() {
     setSaving(true);
     setCandidateError(null);
     try {
-      if (mode === "demo") {
+      if (import.meta.env.DEV && mode === "demo") {
         const candidate = candidates.find((item) => item.userId === selectedUserId);
         if (!candidate) throw new Error("선택한 담당자를 다시 확인해 주세요.");
         setDemoAssignments((current) => ({
@@ -335,7 +337,7 @@ export function DepartmentOfficerManagementPage() {
     setSaving(true);
     setCandidateError(null);
     try {
-      if (mode === "demo") {
+      if (import.meta.env.DEV && mode === "demo") {
         const key = demoAssignmentKey(organizationId, selectedYear, selectedDepartment.code, editingOffice);
         setDemoAssignments((current) => {
           const next = { ...current };

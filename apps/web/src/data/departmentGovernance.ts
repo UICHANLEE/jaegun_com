@@ -70,7 +70,7 @@ export function canManageDepartmentOfficers(
   // The local minister persona mirrors the explicit annual pastor assignment
   // seeded by OrganizationAdministrationPage. This branch is never used in
   // Supabase mode, where governance access must come from the server.
-  return mode === "demo"
+  return import.meta.env.DEV && mode === "demo"
     && viewer.profile.id === "demo-minister"
     && viewer.membership?.role === "minister";
 }

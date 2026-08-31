@@ -10,6 +10,11 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: false,
+    rollupOptions: {
+      treeshake: {
+        moduleSideEffects: (id) => !/[\\/]src[\\/]data[\\/]seed\.ts$/u.test(id),
+      },
+    },
   },
   test: {
     environment: "jsdom",

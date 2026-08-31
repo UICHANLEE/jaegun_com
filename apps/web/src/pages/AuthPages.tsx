@@ -414,7 +414,7 @@ export function LoginPage() {
             </form>
           </div>
 
-          {mode === "demo" ? <div className="demo-access">
+          {import.meta.env.DEV && mode === "demo" ? <div className="demo-access">
             <div className="demo-access__label"><span>서비스 미리보기</span></div>
             <p>실제 계정 없이 역할별 화면과 기능을 안전하게 확인할 수 있어요.</p>
             <div className="demo-access__grid demo-access__grid--roles">
@@ -715,7 +715,7 @@ export function OnboardingPage() {
         <Brand />
         <button className="button button--quiet" type="button" onClick={() => void signOut()}><SignOut /> 로그아웃</button>
       </header>
-      {mode === "demo" ? <div className="demo-ribbon demo-ribbon--standalone">신규 가입자 데모 화면입니다.</div> : null}
+      {import.meta.env.DEV && mode === "demo" ? <div className="demo-ribbon demo-ribbon--standalone">신규 가입자 데모 화면입니다.</div> : null}
       <section className="onboarding-card">
         <div className="onboarding-card__intro">
           <span className="step-pill">가입 설정 · 소속과 역할 확인</span>
@@ -872,7 +872,7 @@ export function PendingPage() {
           <ShieldCheck weight="fill" />
           <p>{application?.requestedRole === "member" ? "해당 교회의 사역자 또는 임원이 가입 신청을 확인합니다." : "재건 공동체 관리자가 역할과 소속을 확인합니다."}</p>
         </div>
-        {mode === "demo" ? <p className="demo-note">데모에서는 로그아웃 후 ‘관리자’ 화면으로 들어가 승인 과정을 확인할 수 있어요.</p> : null}
+        {import.meta.env.DEV && mode === "demo" ? <p className="demo-note">데모에서는 로그아웃 후 ‘관리자’ 화면으로 들어가 승인 과정을 확인할 수 있어요.</p> : null}
       </section>
     </main>
   );

@@ -5,6 +5,7 @@ import {
   isSecureAuthStorageAdapter,
   normalizeSupabasePublicKey,
   normalizeSupabaseUrl,
+  sanitizeUntrustedBrowserAuthUrl,
 } from "./supabase";
 
 describe("Supabase configuration validation", () => {
@@ -38,6 +39,9 @@ describe("Supabase configuration validation", () => {
   it("detects native runtimes and accepts only complete secure-storage bridges", () => {
     expect(isNativeAppRuntime({ Capacitor: { isNativePlatform: () => true } })).toBe(true);
     expect(isNativeAppRuntime({ Capacitor: { isNativePlatform: () => false } })).toBe(false);
+    expect(isNativeAppRuntime({
+      Capacitor: { isNativePlatform: () => { throw new Error("bridge unavailable"); } },
+    })).toBe(true);
     expect(isSecureAuthStorageAdapter({ getItem() { return null; } })).toBe(false);
     expect(isSecureAuthStorageAdapter({
       getItem() { return null; },
@@ -49,5 +53,28 @@ describe("Supabase configuration validation", () => {
   it("keeps sensitive recovery and draft state memory-only in native WebViews", () => {
     expect(canPersistSensitiveClientState({ Capacitor: { isNativePlatform: () => true } })).toBe(false);
     expect(canPersistSensitiveClientState({ Capacitor: { isNativePlatform: () => false } })).toBe(true);
+    expect(canPersistSensitiveClientState({
+      Capacitor: { isNativePlatform: () => { throw new Error("bridge unavailable"); } },
+    })).toBe(false);
+  });
+
+  it("keeps exact PKCE callbacks but strips auth material from every other browser URL", () => {
+    let replacement: string | null = null;
+    const historyObject = {
+      state: { test: true },
+      replaceState(_data: unknown, _unused: string, url?: string | URL | null) {
+        replacement = url === undefined || url === null ? null : String(url);
+      },
+    };
+
+    expect(sanitizeUntrustedBrowserAuthUrl({
+      href: "https://jaegun-com.vercel.app/auth/callback/signup?code=signup-code-1234&sb_flow_id=flow_id_12345678",
+    }, historyObject)).toBe(false);
+    expect(replacement).toBeNull();
+
+    expect(sanitizeUntrustedBrowserAuthUrl({
+      href: "https://jaegun-com.vercel.app/app/home?code=stolen-code-1234&sb_flow_id=flow_id_12345678#access_token=secret",
+    }, historyObject)).toBe(true);
+    expect(replacement).toBe("https://jaegun-com.vercel.app/app/home");
   });
 });

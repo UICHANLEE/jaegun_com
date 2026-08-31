@@ -439,7 +439,7 @@ export async function listEventScopes(
   context?: DemoEventContext,
   signal?: AbortSignal,
 ): Promise<EventScope[]> {
-  if (mode === "demo") return [demoScope(context)];
+  if (import.meta.env.DEV && mode === "demo") return [demoScope(context)];
   const request = requireClient().rpc("get_my_event_scopes");
   const { data, error } = await (signal ? request.abortSignal(signal) : request);
   if (error) throw error;
@@ -463,7 +463,7 @@ export async function listEventOccurrences(
   userId: string,
   input: { from: string; to: string; scopeId?: string | null; limit?: number; context?: DemoEventContext; signal?: AbortSignal },
 ): Promise<EventOccurrence[]> {
-  if (mode === "demo") {
+  if (import.meta.env.DEV && mode === "demo") {
     const from = new Date(input.from).getTime();
     const to = new Date(input.to).getTime();
     return demoOccurrences(userId, input.context).filter((item) => {
@@ -489,7 +489,7 @@ export async function getEventOccurrence(
   context?: DemoEventContext,
   signal?: AbortSignal,
 ): Promise<EventOccurrence> {
-  if (mode === "demo") {
+  if (import.meta.env.DEV && mode === "demo") {
     const found = demoOccurrences(userId, context).find((item) => item.occurrenceId === occurrenceId);
     if (!found) throw new Error("일정을 찾을 수 없습니다.");
     return found;
@@ -508,7 +508,7 @@ export async function saveEvent(mode: AppMode, draft: EventDraft, serverNow?: Da
   // deny event writes.
   const validation = validateEventDraft(draft, serverNow);
   if (validation) throw new Error(validation);
-  if (mode === "demo") {
+  if (import.meta.env.DEV && mode === "demo") {
     const previous = demoDefinitions.get(draft.id);
     if (previous?.status === "cancelled") throw new Error("취소된 일정은 수정할 수 없습니다.");
     demoDefinitions.set(draft.id, {
@@ -545,7 +545,7 @@ export async function cancelEvent(mode: AppMode, eventId: string, operationId: s
   if (!eventId || !operationId || reason.trim().length < 2 || reason.trim().length > 500) {
     throw new Error("취소 사유를 2자 이상 500자 이하로 입력해 주세요.");
   }
-  if (mode === "demo") {
+  if (import.meta.env.DEV && mode === "demo") {
     const definition = demoDefinitions.get(eventId);
     if (!definition) throw new Error("일정을 찾을 수 없습니다.");
     definition.status = "cancelled";
@@ -575,7 +575,7 @@ export async function respondToEvent(
     throw new Error("참석 응답을 확인해 주세요.");
   }
   const operationKey = `${userId}:${operationId}`;
-  if (mode === "demo") {
+  if (import.meta.env.DEV && mode === "demo") {
     const replay = demoOperations.get(operationKey);
     if (replay) {
       if (replay.occurrenceId !== occurrenceId || replay.requestedResponse !== requestedResponse) throw new Error("이미 사용한 요청 식별자입니다.");
@@ -630,7 +630,7 @@ export async function respondToEvent(
 }
 
 export async function listEventRevisions(mode: AppMode, eventId: string, signal?: AbortSignal): Promise<EventRevision[]> {
-  if (mode === "demo") {
+  if (import.meta.env.DEV && mode === "demo") {
     const definition = demoDefinitions.get(eventId);
     if (!definition) return [];
     return [{ revision: definition.revision, action: definition.status === "cancelled" ? "cancelled" : "updated", changedBy: null, changedByName: "로컬 데모", createdAt: new Date().toISOString(), snapshot: { ...definition.draft } }];

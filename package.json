@@ -7,6 +7,8 @@
     "audit:dependencies": "npm audit --package-lock-only --audit-level=high && npm --prefix apps/web audit --package-lock-only --audit-level=high",
     "dev:web": "npm run dev --prefix apps/web",
     "build:web": "npm run build --prefix apps/web",
+    "build:ios": "npm run native:build:ios --prefix apps/web",
+    "preflight:ios": "npm run native:preflight:ios --prefix apps/web",
     "test:web": "npm run test --prefix apps/web",
     "typecheck:web": "npm run typecheck --prefix apps/web",
     "security:secrets": "node scripts/security/scan-secrets.mjs",

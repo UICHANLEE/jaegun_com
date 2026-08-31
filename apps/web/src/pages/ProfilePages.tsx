@@ -54,6 +54,7 @@ import {
   type MembershipApplication,
   type MembershipRole,
 } from "../types/domain";
+import { isOfficialIosNativeClient } from "../native/platform";
 
 export function ProfilePage() {
   const { viewer, organizations, applications, mode, signOut } = useAppData();
@@ -68,6 +69,7 @@ export function ProfilePage() {
   const hasGovernanceAccess = Boolean(viewer?.governanceAccess?.some((access) => (
     access.canManageOfficers || access.canManageDelegations || access.canViewRoster
   )));
+  const isIosNative = isOfficialIosNativeClient();
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -90,7 +92,7 @@ export function ProfilePage() {
           <div><h2>{viewer?.profile.displayName}</h2><p>{viewer?.profile.email}</p><span>{membership?.churchTitleCode ? <em className="church-title-badge">{CHURCH_TITLE_LABELS[membership.churchTitleCode]}</em> : null}{membership ? <RoleBadge role={membership.role} /> : null}{membership?.role === "executive" ? membership.executiveOfficeCodes.map((code) => <em className="executive-office-badge" key={code}>{EXECUTIVE_OFFICE_LABELS[code]}</em>) : null}{viewer?.profile.globalRole === "platform_admin" ? <em><ShieldCheck weight="fill" /> 플랫폼 관리자</em> : null}</span></div>
         </div>
         <p className="profile-card__bio">{viewer?.profile.bio ?? "공동체 안에서 믿음과 일상을 함께 나누고 있어요."}</p>
-        {mode === "demo" ? <span className="profile-card__demo">로컬 데모 계정</span> : null}
+        {import.meta.env.DEV && mode === "demo" ? <span className="profile-card__demo">로컬 데모 계정</span> : null}
       </section>
 
       {organization ? (
@@ -174,7 +176,7 @@ export function ProfilePage() {
         <div className="profile-menu-group">
           <Link className="profile-menu" to="/app/security"><span className="profile-menu__icon"><Fingerprint weight="fill" /></span><span><strong>보안센터</strong><small>MFA, 세션과 보안 활동 확인</small></span><CaretRight /></Link>
           <Link className="profile-menu" to="/app/privacy"><span className="profile-menu__icon profile-menu__icon--blue"><Eye weight="fill" /></span><span><strong>개인정보와 동의</strong><small>필수 동의와 명단 공개 범위 관리</small></span><CaretRight /></Link>
-          <Link className="profile-menu" to="/app/notification-preferences"><span className="profile-menu__icon profile-menu__icon--orange"><Bell weight="fill" /></span><span><strong>알림 설정</strong><small>종류, 방해금지와 잠금화면 보호</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/notification-preferences"><span className="profile-menu__icon profile-menu__icon--orange"><Bell weight="fill" /></span><span><strong>{isIosNative ? "알림 안내" : "알림 설정"}</strong><small>{isIosNative ? "이번 버전은 앱 안 알림함만 제공" : "종류, 방해금지와 잠금화면 보호"}</small></span><CaretRight /></Link>
           <Link className="profile-menu" to="/app/blocked-users"><span className="profile-menu__icon"><UserMinus weight="fill" /></span><span><strong>차단한 사용자</strong><small>차단 목록 확인과 해제</small></span><CaretRight /></Link>
           <Link className="profile-menu profile-menu--danger" to="/app/account"><span className="profile-menu__icon"><Trash weight="fill" /></span><span><strong>계정 삭제</strong><small>삭제 예약, 유예기간과 취소 상태</small></span><CaretRight /></Link>
         </div>
@@ -184,7 +186,7 @@ export function ProfilePage() {
       <button className="button button--danger button--full profile-signout" type="button" disabled={signingOut} onClick={() => void handleSignOut()}>
         {signingOut ? <CircleNotch className="spin" /> : <SignOut />} 로그아웃
       </button>
-      <footer className="profile-footer"><strong>재건 공동체</strong><span>안전하게 연결되는 교회 커뮤니티 · v1.0</span><nav aria-label="법적 문서"><Link to="/legal/privacy">개인정보</Link><Link to="/legal/terms">이용약관</Link><Link to="/legal/community">운영정책</Link></nav></footer>
+      <footer className="profile-footer"><strong>재건 공동체</strong><span>안전하게 연결되는 교회 커뮤니티 · v1.0</span><nav aria-label="법적 문서 및 지원"><Link to="/support">고객지원</Link><Link to="/legal/privacy">개인정보</Link><Link to="/legal/terms">이용약관</Link><Link to="/legal/community">운영정책</Link></nav></footer>
     </div>
   );
 }
@@ -686,6 +688,7 @@ export function NotificationsPage() {
   const [markingRead, setMarkingRead] = useState(false);
   const [markError, setMarkError] = useState<string | null>(null);
   const unreadCount = notifications.filter((item) => !item.readAt).length;
+  const isIosNative = isOfficialIosNativeClient();
   const iconForHref = (href?: string) => href?.includes("approvals") ? <UsersThree weight="fill" /> : href?.includes("posts") ? <Article weight="fill" /> : <Bell weight="fill" />;
 
   async function handleMarkAllRead() {
@@ -726,7 +729,7 @@ export function NotificationsPage() {
           })}
         </div>
         {!notifications.length ? <EmptyState icon={<Bell />} title="도착한 알림이 없어요" description="공동체의 새로운 소식이 오면 알려드릴게요." /> : null}
-        <div className="notification-settings"><LockKey weight="fill" /><p><strong>알림과 잠금화면 보호</strong><span>종류별 알림, 방해금지와 미리보기를 관리하세요.</span></p><Link className="button button--secondary" to="/app/notification-preferences">설정</Link></div>
+        <div className="notification-settings"><LockKey weight="fill" /><p><strong>{isIosNative ? "iPhone 앱 알림" : "알림과 잠금화면 보호"}</strong><span>{isIosNative ? "푸시는 이번 버전에 제공하지 않으며 새 소식은 이 알림함에서 확인해요." : "종류별 알림, 방해금지와 미리보기를 관리하세요."}</span></p><Link className="button button--secondary" to="/app/notification-preferences">{isIosNative ? "안내" : "설정"}</Link></div>
       </div>
     </div>
   );

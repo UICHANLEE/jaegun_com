@@ -34,6 +34,11 @@ import {
 } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 import { canPersistSensitiveClientState } from "../data/supabase";
+import {
+  getUgcSubmissionErrorMessage,
+  IOS_NATIVE_MEDIA_UPLOAD_NOTICE,
+  isIosNativeMediaUploadDisabled,
+} from "../data/ugcSafety";
 import type { PostCategory } from "../types/domain";
 import { confirmDiscardChanges, useUnsavedChangesWarning } from "../unsavedChanges";
 
@@ -142,6 +147,7 @@ function fileSizeLabel(size: number) {
 export function ComposerPage() {
   const { createPost, posts, viewer } = useAppData();
   const navigate = useNavigate();
+  const nativeMediaUploadDisabled = isIosNativeMediaUploadDisabled();
   const [searchParams] = useSearchParams();
   const requestedCategory = searchParams.get("category");
   const initialCategory: PostCategory = requestedCategory === "notice" || requestedCategory === "prayer" || requestedCategory === "photo_video"
@@ -231,7 +237,7 @@ export function ComposerPage() {
       clearPostOperation(operationStorageKey);
       navigate(`/app/posts/${post.id}`, { replace: true });
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : "게시글을 등록하지 못했습니다.");
+      setLocalError(getUgcSubmissionErrorMessage(reason, "게시글을 등록하지 못했습니다."));
       setSubmitting(false);
     }
   }
@@ -272,26 +278,35 @@ export function ComposerPage() {
 
         <section className="media-composer" aria-labelledby="media-heading">
           <div className="media-composer__heading">
-            <div><h2 id="media-heading">사진·영상</h2><p>사진 15MB, 영상 500MB 이하 · 최대 6개</p></div>
-            <span>{files.length}/6</span>
+            <div><h2 id="media-heading">사진·영상</h2><p>{nativeMediaUploadDisabled ? "iPhone 앱 출시 안전 준비 중" : "사진 15MB, 영상 500MB 이하 · 최대 6개"}</p></div>
+            <span>{nativeMediaUploadDisabled ? "준비 중" : `${files.length}/6`}</span>
           </div>
-          {files.length ? (
-            <div className="media-preview-grid">
-              {files.map((file, index) => (
-                <div className="media-preview" key={`${file.name}-${file.lastModified}`}>
-                  {file.type.startsWith("image/") ? <img src={previews[index]} alt={file.name} /> : <video src={previews[index]} muted aria-label={file.name} />}
-                  <button type="button" onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))} aria-label={`${file.name} 삭제`}><Trash weight="fill" /></button>
-                  <span>{file.type.startsWith("video/") ? <FileVideo weight="fill" /> : <ImageSquare weight="fill" />}{fileSizeLabel(file.size)}</span>
-                </div>
-              ))}
+          {nativeMediaUploadDisabled ? (
+            <div className="media-empty" role="note" aria-label="iPhone 앱 미디어 업로드 안내">
+              <WarningCircle weight="fill" />
+              <p><strong>사진·영상 업로드 안전 준비 중</strong><br />{IOS_NATIVE_MEDIA_UPLOAD_NOTICE}</p>
             </div>
           ) : (
-            <div className="media-empty"><Camera /><p>사진이나 영상을 더하면<br />이야기가 더 생생해져요.</p></div>
+            <>
+              {files.length ? (
+                <div className="media-preview-grid">
+                  {files.map((file, index) => (
+                    <div className="media-preview" key={`${file.name}-${file.lastModified}`}>
+                      {file.type.startsWith("image/") ? <img src={previews[index]} alt={file.name} /> : <video src={previews[index]} muted aria-label={file.name} />}
+                      <button type="button" onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))} aria-label={`${file.name} 삭제`}><Trash weight="fill" /></button>
+                      <span>{file.type.startsWith("video/") ? <FileVideo weight="fill" /> : <ImageSquare weight="fill" />}{fileSizeLabel(file.size)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="media-empty"><Camera /><p>사진이나 영상을 더하면<br />이야기가 더 생생해져요.</p></div>
+              )}
+              <label className={`button button--secondary upload-button ${files.length >= 6 ? "is-disabled" : ""}`}>
+                <UploadSimple /> 파일 선택
+                <input disabled={files.length >= 6} type="file" accept={MEDIA_ACCEPT} multiple onChange={addFiles} />
+              </label>
+            </>
           )}
-          <label className={`button button--secondary upload-button ${files.length >= 6 ? "is-disabled" : ""}`}>
-            <UploadSimple /> 파일 선택
-            <input disabled={files.length >= 6} type="file" accept={MEDIA_ACCEPT} multiple onChange={addFiles} />
-          </label>
         </section>
 
         <p className="posting-guideline"><CheckCircle weight="fill" /> 서로를 존중하고 개인정보가 포함되지 않도록 확인해 주세요.</p>
@@ -373,7 +388,7 @@ export function PostDetailPage() {
       await addComment(post.id, trimmedComment);
       setComment("");
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : "댓글을 등록하지 못했습니다.");
+      setLocalError(getUgcSubmissionErrorMessage(reason, "댓글을 등록하지 못했습니다."));
     } finally {
       setSubmitting(false);
     }

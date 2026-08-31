@@ -97,6 +97,7 @@ import {
 } from "../data/safetyPrivacy";
 import type { AppMode } from "../types/domain";
 import { supportEmail as SUPPORT_EMAIL } from "../data/runtimeConfig";
+import { isOfficialIosNativeClient } from "../native/platform";
 
 export {
   BlockUserControl,
@@ -122,10 +123,19 @@ const MfaBootstrapContext = createContext<MfaBootstrapContextValue | null>(null)
 const MfaGateContext = createContext<{ refresh: () => Promise<MfaStatus | null> } | null>(null);
 const GATE_ALLOWED_PATHS = new Set([
   "/account-deletion",
+  "/support",
+  "/auth/callback/recovery",
   "/app/privacy",
   "/app/account",
+  "/reset-password",
 ]);
-const MFA_GATE_ALLOWED_PATHS = new Set(["/account-deletion", "/app/mfa-challenge"]);
+const MFA_GATE_ALLOWED_PATHS = new Set([
+  "/support",
+  "/account-deletion",
+  "/auth/callback/recovery",
+  "/app/mfa-challenge",
+  "/reset-password",
+]);
 
 function errorMessage(reason: unknown, fallback: string) {
   return reason instanceof Error ? reason.message : fallback;
@@ -622,6 +632,7 @@ export function NotificationPreferencesPage() {
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [deviceSuccess, setDeviceSuccess] = useState<string | null>(null);
   const [removeDeviceId, setRemoveDeviceId] = useState<string | null>(null);
+  const isIosNative = isOfficialIosNativeClient();
   const canRegisterThisDevice = mode !== "demo" && nativePushRegistrationAvailable();
 
   useEffect(() => {
@@ -680,9 +691,35 @@ export function NotificationPreferencesPage() {
 
   return (
     <div className="page safety-page">
-      <SafetyPageIntro eyebrow="NOTIFICATIONS" title="알림 설정" description="중요한 소식은 놓치지 않고, 민감한 내용은 잠금화면에 숨겨요." />
+      <SafetyPageIntro
+        eyebrow="NOTIFICATIONS"
+        title="알림 설정"
+        description={isIosNative
+          ? "이번 iPhone 버전은 앱 안 알림함으로 새 소식을 확인해요."
+          : "중요한 소식은 놓치지 않고, 민감한 내용은 잠금화면에 숨겨요."}
+      />
       <DemoNotice />
-      {error || !state || !draft ? <StateError message={error ?? "알림 설정을 불러오지 못했습니다."} retry={() => void refresh()} /> : (
+      {isIosNative ? (
+        <section
+          aria-labelledby="ios-notification-release-heading"
+          className="safety-card"
+          role="note"
+        >
+          <div className="safety-card__heading">
+            <span><BellSimple weight="fill" /></span>
+            <div>
+              <h2 id="ios-notification-release-heading">iPhone 앱 알림</h2>
+              <p>푸시 알림은 이번 1.0 버전에서 제공하지 않아요.</p>
+            </div>
+          </div>
+          <p className="safety-muted-copy">
+            새 공지와 승인 결과는 앱 안 알림함에서 안전하게 확인할 수 있어요. 이 버전은 알림 권한을 요청하지 않습니다.
+          </p>
+          <Link className="button button--secondary button--full" to="/app/notifications">
+            <BellSimple /> 앱 안 알림함 열기
+          </Link>
+        </section>
+      ) : error || !state || !draft ? <StateError message={error ?? "알림 설정을 불러오지 못했습니다."} retry={() => void refresh()} /> : (
         <form className="safety-form" onSubmit={handleSubmit}>
           <section className="safety-card">
             <div className="safety-card__heading"><span><BellSimple weight="fill" /></span><div><h2>푸시 알림</h2><p>앱 알림 허용 여부와 종류를 선택하세요.</p></div></div>
@@ -1267,7 +1304,7 @@ function LegalPage({ eyebrow, title, summary, children }: { eyebrow: string; tit
   return (
     <main className="legal-page">
       <header className="legal-header"><Link to="/" aria-label="재건 공동체 홈"><img src="/assets/brand-mark-tight.png" alt="" /><strong>재건 공동체</strong></Link><Link className="button button--secondary" to="/">돌아가기</Link></header>
-      <article className="legal-document"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="legal-document__summary">{summary}</p><div className="legal-document__notice"><Info weight="fill" /><span><strong>운영자 연락처</strong>{SUPPORT_EMAIL ? <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> : <small>VITE_SUPPORT_EMAIL이 설정되지 않았습니다. 정식 출시 전 운영자 문의 주소를 반드시 설정해야 합니다.</small>}</span></div>{children}<nav aria-label="법적 문서"><Link to="/legal/privacy">개인정보 수집·이용</Link><Link to="/legal/sensitive">민감정보 처리</Link><Link to="/legal/overseas">국외 이전</Link><Link to="/legal/terms">이용약관</Link><Link to="/legal/community">공동체 운영정책</Link><Link to="/account-deletion">계정 삭제 안내</Link></nav></article>
+      <article className="legal-document"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="legal-document__summary">{summary}</p><div className="legal-document__notice"><Info weight="fill" /><span><strong>운영자 연락처</strong>{SUPPORT_EMAIL ? <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> : <small>VITE_SUPPORT_EMAIL이 설정되지 않았습니다. 정식 출시 전 운영자 문의 주소를 반드시 설정해야 합니다.</small>}</span></div>{children}<nav aria-label="법적 문서 및 지원"><Link to="/support">고객지원</Link><Link to="/legal/privacy">개인정보 수집·이용</Link><Link to="/legal/sensitive">민감정보 처리</Link><Link to="/legal/overseas">국외 이전</Link><Link to="/legal/terms">이용약관</Link><Link to="/legal/community">공동체 운영정책</Link><Link to="/account-deletion">계정 삭제 안내</Link></nav></article>
     </main>
   );
 }
@@ -1325,6 +1362,32 @@ export function PublicAccountDeletionPage() {
       <section><h2>삭제되는 데이터</h2><p>프로필, 교회 소속과 공개 명단 정보, 인증 세션과 기기 토큰, 개인 알림 설정, 업로드한 사진·영상 원본은 서버 삭제 절차에 따라 처리됩니다. 삭제 예약 후 서버가 표시한 유예기간 안에는 앱에서 요청을 취소할 수 있습니다.</p></section>
       <section><h2>제한적으로 보존될 수 있는 데이터</h2><p>다른 사용자의 안전, 분쟁 대응, 감사와 법적 의무에 필요한 신고·조치 증거는 고지된 목적과 기간 범위에서 계정 정보와 분리해 보존하거나 익명화할 수 있습니다. 다른 참여자의 대화 기록은 상대방의 이용 권리를 위해 ‘탈퇴한 회원’으로 표시될 수 있습니다.</p></section>
       <section><h2>도움이 필요한 경우</h2><p>{SUPPORT_EMAIL ? "앱에서 삭제를 요청할 수 없으면 아래 운영자 연락처로 본인 계정의 삭제 절차를 문의하세요." : "운영자 문의 주소가 아직 설정되지 않았습니다. 정식 출시 전 지원 주소를 설정해야 합니다."}</p></section>
+    </LegalPage>
+  );
+}
+
+export function PublicSupportPage() {
+  return (
+    <LegalPage eyebrow="SUPPORT" title="재건 공동체 고객지원" summary="로그인, 가입 승인, 신고, 개인정보 및 계정 삭제 문제를 운영자에게 문의할 수 있습니다.">
+      <section>
+        <h2>이메일로 문의하기</h2>
+        <p>문제가 발생한 화면과 시간, 사용 중인 기기 종류를 함께 알려 주세요. 비밀번호, 인증번호, 주민등록번호, 전체 금융정보는 이메일에 적지 마세요.</p>
+        {SUPPORT_EMAIL ? <a className="button button--primary" href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("재건 공동체 앱 문의")}`}>지원 이메일 보내기</a> : <p>지원 이메일을 준비 중입니다.</p>}
+      </section>
+      <section>
+        <h2>로그인과 가입 승인</h2>
+        <p>비밀번호를 잊었다면 로그인 화면의 ‘비밀번호를 잊으셨나요?’에서 새 링크를 요청하세요. 교회 가입 승인은 소속 교회의 사역자 또는 임원이 처리하며, 사역자·임원 권한은 플랫폼 관리자가 확인합니다.</p>
+      </section>
+      <section>
+        <h2>신고와 사용자 차단</h2>
+        <p>게시물과 대화에서 신고 또는 차단 기능을 사용할 수 있습니다. 긴급한 신체 위험이 있으면 앱 문의만 기다리지 말고 112 또는 지역 긴급기관에 먼저 연락하세요.</p>
+        <Link className="button button--secondary" to="/legal/community">공동체 운영정책 보기</Link>
+      </section>
+      <section>
+        <h2>개인정보와 계정 삭제</h2>
+        <p>개인정보 처리 내용은 공개 문서에서 언제든 확인할 수 있습니다. 앱을 사용할 수 없는 경우에도 아래 삭제 안내를 통해 요청 방법과 보존 범위를 확인할 수 있습니다.</p>
+        <Link className="button button--secondary" to="/account-deletion">계정 삭제 안내 보기</Link>
+      </section>
     </LegalPage>
   );
 }

@@ -1,5 +1,10 @@
 node_modules/
 dist/
+.native-build/
+*.xcarchive/
+*.ipa
+*.mobileprovision
+xcuserdata/
 *.tsbuildinfo
 test-results/
 playwright-report/

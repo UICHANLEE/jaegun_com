@@ -26,7 +26,15 @@ VITE_SUPABASE_ANON_KEY=<publishable-anon-key>
 
 CLI/CI에는 필요에 따라 `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`, `SUPABASE_DB_PASSWORD`를 비밀값으로 설정합니다. `SUPABASE_SERVICE_ROLE_KEY`는 서버 전용이며 `VITE_` 변수나 브라우저 번들에 절대 넣지 않습니다.
 
-운영 Auth Dashboard에서 이메일 로그인을 활성화하고 Site URL을 `https://jaegun-com.vercel.app`, Redirect URL을 `https://jaegun-com.vercel.app/reset-password`로 정확히 등록합니다. 운영 이메일 확인·비밀번호 재설정에는 별도 SMTP가 필요합니다. Storage의 `avatars`와 `community-media`는 마이그레이션이 비공개 버킷으로 생성합니다.
+운영 Auth Dashboard에서 이메일 로그인을 활성화하고 Site URL을 `https://jaegun-com.vercel.app`로 등록합니다. Redirect URL은 다음 5개만 유지합니다.
+
+- `https://jaegun-com.vercel.app/reset-password`
+- `https://jaegun-com.vercel.app/auth/callback/signup`
+- `https://jaegun-com.vercel.app/auth/callback/signup?sb_flow_id=*`
+- `https://jaegun-com.vercel.app/auth/callback/recovery`
+- `https://jaegun-com.vercel.app/auth/callback/recovery?sb_flow_id=*`
+
+마지막 두 종류의 `*`는 호스트나 경로 wildcard가 아니라 앱이 생성하고 다시 검증하는 단일 `sb_flow_id` query 값에만 사용합니다. Preview·로컬 URL은 실제 시험 대상만 별도로 정확히 등록하고 wildcard host/path를 사용하지 않습니다. 운영 이메일 확인·비밀번호 재설정에는 별도 SMTP가 필요합니다. Storage의 `avatars`와 `community-media`는 마이그레이션이 비공개 버킷으로 생성합니다.
 
 `messages`, `notifications`, 승인 큐, 회원 상태, 게시물·댓글, 대화 읽음 상태와 임원 직책·회의록·회계장부는 `supabase_realtime` publication에 멱등 등록됩니다. 클라이언트 Realtime 구독에도 각 사용자의 RLS가 그대로 적용됩니다.
 

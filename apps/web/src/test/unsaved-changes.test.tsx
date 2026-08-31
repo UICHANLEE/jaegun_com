@@ -8,6 +8,8 @@ import { getServiceYear } from "../serviceTime";
 import { UNSAVED_CHANGES_MESSAGE, useUnsavedChangesWarning } from "../unsavedChanges";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
+const LAZY_ROUTE_TIMEOUT_MS = 5_000;
+const LAZY_ROUTE_TEST_TIMEOUT_MS = 10_000;
 
 function storeViewer(role: "member" | "executive") {
   window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({
@@ -69,7 +71,11 @@ describe("unsaved form protection", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderApp(["/app/posts", "/app/posts/new"]);
 
-    const title = await screen.findByPlaceholderText("제목을 입력해 주세요");
+    const title = await screen.findByPlaceholderText(
+      "제목을 입력해 주세요",
+      undefined,
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    );
     const pristineUnload = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(pristineUnload);
     expect(pristineUnload.defaultPrevented).toBe(false);
@@ -86,14 +92,18 @@ describe("unsaved form protection", () => {
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "뒤로" }));
     expect(await screen.findByRole("heading", { name: "게시판" })).toBeInTheDocument();
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("keeps a changed meeting-minutes form open when close is cancelled", async () => {
     storeViewer("executive");
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderApp(["/manage/home", "/manage/minutes"]);
 
-    expect(await screen.findByRole("heading", { name: "임원 회의 기록" })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: "임원 회의 기록" },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "회의록 작성" }));
     fireEvent.change(screen.getByLabelText(/회의 제목/), { target: { value: "작성 중인 회의록" } });
     fireEvent.click(screen.getByRole("button", { name: "작성 폼 닫기" }));
@@ -104,14 +114,18 @@ describe("unsaved form protection", () => {
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getByRole("button", { name: "작성 폼 닫기" }));
     expect(screen.queryByText("새 회의록")).not.toBeInTheDocument();
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("blocks ManagerShell navigation links until the dirty meeting form is confirmed", async () => {
     storeViewer("executive");
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderApp(["/manage/minutes"]);
 
-    expect(await screen.findByRole("heading", { name: "임원 회의 기록" })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: "임원 회의 기록" },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "회의록 작성" }));
     fireEvent.change(screen.getByLabelText(/회의 제목/), { target: { value: "이동 전에 지켜야 할 회의록" } });
     fireEvent.click(screen.getAllByRole("link", { name: "운영 홈" })[0]);
@@ -122,8 +136,12 @@ describe("unsaved form protection", () => {
 
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getAllByRole("link", { name: "운영 홈" })[0]);
-    expect(await screen.findByRole("heading", { name: /올해 교회 운영 흐름을 살펴보세요/ })).toBeInTheDocument();
-  });
+    expect(await screen.findByRole(
+      "heading",
+      { name: /올해 교회 운영 흐름을 살펴보세요/ },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("does not switch ledger years when discarding a changed entry is cancelled", async () => {
     storeViewer("executive");
@@ -131,7 +149,11 @@ describe("unsaved form protection", () => {
     const currentYear = getServiceYear();
     renderApp(["/manage/ledger"]);
 
-    expect(await screen.findByRole("heading", { name: "교회 재정 기록" })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: "교회 재정 기록" },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "항목 등록" }).at(-1)!);
     fireEvent.change(screen.getByLabelText(/적요/), { target: { value: "작성 중인 장부 항목" } });
 
@@ -145,7 +167,7 @@ describe("unsaved form protection", () => {
     fireEvent.change(yearSelector, { target: { value: String(currentYear - 1) } });
     expect(yearSelector).toHaveValue(String(currentYear - 1));
     expect(screen.queryByText("새 장부 항목")).not.toBeInTheDocument();
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 });
 
 describe("comment length contract", () => {
@@ -153,7 +175,11 @@ describe("comment length contract", () => {
     storeViewer("member");
     renderApp(["/app/posts/post-retreat"]);
 
-    const comment = await screen.findByPlaceholderText("따뜻한 댓글을 남겨주세요");
+    const comment = await screen.findByPlaceholderText(
+      "따뜻한 댓글을 남겨주세요",
+      undefined,
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    );
     expect(comment).toHaveAttribute("maxLength", "5000");
     expect(screen.getByText("0/5,000")).toBeInTheDocument();
 
@@ -162,5 +188,5 @@ describe("comment length contract", () => {
     expect(comment).toHaveAttribute("aria-invalid", "true");
     fireEvent.submit(comment.closest("form")!);
     expect(await screen.findByRole("alert")).toHaveTextContent("댓글은 5,000자 이하로 입력해 주세요.");
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 });

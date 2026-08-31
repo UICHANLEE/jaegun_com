@@ -1,0 +1,112 @@
+name: Account deletion worker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      confirm_processing:
+        description: Type PROCESS_DUE_ACCOUNT_DELETIONS after completing the deletion runbook preflight
+        required: true
+        type: string
+
+concurrency:
+  group: account-deletion-worker
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  process-due-requests:
+    name: Process due deletion requests
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.confirm_processing == 'PROCESS_DUE_ACCOUNT_DELETIONS') ||
+      (github.event_name == 'schedule' && vars.ACCOUNT_DELETION_WORKER_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Invoke the scheduler-only worker
+        shell: bash
+        env:
+          ACCOUNT_DELETION_WORKER_SECRET: ${{ secrets.ACCOUNT_DELETION_WORKER_SECRET }}
+        run: |
+          set -euo pipefail
+          test "${#ACCOUNT_DELETION_WORKER_SECRET}" -ge 32
+          response_file="${RUNNER_TEMP:?}/account-deletion-worker-response.json"
+          status="$({
+            curl --silent --show-error \
+              --max-time 30 \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer ${ACCOUNT_DELETION_WORKER_SECRET}" \
+              --header "Content-Type: application/json" \
+              --data '{"limit":5}' \
+              "https://opwzujhfsxqaivtbjewg.supabase.co/functions/v1/process-account-deletions"
+          })"
+          test "$status" = "200"
+
+      - name: Verify provider scheduler health when installed
+        shell: bash
+        env:
+          ACCOUNT_DELETION_WORKER_SECRET: ${{ secrets.ACCOUNT_DELETION_WORKER_SECRET }}
+          ACCOUNT_DELETION_PROVIDER_REQUIRED: ${{ vars.ACCOUNT_DELETION_PROVIDER_REQUIRED }}
+        run: |
+          set -euo pipefail
+          test "${#ACCOUNT_DELETION_WORKER_SECRET}" -ge 32
+          response_file="${RUNNER_TEMP:?}/account-deletion-worker-health.json"
+          status="$({
+            curl --silent --show-error \
+              --max-time 30 \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer ${ACCOUNT_DELETION_WORKER_SECRET}" \
+              --header "Content-Type: application/json" \
+              --data '{"operation":"status"}' \
+              "https://opwzujhfsxqaivtbjewg.supabase.co/functions/v1/process-account-deletions"
+          })"
+
+          if [ "$status" != "200" ]; then
+            if [ "${ACCOUNT_DELETION_PROVIDER_REQUIRED:-}" = "true" ]; then
+              echo "::error::Provider scheduler health is required but unavailable."
+              exit 1
+            fi
+            echo "::warning::Provider scheduler health is not available; GitHub fallback processing remains active."
+            exit 0
+          fi
+
+          if ! jq -e '
+            type == "object" and
+            (.ok | type == "boolean") and
+            (.providerConfigured | type == "boolean") and
+            (.checkedAt | type == "string") and
+            (.lastDispatchAt == null or (.lastDispatchAt | type == "string")) and
+            (.lastSuccessAt == null or (.lastSuccessAt | type == "string")) and
+            (.lastFailureAt == null or (.lastFailureAt | type == "string")) and
+            ([.dueRequests, .overdueRequests, .staleProcessing,
+              .staleIdentityDeletion, .failedRequests, .deadCleanupItems,
+              .retryingCleanupItems] | all(type == "number" and . >= 0))
+          ' "$response_file" >/dev/null; then
+            if [ "${ACCOUNT_DELETION_PROVIDER_REQUIRED:-}" = "true" ]; then
+              echo "::error::Provider scheduler health returned an invalid contract after cutover."
+              exit 1
+            fi
+            echo "::warning::Provider scheduler health contract is unavailable before cutover."
+            exit 0
+          fi
+
+          configured="$(jq -r '.providerConfigured' "$response_file")"
+          healthy="$(jq -r '.ok' "$response_file")"
+          if [ "$configured" != "true" ]; then
+            if [ "${ACCOUNT_DELETION_PROVIDER_REQUIRED:-}" = "true" ]; then
+              echo "::error::Supabase Cron is required after cutover but is not configured."
+              exit 1
+            fi
+            echo "::warning::Supabase Cron is not installed; GitHub fallback processing remains active."
+            exit 0
+          fi
+          if [ "$healthy" != "true" ]; then
+            echo "::error::Account deletion provider scheduler is stale or its sanitized backlog thresholds were exceeded."
+            exit 1
+          fi

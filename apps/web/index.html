@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f7f4ee" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://opwzujhfsxqaivtbjewg.supabase.co; media-src 'self' blob: https://opwzujhfsxqaivtbjewg.supabase.co; font-src 'self' data:; connect-src 'self' https://opwzujhfsxqaivtbjewg.supabase.co wss://opwzujhfsxqaivtbjewg.supabase.co; worker-src 'self' blob:; frame-src 'none'; manifest-src 'self'; upgrade-insecure-requests"
+    />
     <link rel="icon" type="image/png" sizes="192x192" href="/assets/brand-icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta property="og:type" content="website" />
@@ -17,6 +21,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/native/entry.ts"></script>
   </body>
 </html>

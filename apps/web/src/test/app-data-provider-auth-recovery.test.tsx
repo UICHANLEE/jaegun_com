@@ -1,16 +1,35 @@
+// @vitest-environment-options {"url":"https://jaegun-com.vercel.app/"}
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type MockUser = { id: string; email: string; user_metadata: Record<string, unknown> };
 type MockSession = { user: MockUser; access_token: string } | null;
-type AuthCallback = (event: string, session: MockSession extends null ? never : MockSession) => void;
+type MockExchangeResponse = {
+  data: { user: MockUser | null; session: MockSession; redirectType: string | null };
+  error: Error | null;
+};
 
 const remote = vi.hoisted(() => ({
   currentSession: null as { user: MockUser; access_token: string } | null,
-  authCallback: null as ((event: string, session: { user: MockUser; access_token: string } | null) => void) | null,
+  authCallback: null as ((event: string, session: { user: MockUser; access_token: string } | null) => void | Promise<void>) | null,
+  emitInitialSessionDuringSubscription: false,
+  nativeRuntime: false,
+  nativeRecoveryIntent: { status: "missing" } as
+    | { status: "missing" }
+    | { status: "pending"; expiresAt: number }
+    | { status: "verified"; userId: string; expiresAt: number }
+    | { status: "invalid" },
+  beginNativeRecovery: vi.fn(async () => Date.now() + 5 * 60 * 1000),
+  verifyNativeRecovery: vi.fn(async () => Date.now() + 30 * 60 * 1000),
+  clearNativeRecovery: vi.fn(async () => undefined),
   signIn: vi.fn(async (): Promise<{ data: { session: null }; error: Error | null }> => ({ data: { session: null }, error: null })),
   signUp: vi.fn(async (): Promise<{ data: { session: null }; error: Error | null }> => ({ data: { session: null }, error: null })),
+  exchangeCode: vi.fn(async (): Promise<MockExchangeResponse> => ({
+    data: { user: null, session: null, redirectType: null as string | null },
+    error: null as Error | null,
+  })),
+  resetPassword: vi.fn(async () => ({ error: null as Error | null })),
   signOut: vi.fn(async (): Promise<{ error: Error | null }> => ({ error: null })),
   updateUser: vi.fn(async () => ({ data: {}, error: null })),
   unsubscribe: vi.fn(),
@@ -59,21 +78,27 @@ const remote = vi.hoisted(() => ({
     effective_at: "2026-08-27T00:00:00+09:00",
     retired_at: null,
   }],
+  nativeAppUrlSubscriber: null as ((url: string) => void) | null,
 }));
 
 vi.mock("../data/supabase", () => ({
   canPersistSensitiveClientState: () => true,
+  isNativeAppRuntime: () => remote.nativeRuntime,
   isSupabaseConfigured: true,
   supabase: {
     auth: {
       getSession: vi.fn(async () => ({ data: { session: remote.currentSession }, error: null })),
       signInWithPassword: remote.signIn,
       signUp: remote.signUp,
+      exchangeCodeForSession: remote.exchangeCode,
       signOut: remote.signOut,
       updateUser: remote.updateUser,
-      resetPasswordForEmail: vi.fn(async () => ({ error: null })),
+      resetPasswordForEmail: remote.resetPassword,
       onAuthStateChange: vi.fn((callback) => {
         remote.authCallback = callback;
+        if (remote.emitInitialSessionDuringSubscription) {
+          void callback("INITIAL_SESSION", remote.currentSession);
+        }
         return { data: { subscription: { unsubscribe: remote.unsubscribe } } };
       }),
     },
@@ -118,6 +143,23 @@ vi.mock("../data/supabase", () => ({
   },
 }));
 
+vi.mock("../native/runtime", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../native/runtime")>();
+  return {
+    ...original,
+    beginNativePasswordRecoveryIntent: remote.beginNativeRecovery,
+    clearNativePasswordRecoveryIntent: remote.clearNativeRecovery,
+    readNativePasswordRecoveryIntent: vi.fn(async () => remote.nativeRecoveryIntent),
+    subscribeToNativeAppUrls: vi.fn((subscriber: (url: string) => void) => {
+      remote.nativeAppUrlSubscriber = subscriber;
+      return () => {
+        if (remote.nativeAppUrlSubscriber === subscriber) remote.nativeAppUrlSubscriber = null;
+      };
+    }),
+    verifyNativePasswordRecoveryIntent: remote.verifyNativeRecovery,
+  };
+});
+
 import { AppDataProvider, useAppData } from "../data/AppDataProvider";
 import App from "../App";
 
@@ -142,20 +184,38 @@ const user: MockUser = { id: "recovery-user", email: "user@example.com", user_me
 const session = { user, access_token: "token" };
 
 beforeEach(() => {
+  window.history.replaceState({}, "", "/");
   window.sessionStorage.clear();
   remote.currentSession = null;
   remote.authCallback = null;
+  remote.emitInitialSessionDuringSubscription = false;
+  remote.nativeRuntime = false;
+  remote.nativeRecoveryIntent = { status: "missing" };
+  remote.beginNativeRecovery.mockClear();
+  remote.beginNativeRecovery.mockResolvedValue(Date.now() + 5 * 60 * 1000);
+  remote.verifyNativeRecovery.mockClear();
+  remote.verifyNativeRecovery.mockResolvedValue(Date.now() + 30 * 60 * 1000);
+  remote.clearNativeRecovery.mockClear();
   remote.signIn.mockClear();
   remote.signUp.mockClear();
+  remote.exchangeCode.mockReset();
+  remote.exchangeCode.mockResolvedValue({
+    data: { user: null, session: null, redirectType: null },
+    error: null,
+  });
+  remote.resetPassword.mockReset();
+  remote.resetPassword.mockResolvedValue({ error: null });
   remote.signOut.mockReset();
   remote.signOut.mockResolvedValue({ error: null });
   remote.updateUser.mockClear();
   remote.directoryError = null;
   remote.from.mockClear();
+  remote.nativeAppUrlSubscriber = null;
   latestData = null;
 });
 
 afterEach(() => {
+  window.history.replaceState({}, "", "/");
   window.sessionStorage.clear();
 });
 
@@ -246,6 +306,309 @@ describe("AppDataProvider password recovery trust boundary", () => {
     });
     expect(remote.updateUser).toHaveBeenCalledWith({ password: "new-password-123" });
     expect(screen.getByTestId("recovery-ready")).toHaveTextContent("false");
+  });
+
+  it("exchanges an exact native recovery callback once after the auth listener is installed", async () => {
+    remote.nativeRuntime = true;
+    remote.exchangeCode.mockImplementationOnce(async () => {
+      await remote.authCallback?.("PASSWORD_RECOVERY", session);
+      return {
+        data: { user, session, redirectType: "recovery" },
+        error: null,
+      };
+    });
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.nativeAppUrlSubscriber).not.toBeNull());
+    expect(remote.authCallback).not.toBeNull();
+
+    const callbackUrl = "https://jaegun-com.vercel.app/auth/callback/recovery?code=recovery-native-code-1234&sb_flow_id=flow_id_native_1234";
+    await act(async () => {
+      remote.nativeAppUrlSubscriber?.(callbackUrl);
+      remote.nativeAppUrlSubscriber?.(callbackUrl);
+    });
+
+    await waitFor(() => expect(remote.exchangeCode).toHaveBeenCalledTimes(1));
+    expect(remote.exchangeCode).toHaveBeenCalledWith(
+      "recovery-native-code-1234",
+      { flowId: "flow_id_native_1234" },
+    );
+    expect(remote.beginNativeRecovery).toHaveBeenCalledTimes(1);
+    expect(remote.beginNativeRecovery.mock.invocationCallOrder[0]).toBeLessThan(
+      remote.exchangeCode.mock.invocationCallOrder[0],
+    );
+    expect(remote.verifyNativeRecovery).toHaveBeenCalledWith(user.id);
+    expect(screen.getByTestId("recovery-ready")).toHaveTextContent("true");
+    expect(window.location.pathname).toBe("/reset-password");
+  });
+
+  it.each([
+    ["교환 전 pending", { status: "pending" as const, expiresAt: Date.now() + 60_000 }],
+    ["만료 또는 손상", { status: "invalid" as const }],
+    ["다른 사용자 verified", {
+      status: "verified" as const,
+      userId: "different-user",
+      expiresAt: Date.now() + 60_000,
+    }],
+  ])("fails closed after a native force-quit with %s recovery state", async (_label, intent) => {
+    remote.nativeRuntime = true;
+    remote.nativeRecoveryIntent = intent;
+    remote.currentSession = session;
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+
+    await act(async () => {
+      await remote.authCallback?.("INITIAL_SESSION", session);
+    });
+
+    await waitFor(() => expect(remote.signOut).toHaveBeenCalledWith({ scope: "local" }));
+    await waitFor(() => expect(remote.clearNativeRecovery).toHaveBeenCalledTimes(1));
+    expect(remote.signOut.mock.invocationCallOrder[0]).toBeLessThan(
+      remote.clearNativeRecovery.mock.invocationCallOrder[0],
+    );
+    expect(screen.getByTestId("recovery-ready")).toHaveTextContent("false");
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+    expect(screen.getByTestId("provider-error")).toHaveTextContent(
+      "완료되지 않았거나 만료된 비밀번호 복구 요청",
+    );
+  });
+
+  it("restores only a matching verified native recovery marker after force-quit", async () => {
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+    remote.nativeRuntime = true;
+    remote.nativeRecoveryIntent = { status: "verified", userId: user.id, expiresAt };
+    remote.currentSession = session;
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+
+    await act(async () => {
+      await remote.authCallback?.("INITIAL_SESSION", session);
+    });
+
+    expect(remote.signOut).not.toHaveBeenCalled();
+    expect(remote.clearNativeRecovery).not.toHaveBeenCalled();
+    expect(screen.getByTestId("recovery-ready")).toHaveTextContent("true");
+    expect(window.location.pathname).toBe("/reset-password");
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+  });
+
+  it("replays an early normal native INITIAL_SESSION only after the app-link drain", async () => {
+    remote.nativeRuntime = true;
+    remote.currentSession = session;
+    remote.emitInitialSessionDuringSubscription = true;
+    remote.nativeRecoveryIntent = { status: "missing" };
+
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+
+    await waitFor(() => expect(remote.nativeAppUrlSubscriber).not.toBeNull());
+    // This mock deliberately stops protected bootstrap after consent loading;
+    // reaching that request proves the early session was unblocked and replayed.
+    await waitFor(() => expect(remote.from).toHaveBeenCalledWith("consent_documents"));
+    expect(remote.signOut).not.toHaveBeenCalled();
+    expect(remote.clearNativeRecovery).not.toHaveBeenCalled();
+    expect(screen.getByTestId("recovery-ready")).toHaveTextContent("false");
+  });
+
+  it("returns from INITIAL_SESSION before deferred fail-closed sign-out completes", async () => {
+    let finishSignOut!: (result: { error: Error | null }) => void;
+    remote.nativeRuntime = true;
+    remote.nativeRecoveryIntent = { status: "pending", expiresAt: Date.now() + 60_000 };
+    remote.currentSession = session;
+    remote.signOut.mockImplementationOnce(() => new Promise((resolve) => {
+      finishSignOut = resolve;
+    }));
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+
+    await expect(remote.authCallback?.("INITIAL_SESSION", session)).resolves.toBeUndefined();
+    await waitFor(() => expect(remote.signOut).toHaveBeenCalledWith({ scope: "local" }));
+    expect(remote.clearNativeRecovery).not.toHaveBeenCalled();
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+
+    finishSignOut({ error: null });
+    await waitFor(() => expect(remote.clearNativeRecovery).toHaveBeenCalledTimes(1));
+    expect(remote.signOut.mock.invocationCallOrder[0]).toBeLessThan(
+      remote.clearNativeRecovery.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("retains the recovery marker when local session removal fails", async () => {
+    remote.nativeRuntime = true;
+    remote.nativeRecoveryIntent = { status: "invalid" };
+    remote.currentSession = session;
+    remote.signOut.mockResolvedValueOnce({ error: new Error("local sign-out failed") });
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+
+    await act(async () => {
+      await remote.authCallback?.("INITIAL_SESSION", session);
+    });
+
+    await waitFor(() => expect(remote.signOut).toHaveBeenCalledWith({ scope: "local" }));
+    expect(remote.clearNativeRecovery).not.toHaveBeenCalled();
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+    expect(screen.getByTestId("provider-error")).toHaveTextContent("복구 세션을 안전하게 종료하지 못했습니다");
+  });
+
+  it("keeps startup blocked when a recovery app-link races a missing marker snapshot", async () => {
+    let finishExchange!: (result: MockExchangeResponse) => void;
+    remote.nativeRuntime = true;
+    remote.nativeRecoveryIntent = { status: "missing" };
+    remote.currentSession = session;
+    remote.exchangeCode.mockImplementationOnce(() => new Promise((resolve) => {
+      finishExchange = resolve;
+    }));
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.nativeAppUrlSubscriber).not.toBeNull());
+
+    const initialSession = remote.authCallback?.("INITIAL_SESSION", session);
+    remote.nativeAppUrlSubscriber?.(
+      "https://jaegun-com.vercel.app/auth/callback/recovery?code=race-recovery-code-5678&sb_flow_id=race_flow_id_1234",
+    );
+    await act(async () => {
+      await initialSession;
+    });
+
+    await waitFor(() => expect(remote.exchangeCode).toHaveBeenCalledTimes(1));
+    expect(remote.beginNativeRecovery).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("recovery-ready")).toHaveTextContent("false");
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+
+    finishExchange({
+      data: { user, session, redirectType: "recovery" },
+      error: null,
+    });
+    await waitFor(() => expect(remote.verifyNativeRecovery).toHaveBeenCalledWith(user.id));
+    await waitFor(() => expect(screen.getByTestId("recovery-ready")).toHaveTextContent("true"));
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+  });
+
+  it("removes the native recovery marker only after password-reset sign-out", async () => {
+    remote.nativeRuntime = true;
+    remote.nativeRecoveryIntent = {
+      status: "verified",
+      userId: user.id,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+    remote.currentSession = session;
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+    await act(async () => {
+      await remote.authCallback?.("INITIAL_SESSION", session);
+    });
+
+    await act(async () => {
+      await latestData!.updatePassword("new-password-123");
+    });
+
+    expect(remote.signOut).toHaveBeenCalledWith();
+    expect(remote.clearNativeRecovery).toHaveBeenCalledTimes(1);
+    expect(remote.signOut.mock.invocationCallOrder[0]).toBeLessThan(
+      remote.clearNativeRecovery.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("removes the native recovery marker only after an ordinary sign-out", async () => {
+    remote.nativeRuntime = true;
+    remote.currentSession = session;
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(latestData).not.toBeNull());
+
+    await act(async () => {
+      await latestData!.signOut();
+    });
+
+    expect(remote.signOut).toHaveBeenCalledWith();
+    expect(remote.clearNativeRecovery).toHaveBeenCalledTimes(1);
+    expect(remote.signOut.mock.invocationCallOrder[0]).toBeLessThan(
+      remote.clearNativeRecovery.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("blocks browser recovery data loads until the authoritative event, then removes the callback query", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/auth/callback/recovery?code=browser-recovery-code-1234&sb_flow_id=flow_id_browser_1234",
+    );
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+    remote.currentSession = session;
+
+    await act(async () => {
+      remote.authCallback?.("INITIAL_SESSION", session);
+    });
+    expect(window.location.pathname).toBe("/auth/callback/recovery");
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+
+    await act(async () => {
+      remote.authCallback?.("PASSWORD_RECOVERY", session);
+    });
+    expect(window.location.pathname).toBe("/reset-password");
+    expect(window.location.search).toBe("");
+    expect(window.location.hash).toBe("");
+    expect(screen.getByTestId("recovery-ready")).toHaveTextContent("true");
+    expect(screen.getByTestId("loading")).toHaveTextContent("false");
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+  });
+
+  it("removes a successful browser signup callback before continuing account loading", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/auth/callback/signup?code=browser-signup-code-1234&sb_flow_id=flow_id_signup_1234",
+    );
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.authCallback).not.toBeNull());
+    remote.currentSession = session;
+
+    await act(async () => {
+      remote.authCallback?.("INITIAL_SESSION", session);
+      remote.authCallback?.("SIGNED_IN", session);
+    });
+    expect(window.location.pathname).toBe("/auth");
+    expect(window.location.search).toBe("");
+    expect(window.location.hash).toBe("");
+  });
+
+  it("rejects token-bearing native links and signs out a callback whose path does not match its PKCE purpose", async () => {
+    remote.exchangeCode.mockResolvedValueOnce({
+      data: { user, session, redirectType: "recovery" },
+      error: null,
+    });
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(remote.nativeAppUrlSubscriber).not.toBeNull());
+
+    await act(async () => {
+      remote.nativeAppUrlSubscriber?.(
+        "https://jaegun-com.vercel.app/auth/callback/signup?code=blocked-token-code-1234#access_token=secret",
+      );
+      remote.nativeAppUrlSubscriber?.(
+        "https://evil.example/auth/callback/signup?code=blocked-host-code-1234",
+      );
+    });
+    expect(remote.exchangeCode).not.toHaveBeenCalled();
+
+    await act(async () => {
+      remote.nativeAppUrlSubscriber?.(
+        "https://jaegun-com.vercel.app/auth/callback/signup?code=mismatched-purpose-code-1234&sb_flow_id=flow_id_mismatch_1234",
+      );
+    });
+    await waitFor(() => expect(remote.signOut).toHaveBeenCalledWith({ scope: "local" }));
+    expect(screen.getByTestId("provider-error")).toHaveTextContent(
+      "확인 링크의 용도를 확인하지 못했습니다",
+    );
+  });
+
+  it("uses public production callbacks for signup confirmation and password recovery", async () => {
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(latestData?.organizations).toHaveLength(2));
+
+    await act(async () => {
+      await latestData!.requestPasswordReset(" MEMBER@EXAMPLE.COM ");
+    });
+    expect(remote.resetPassword).toHaveBeenCalledWith("member@example.com", {
+      redirectTo: "https://jaegun-com.vercel.app/auth/callback/recovery",
+    });
   });
 
   it("restores recovery intent after refresh only for the same verified user", async () => {
@@ -394,6 +757,7 @@ describe("AppDataProvider password recovery trust boundary", () => {
       email: "new@example.com",
       password: "password1234",
       options: {
+        emailRedirectTo: "https://jaegun-com.vercel.app/auth/callback/signup",
         data: {
           display_name: "가입자",
           signup_organization_id: "org-19",

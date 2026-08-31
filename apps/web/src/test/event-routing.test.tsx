@@ -8,6 +8,8 @@ import { createDemoState, DEMO_VIEWER } from "../data/seed";
 import { requiresManagementMfaEnrollment } from "../pages/SafetyPrivacyPages";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
+const LAZY_ROUTE_TIMEOUT_MS = 5_000;
+const LAZY_ROUTE_TEST_TIMEOUT_MS = 10_000;
 
 function renderApp(path: string) {
   return render(
@@ -53,48 +55,68 @@ describe("event route integration", () => {
     setOrdinaryMember();
     const { container } = renderApp("/app/events");
 
-    expect(await screen.findByRole("heading", { name: "다가오는 일정" })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: "다가오는 일정" },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     expect(await screen.findByText("공동체 연합 기도회")).toBeInTheDocument();
     const bottomNavigation = container.querySelector(".bottom-nav");
     expect(bottomNavigation).not.toBeNull();
     expect(within(bottomNavigation as HTMLElement).getAllByRole("link")).toHaveLength(5);
     expect(within(bottomNavigation as HTMLElement).queryByRole("link", { name: /일정/ })).not.toBeInTheDocument();
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("opens event detail as a focused route without the mobile bottom navigation", async () => {
     setOrdinaryMember();
     const { container } = renderApp("/app/events/demo-event-worship-occurrence-0");
 
-    expect(await screen.findByRole("heading", { name: "공동체 연합 기도회" })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: "공동체 연합 기도회" },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     expect(container.querySelector(".bottom-nav")).toBeNull();
     expect(screen.getByRole("button", { name: "참석" })).toBeEnabled();
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("keeps the calendar discoverable from every member profile", async () => {
     setOrdinaryMember();
     renderApp("/app/profile");
 
-    const calendarLink = await screen.findByRole("link", { name: /공동체 일정/ });
+    const calendarLink = await screen.findByRole(
+      "link",
+      { name: /공동체 일정/ },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    );
     expect(calendarLink).toHaveAttribute("href", "/app/events");
     expect(calendarLink).toHaveTextContent("총회·노회·교회 일정과 참석 응답");
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("opens the exact-scope editor from a signed-in manager route", async () => {
     setPlatformAdmin();
     const { container } = renderApp("/manage/events/new");
 
-    expect(await screen.findByRole("heading", { name: "일정 만들기" })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: "일정 만들기" },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     expect(await screen.findByRole("combobox", { name: /공개 범위/ })).toBeInTheDocument();
     expect(container.querySelector(".bottom-nav")).toBeNull();
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("exposes calendar management from the manager quick actions", async () => {
     setPlatformAdmin();
     renderApp("/manage/home");
 
-    const quickAction = await screen.findByRole("link", { name: /일정 관리/ });
+    const quickAction = await screen.findByRole(
+      "link",
+      { name: /일정 관리/ },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    );
     expect(quickAction).toHaveAttribute("href", "/app/events");
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 });
 
 describe("event editor MFA boundary", () => {

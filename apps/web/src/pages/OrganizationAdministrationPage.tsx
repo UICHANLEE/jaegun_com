@@ -247,7 +247,9 @@ export function OrganizationAdministrationPage() {
   const [delegations, setDelegations] = useState<GovernanceDelegation[]>([]);
   const [delegationsLoading, setDelegationsLoading] = useState(false);
   const [delegationError, setDelegationError] = useState<string | null>(null);
-  const [demoOffices, setDemoOffices] = useState(() => initialDemoOffices(serviceYear));
+  const [demoOffices, setDemoOffices] = useState(() => (
+    import.meta.env.DEV ? initialDemoOffices(serviceYear) : {}
+  ));
   const [demoDelegations, setDemoDelegations] = useState<GovernanceDelegation[]>([]);
   const [demoRevision, setDemoRevision] = useState(0);
   const [editingOffice, setEditingOffice] = useState<GovernanceOfficeCode | null>(null);
@@ -269,7 +271,7 @@ export function OrganizationAdministrationPage() {
   const rawAccess = viewer?.governanceAccess ?? [];
 
   const demoAccess = useMemo<GovernanceAccessEntry[]>(() => {
-    if (mode !== "demo" || isPlatformAdmin) return [];
+    if (!import.meta.env.DEV || mode !== "demo" || isPlatformAdmin) return [];
     const membership = viewer?.membership;
     const churchScope = tree.find((item) => item.organizationId === membership?.organizationId);
     if (!churchScope) return rawAccess;
@@ -293,7 +295,7 @@ export function OrganizationAdministrationPage() {
       expiresAt: null,
     }];
   }, [demoOffices, isPlatformAdmin, mode, rawAccess, serviceYear, tree, viewer?.membership, viewer?.profile.id]);
-  const effectiveAccess = mode === "demo" && demoAccess.length ? demoAccess : rawAccess;
+  const effectiveAccess = import.meta.env.DEV && mode === "demo" && demoAccess.length ? demoAccess : rawAccess;
 
   const accessForSelectedScope = useMemo(() => {
     if (!selectedScope) return null;
@@ -324,7 +326,7 @@ export function OrganizationAdministrationPage() {
     const controller = new AbortController();
     setTreeLoading(true);
     setTreeError(null);
-    const load = mode === "demo"
+    const load = import.meta.env.DEV && mode === "demo"
       ? Promise.resolve(buildDemoTree(organizations, members))
       : getGovernanceTree(controller.signal);
     void load.then((next) => {
@@ -408,7 +410,7 @@ export function OrganizationAdministrationPage() {
     setRosterLoading(true);
     setRosterError(null);
     try {
-      const next = mode === "demo"
+      const next = import.meta.env.DEV && mode === "demo"
         ? makeDemoRoster(selectedScope)
         : await listGovernanceRoster({
             scopeId: selectedScope.scopeId,
@@ -442,7 +444,7 @@ export function OrganizationAdministrationPage() {
     setOfficerRoster([]);
     setOfficerLoading(true);
     try {
-      const next = mode === "demo"
+      const next = import.meta.env.DEV && mode === "demo"
         ? makeDemoRoster(selectedScope, { query: "", offset: 0, limit: PAGE_SIZE })
         : await listGovernanceRoster({
             scopeId: selectedScope.scopeId,
@@ -477,7 +479,7 @@ export function OrganizationAdministrationPage() {
     setAppointmentUserId("");
     setDelegateUserId("");
     setCandidateLoading(true);
-    const load = mode === "demo"
+    const load = import.meta.env.DEV && mode === "demo"
       ? Promise.resolve(makeDemoRoster(selectedScope, { query: candidateSearch, offset: 0, limit: PAGE_SIZE }))
       : editingOffice
         ? listGovernanceOfficeCandidates({
@@ -537,7 +539,7 @@ export function OrganizationAdministrationPage() {
     setDelegationError(null);
     setDelegations([]);
     try {
-      const next = mode === "demo"
+      const next = import.meta.env.DEV && mode === "demo"
         ? demoDelegations.filter((item) => item.scopeId === selectedScope.scopeId)
         : await listGovernanceDelegations(selectedScope.scopeId, signal);
       if (!signal?.aborted) setDelegations(next);
@@ -686,7 +688,7 @@ export function OrganizationAdministrationPage() {
     setSavingOffice(true);
     setRosterError(null);
     try {
-      if (mode === "demo") {
+      if (import.meta.env.DEV && mode === "demo") {
         setDemoOffices((current) => assignDemoOffice(
           current,
           selectedScope.scopeId,
@@ -715,7 +717,7 @@ export function OrganizationAdministrationPage() {
     const nextCodes = holder.officeCodes.filter((item) => item !== code);
     setSavingOffice(true);
     try {
-      if (mode === "demo") {
+      if (import.meta.env.DEV && mode === "demo") {
         setDemoOffices((current) => ({
           ...current,
           [demoOfficeKey(selectedScope.scopeId, selectedYear, holder.userId)]: nextCodes,
@@ -748,7 +750,7 @@ export function OrganizationAdministrationPage() {
     setSavingDelegation(true);
     setDelegationError(null);
     try {
-      if (mode === "demo") {
+      if (import.meta.env.DEV && mode === "demo") {
         setDemoDelegations((current) => [...current, {
           id: `demo-delegation-${current.length + 1}`,
           scopeId: selectedScope.scopeId,
@@ -777,7 +779,7 @@ export function OrganizationAdministrationPage() {
       setDelegatedCapabilities([]);
       setDelegationReason("");
       setNotice("권한 위임을 등록했습니다.");
-      if (mode !== "demo") await reloadDelegations();
+      if (!import.meta.env.DEV || mode !== "demo") await reloadDelegations();
     } catch (reason) {
       setDelegationError(reason instanceof Error ? reason.message : "권한 위임을 등록하지 못했습니다.");
     } finally {
@@ -790,7 +792,7 @@ export function OrganizationAdministrationPage() {
     if (!revokeTarget || !revokeReason.trim()) return;
     setSavingDelegation(true);
     try {
-      if (mode === "demo") {
+      if (import.meta.env.DEV && mode === "demo") {
         setDemoDelegations((current) => current.map((item) => item.id === revokeTarget
           ? { ...item, status: "revoked", revokedAt: `${selectedYear}-01-01` }
           : item));

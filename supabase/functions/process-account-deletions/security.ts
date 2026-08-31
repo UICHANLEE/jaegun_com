@@ -1,6 +1,41 @@
 export const MAX_WORKER_BODY_BYTES = 2 * 1024;
 export const MAX_WORKER_BATCH = 10;
 
+export type WorkerRequest =
+  | { operation: "process"; limit: number }
+  | { operation: "status" };
+
+export type AccountDeletionWorkerHealth = {
+  ok: boolean;
+  providerConfigured: boolean;
+  checkedAt: string;
+  lastDispatchAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  dueRequests: number;
+  overdueRequests: number;
+  staleProcessing: number;
+  staleIdentityDeletion: number;
+  failedRequests: number;
+  deadCleanupItems: number;
+  retryingCleanupItems: number;
+};
+
+export type ProviderSchedulerCredential = {
+  issuedAtSeconds: number;
+  nonce: string;
+  signature: string;
+};
+
+export const PROVIDER_SCHEDULER_HEADER_NAMES = [
+  "x-jaegun-scheduler-timestamp",
+  "x-jaegun-scheduler-nonce",
+  "x-jaegun-scheduler-signature",
+] as const;
+
+const PROVIDER_SCHEDULER_MAX_AGE_MS = 3 * 60 * 1000;
+const PROVIDER_SCHEDULER_MAX_FUTURE_MS = 30 * 1000;
+
 export const ACCOUNT_CLEANUP_BUCKETS = new Set([
   "avatars",
   "community-media",
@@ -240,23 +275,164 @@ async function readBodyWithinLimit(request: Request): Promise<unknown> {
   }
 }
 
-export async function parseWorkerRequest(request: Request): Promise<{ limit: number }> {
+export async function parseWorkerRequest(request: Request): Promise<WorkerRequest> {
   const value = await readBodyWithinLimit(request);
   if (!isPlainRecord(value)) throw new WorkerValidationError(400, "invalid_request");
-  if (Object.keys(value).some((key) => key !== "limit")) {
+  if (Object.keys(value).some((key) => key !== "limit" && key !== "operation")) {
     throw new WorkerValidationError(400, "unexpected_field");
+  }
+  const operation = value.operation === undefined ? "process" : value.operation;
+  if (operation === "status") {
+    if (value.limit !== undefined) {
+      throw new WorkerValidationError(400, "unexpected_field");
+    }
+    return { operation: "status" };
+  }
+  if (operation !== "process") {
+    throw new WorkerValidationError(400, "invalid_operation");
   }
   const limit = value.limit === undefined ? 5 : value.limit;
   if (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > MAX_WORKER_BATCH) {
     throw new WorkerValidationError(400, "invalid_limit");
   }
-  return { limit: Number(limit) };
+  return { operation: "process", limit: Number(limit) };
+}
+
+const WORKER_HEALTH_KEYS = new Set([
+  "ok",
+  "providerConfigured",
+  "checkedAt",
+  "lastDispatchAt",
+  "lastSuccessAt",
+  "lastFailureAt",
+  "dueRequests",
+  "overdueRequests",
+  "staleProcessing",
+  "staleIdentityDeletion",
+  "failedRequests",
+  "deadCleanupItems",
+  "retryingCleanupItems",
+]);
+
+function isTimestampOrNull(value: unknown): value is string | null {
+  return value === null || (
+    typeof value === "string" &&
+    value.length >= 20 &&
+    value.length <= 40 &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function isBoundedCounter(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 1_000_000;
+}
+
+export function isAccountDeletionWorkerHealth(
+  value: unknown,
+): value is AccountDeletionWorkerHealth {
+  if (!isPlainRecord(value)) return false;
+  if (Object.keys(value).some((key) => !WORKER_HEALTH_KEYS.has(key))) return false;
+  if (Object.keys(value).length !== WORKER_HEALTH_KEYS.size) return false;
+  return (
+    typeof value.ok === "boolean" &&
+    typeof value.providerConfigured === "boolean" &&
+    isTimestampOrNull(value.checkedAt) &&
+    value.checkedAt !== null &&
+    isTimestampOrNull(value.lastDispatchAt) &&
+    isTimestampOrNull(value.lastSuccessAt) &&
+    isTimestampOrNull(value.lastFailureAt) &&
+    isBoundedCounter(value.dueRequests) &&
+    isBoundedCounter(value.overdueRequests) &&
+    isBoundedCounter(value.staleProcessing) &&
+    isBoundedCounter(value.staleIdentityDeletion) &&
+    isBoundedCounter(value.failedRequests) &&
+    isBoundedCounter(value.deadCleanupItems) &&
+    isBoundedCounter(value.retryingCleanupItems)
+  );
 }
 
 export function parseWorkerBearer(authorization: string | null): string {
   if (!authorization || authorization.length > 263) return "";
   const match = /^Bearer ([A-Za-z0-9._~+\/=\-]{32,256})$/.exec(authorization);
   return match?.[1] ?? "";
+}
+
+export function parseProviderSchedulerCredential(
+  headers: Headers,
+): ProviderSchedulerCredential | null {
+  const timestamp = headers.get(PROVIDER_SCHEDULER_HEADER_NAMES[0])?.trim() ?? "";
+  const nonce = headers.get(PROVIDER_SCHEDULER_HEADER_NAMES[1])?.trim() ?? "";
+  const signature = headers.get(PROVIDER_SCHEDULER_HEADER_NAMES[2])?.trim() ?? "";
+  if (!/^[0-9]{10}$/.test(timestamp)) return null;
+  if (!/^[0-9a-f]{32}$/.test(nonce)) return null;
+  if (!/^[0-9a-f]{64}$/.test(signature)) return null;
+  const issuedAtSeconds = Number(timestamp);
+  if (!Number.isSafeInteger(issuedAtSeconds)) return null;
+  return { issuedAtSeconds, nonce, signature };
+}
+
+export function providerSchedulerSignaturePayload(
+  issuedAtSeconds: number,
+  nonce: string,
+): string {
+  return [
+    "v1",
+    String(issuedAtSeconds),
+    nonce,
+    "POST",
+    "/functions/v1/process-account-deletions",
+    "limit=5",
+  ].join("\n");
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function fixedLengthHexEqual(left: string, right: string): boolean {
+  if (left.length !== 64 || right.length !== 64) return false;
+  let difference = 0;
+  for (let index = 0; index < 64; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}
+
+export async function verifyProviderSchedulerCredential(
+  credential: ProviderSchedulerCredential,
+  workerSecret: string,
+  nowMilliseconds = Date.now(),
+): Promise<boolean> {
+  if (workerSecret.length < 32 || workerSecret.length > 256) return false;
+  const issuedAtMilliseconds = credential.issuedAtSeconds * 1000;
+  if (
+    issuedAtMilliseconds < nowMilliseconds - PROVIDER_SCHEDULER_MAX_AGE_MS ||
+    issuedAtMilliseconds > nowMilliseconds + PROVIDER_SCHEDULER_MAX_FUTURE_MS
+  ) {
+    return false;
+  }
+  try {
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(workerSecret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const signature = new Uint8Array(
+      await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(
+          providerSchedulerSignaturePayload(credential.issuedAtSeconds, credential.nonce),
+        ),
+      ),
+    );
+    return fixedLengthHexEqual(bytesToHex(signature), credential.signature);
+  } catch {
+    return false;
+  }
 }
 
 export type StorageDeleteOutcome = {

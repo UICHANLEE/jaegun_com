@@ -126,7 +126,7 @@ export function ManagerShell() {
   const hasGovernanceAccess = Boolean(
     isPlatformAdmin
     || delegatedScope
-    || (mode === "demo" && (isMinister || (isExecutive && membership?.executiveOfficeCodes.includes("president")))),
+    || (import.meta.env.DEV && mode === "demo" && (isMinister || (isExecutive && membership?.executiveOfficeCodes.includes("president")))),
   );
   const hasDepartmentOfficerAccess = canManageDepartmentOfficers(viewer, mode, church?.name);
   const governanceRoleLabel = delegatedScope?.authoritySource === "delegation" ? "위임 관리자" : "조직 관리자";
@@ -157,7 +157,7 @@ export function ManagerShell() {
           </span>
           <div>
             <strong>{viewer?.profile.displayName}</strong>
-            <span>{mode === "demo" ? `로컬 데모 · ${modeLabel} 모드` : roleLabel}</span>
+            <span>{import.meta.env.DEV && mode === "demo" ? `로컬 데모 · ${modeLabel} 모드` : roleLabel}</span>
           </div>
         </div>
       </aside>
@@ -188,7 +188,7 @@ export function ManagerShell() {
           </div>
         </header>
 
-        {mode === "demo" ? <div className="demo-ribbon">안전한 로컬 데모 데이터로 {modeLabel} 기능을 둘러보는 중입니다.</div> : null}
+        {import.meta.env.DEV && mode === "demo" ? <div className="demo-ribbon">안전한 로컬 데모 데이터로 {modeLabel} 기능을 둘러보는 중입니다.</div> : null}
         <ServiceErrorNotice />
         <main className="app-main manager-main">
           <Outlet />

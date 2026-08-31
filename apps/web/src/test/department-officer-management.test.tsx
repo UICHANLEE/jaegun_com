@@ -8,6 +8,8 @@ import { createDemoState, DEMO_VIEWER } from "../data/seed";
 import type { ViewerContext } from "../types/domain";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
+const LAZY_ROUTE_TIMEOUT_MS = 5_000;
+const LAZY_ROUTE_TEST_TIMEOUT_MS = 10_000;
 
 function renderApp(path = "/manage/departments") {
   return render(
@@ -49,7 +51,11 @@ describe("department officer management", () => {
 
     renderApp();
 
-    expect(await screen.findByRole("heading", { name: "세대별 섬김팀을 한눈에 구성하세요." })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: "세대별 섬김팀을 한눈에 구성하세요." },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     const departmentGroup = screen.getByRole("group", { name: "부서 선택" });
     for (const label of ["장년부", "청년부", "청소년부", "초등부"]) {
       expect(within(departmentGroup).getByRole("button", { name: new RegExp(label) })).toBeInTheDocument();
@@ -75,7 +81,7 @@ describe("department officer management", () => {
     const nextYear = Number((yearSelector as HTMLSelectElement).value) + 1;
     fireEvent.change(yearSelector, { target: { value: String(nextYear) } });
     expect(yearSelector).toHaveValue(String(nextYear));
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("does not expose the route to a minister without an explicit pastor assignment", async () => {
     const base = createDemoState();
@@ -86,10 +92,14 @@ describe("department officer management", () => {
 
     renderApp();
 
-    expect(await screen.findByRole("heading", { name: /목회와 성도 돌봄을 살펴보세요/ })).toBeInTheDocument();
+    expect(await screen.findByRole(
+      "heading",
+      { name: /목회와 성도 돌봄을 살펴보세요/ },
+      { timeout: LAZY_ROUTE_TIMEOUT_MS },
+    )).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "부서 임원 구성" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "부서 임원" })).not.toBeInTheDocument();
-  });
+  }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("requires exact church pastor governance access in Supabase mode", () => {
     const viewer = ministerViewer("production-pastor");

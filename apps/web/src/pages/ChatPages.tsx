@@ -24,6 +24,11 @@ import {
 } from "../components/SafetyControls";
 import { useAppData } from "../data/AppDataProvider";
 import { loadSafetyPrivacyState } from "../data/safetyPrivacy";
+import {
+  getUgcSubmissionErrorMessage,
+  IOS_NATIVE_MEDIA_UPLOAD_NOTICE,
+  isIosNativeMediaUploadDisabled,
+} from "../data/ugcSafety";
 
 const MEDIA_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,video/mp4,video/quicktime,video/webm";
 const MESSAGE_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-CA", {
@@ -180,6 +185,7 @@ export function ChatListPage() {
 export function ConversationPage() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
+  const nativeMediaUploadDisabled = isIosNativeMediaUploadDisabled();
   const {
     mode,
     viewer,
@@ -274,7 +280,7 @@ export function ConversationPage() {
       setBody((current) => bodyRevisionRef.current === submittedBodyRevision ? "" : current);
       setFiles((current) => filesRevisionRef.current === submittedFilesRevision ? [] : current);
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : "메시지를 보내지 못했습니다.");
+      setLocalError(getUgcSubmissionErrorMessage(reason, "메시지를 보내지 못했습니다."));
     } finally {
       setSubmitting(false);
     }
@@ -400,13 +406,27 @@ export function ConversationPage() {
       </div>
       {localError ? <div className="conversation-error"><ErrorBanner message={localError} /></div> : null}
       <form className="message-composer" onSubmit={handleSubmit}>
+        {nativeMediaUploadDisabled ? (
+          <p className="posting-guideline" role="note">
+            <WarningCircle weight="fill" aria-hidden="true" /> {IOS_NATIVE_MEDIA_UPLOAD_NOTICE}
+          </p>
+        ) : null}
         {files.length ? (
           <div className="message-composer__files">
             {files.map((file, index) => <span key={`${file.name}-${file.lastModified}`}><Camera />{file.name}<button type="button" onClick={() => { filesRevisionRef.current += 1; setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)); }} aria-label={`${file.name} 제거`}><X /></button></span>)}
           </div>
         ) : null}
         <div className="message-composer__row">
-          <label className="icon-button icon-button--quiet attachment-button"><Paperclip aria-hidden="true" /><input type="file" aria-label="사진 또는 영상 첨부" accept={MEDIA_ACCEPT} multiple onChange={pickFiles} /></label>
+          {nativeMediaUploadDisabled ? (
+            <span
+              className="icon-button icon-button--quiet attachment-button is-disabled"
+              aria-label="iPhone 앱에서 사진 또는 영상 첨부 준비 중"
+              aria-disabled="true"
+              title="사진·영상 첨부 준비 중"
+            ><Paperclip aria-hidden="true" /></span>
+          ) : (
+            <label className="icon-button icon-button--quiet attachment-button"><Paperclip aria-hidden="true" /><input type="file" aria-label="사진 또는 영상 첨부" accept={MEDIA_ACCEPT} multiple onChange={pickFiles} /></label>
+          )}
           <label className="message-composer__input"><span className="sr-only">메시지</span><textarea rows={1} maxLength={10_000} value={body} onChange={(event) => { bodyRevisionRef.current += 1; setBody(event.target.value); }} placeholder="메시지를 입력하세요" /></label>
           <button className="message-send" type="submit" disabled={submitting || (!body.trim() && !files.length)} aria-label="메시지 보내기">{submitting ? <CircleNotch className="spin" /> : <PaperPlaneRight weight="fill" />}</button>
         </div>

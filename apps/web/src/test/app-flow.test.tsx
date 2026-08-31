@@ -107,6 +107,16 @@ describe("primary service journeys", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("재설정 링크가 만료되었거나 이미 사용되었습니다");
   });
 
+  it("keeps public auth callback routes inside the intended signup and recovery flows", async () => {
+    const recoveryView = renderApp(["/auth/callback/recovery?code=recovery-code-1234"]);
+    expect(await screen.findByRole("heading", { name: "새 비밀번호 설정" })).toBeInTheDocument();
+    recoveryView.unmount();
+
+    renderApp(["/auth/callback/signup"]);
+    fireEvent.click((await screen.findByText("신규 가입자")).closest("button")!);
+    expect(await screen.findByRole("heading", { name: /어느 공동체와 함께하시나요/ })).toBeInTheDocument();
+  });
+
   it("does not trust an unverified recovery code from the URL", async () => {
     renderApp(["/reset-password?code=recovery-code"]);
     expect(await screen.findByRole("alert")).toHaveTextContent("유효한 비밀번호 재설정 정보가 없습니다");
@@ -119,6 +129,19 @@ describe("primary service journeys", () => {
     expect(await screen.findByRole("heading", { name: "길을 잘못 찾으신 것 같아요" })).toBeInTheDocument();
     expect(screen.getByText(/404 · 페이지를 찾을 수 없음/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /홈으로 이동/ })).toHaveAttribute("href", "/auth");
+  });
+
+  it("keeps customer support and account-deletion guidance public before login", async () => {
+    const supportView = renderApp(["/support"]);
+
+    expect(await screen.findByRole("heading", { name: "재건 공동체 고객지원" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "로그인과 가입 승인" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "계정 삭제 안내 보기" })).toHaveAttribute("href", "/account-deletion");
+    supportView.unmount();
+
+    renderApp(["/account-deletion"]);
+    expect(await screen.findByRole("heading", { name: "계정과 데이터 삭제 요청" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "고객지원" })).toHaveAttribute("href", "/support");
   });
 
   it("opens the complete administrator home from the explicit demo entry", async () => {

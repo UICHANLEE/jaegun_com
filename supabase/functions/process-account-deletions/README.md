@@ -7,9 +7,14 @@ Scheduler-only worker for the irreversible half of Jaegun account deletion. It c
 - Set a unique, URL-safe `ACCOUNT_DELETION_WORKER_SECRET` of 32–256 characters in Supabase Edge secrets. Never reuse the service-role key.
 - Deploy this function with gateway JWT verification disabled. The handler rejects every request carrying an `Origin` header and authenticates the scheduler bearer secret using a constant-time digest comparison.
 - Invoke `POST /functions/v1/process-account-deletions` with `Authorization: Bearer …`, `Content-Type: application/json`, and `{ "limit": 5 }`. The batch limit is 1–10.
-- Run every five minutes. Database claims have ten-minute leases and eight-attempt terminal guards, so overlapping invocations do not process one request concurrently.
+- Run every five minutes. The production-primary path is Supabase Cron + `pg_net`; the shared credential is stored encrypted in Vault under `account_deletion_worker_secret` but is never copied into the network queue. The dispatcher sends a three-minute HMAC credential over timestamp/nonce/signature headers, and the Edge worker claims each nonce once through a service-role RPC. Database claims have ten-minute leases and eight-attempt terminal guards, so an overlapping GitHub fallback invocation does not process one request concurrently.
+- Authenticated operational monitors may send `{ "operation": "status" }`. The response contains only provider heartbeat timestamps and aggregate backlog/error counters. It never returns an account, request, or object identifier.
 
 The response contains only aggregate counters. The worker never logs request IDs, user IDs, object paths, credentials, Auth responses, or provider error messages.
+
+Applying migration `202608310018_account_deletion_scheduler_observability.sql` does not install a cron job or make an external request. Follow `docs/operations/account-deletion-runbook.md` to provision the same credential in Edge secrets, GitHub Actions, and Vault, then explicitly install the provider jobs. Before that cutover, the backward-compatible GitHub worker becomes the processor only after its separate enable variable is deliberately set and reports that provider health is unavailable.
+
+The committed GitHub schedule is disabled unless repository variable `ACCOUNT_DELETION_WORKER_ENABLED` is exactly `true`; `workflow_dispatch` remains an explicit processing action. After a verified provider heartbeat, set `ACCOUNT_DELETION_PROVIDER_REQUIRED=true` so an unavailable/invalid status contract or `providerConfigured=false` fails the watchdog instead of remaining a cutover warning.
 
 ## Recovery guarantees
 

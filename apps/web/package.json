@@ -6,11 +6,25 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postbuild": "node scripts/verify-production-bundle.mjs dist",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "native:add:ios": "npm run build && cap add ios --packagemanager SPM",
+    "native:sync:ios": "npm run build && cap sync ios && npm run native:verify:ios",
+    "native:verify:ios": "node scripts/verify-ios-release-config.mjs && node scripts/verify-production-bundle.mjs ios/App/App/public",
+    "native:verify:built:ios": "node scripts/verify-ios-built-app.mjs && node scripts/verify-production-bundle.mjs .native-build/Build/Products/Release-iphoneos/App.app/public",
+    "native:build:ios": "npm run native:sync:ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath .native-build CODE_SIGNING_ALLOWED=NO build",
+    "native:preflight:ios": "npm run native:sync:ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -derivedDataPath .native-build CODE_SIGNING_ALLOWED=NO build && npm run native:verify:built:ios"
   },
   "dependencies": {
+    "@capacitor/app": "8.1.1",
+    "@capacitor/browser": "8.0.4",
+    "@capacitor/core": "8.5.0",
+    "@capacitor/keyboard": "8.0.5",
+    "@capacitor/network": "8.0.1",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.3",
     "@fontsource-variable/noto-sans-kr": "5.3.0",
     "@phosphor-icons/react": "2.1.10",
     "@supabase/supabase-js": "2.112.0",
@@ -23,6 +37,8 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.0",
+    "@capacitor/ios": "8.5.0",
     "@emnapi/core": "1.11.3",
     "@emnapi/runtime": "1.11.3",
     "@testing-library/jest-dom": "6.9.1",
@@ -34,5 +50,10 @@
     "typescript": "7.0.2",
     "vite": "8.1.3",
     "vitest": "4.1.10"
+  },
+  "overrides": {
+    "xcode": {
+      "uuid": "11.1.1"
+    }
   }
 }

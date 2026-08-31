@@ -5,11 +5,15 @@ import test from "node:test";
 import {
   identityPresence,
   isAccountDeletionClaim,
+  isAccountDeletionWorkerHealth,
   isAllowedAccountStoragePath,
   isIdentityDeletionClaim,
+  parseProviderSchedulerCredential,
   parseWorkerBearer,
   parseWorkerRequest,
+  providerSchedulerSignaturePayload,
   storageDeleteOutcome,
+  verifyProviderSchedulerCredential,
   WorkerValidationError,
 } from "./security.ts";
 
@@ -130,7 +134,16 @@ test("parses a bounded strict scheduler request", async () => {
       body: JSON.stringify({ limit: 7 }),
     }),
   );
-  assert.deepEqual(parsed, { limit: 7 });
+  assert.deepEqual(parsed, { operation: "process", limit: 7 });
+
+  const status = await parseWorkerRequest(
+    new Request("https://example.invalid", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ operation: "status" }),
+    }),
+  );
+  assert.deepEqual(status, { operation: "status" });
 
   await assert.rejects(
     parseWorkerRequest(
@@ -141,6 +154,26 @@ test("parses a bounded strict scheduler request", async () => {
       }),
     ),
     (error) => error instanceof WorkerValidationError && error.code === "invalid_limit",
+  );
+  await assert.rejects(
+    parseWorkerRequest(
+      new Request("https://example.invalid", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operation: "status", limit: 1 }),
+      }),
+    ),
+    (error) => error instanceof WorkerValidationError && error.code === "unexpected_field",
+  );
+  await assert.rejects(
+    parseWorkerRequest(
+      new Request("https://example.invalid", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operation: "unknown" }),
+      }),
+    ),
+    (error) => error instanceof WorkerValidationError && error.code === "invalid_operation",
   );
   await assert.rejects(
     parseWorkerRequest(
@@ -170,6 +203,93 @@ test("accepts only one bounded bearer credential", () => {
   assert.equal(parseWorkerBearer(`bearer ${secret}`), "");
   assert.equal(parseWorkerBearer("Bearer short"), "");
   assert.equal(parseWorkerBearer(`Bearer ${secret} extra`), "");
+});
+
+test("verifies only fresh provider HMAC credentials with a strict header contract", async () => {
+  const workerSecret = "provider-worker-secret-value-1234567890";
+  const issuedAtSeconds = 1788150000;
+  const nonce = "0123456789abcdef0123456789abcdef";
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(workerSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signatureBytes = new Uint8Array(
+    await crypto.subtle.sign(
+      "HMAC",
+      key,
+      encoder.encode(providerSchedulerSignaturePayload(issuedAtSeconds, nonce)),
+    ),
+  );
+  const signature = Array.from(
+    signatureBytes,
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  const headers = new Headers({
+    "X-Jaegun-Scheduler-Timestamp": String(issuedAtSeconds),
+    "X-Jaegun-Scheduler-Nonce": nonce,
+    "X-Jaegun-Scheduler-Signature": signature,
+  });
+  const credential = parseProviderSchedulerCredential(headers);
+  assert.ok(credential);
+  assert.equal(
+    await verifyProviderSchedulerCredential(
+      credential,
+      workerSecret,
+      issuedAtSeconds * 1000 + 120_000,
+    ),
+    true,
+  );
+  assert.equal(
+    await verifyProviderSchedulerCredential(
+      credential,
+      workerSecret,
+      issuedAtSeconds * 1000 + 181_000,
+    ),
+    false,
+  );
+  assert.equal(
+    await verifyProviderSchedulerCredential(
+      { ...credential, nonce: "f".repeat(32) },
+      workerSecret,
+      issuedAtSeconds * 1000,
+    ),
+    false,
+  );
+  assert.equal(
+    parseProviderSchedulerCredential(
+      new Headers({
+        "X-Jaegun-Scheduler-Timestamp": String(issuedAtSeconds),
+        "X-Jaegun-Scheduler-Nonce": nonce,
+      }),
+    ),
+    null,
+  );
+});
+
+test("accepts only an identifier-free bounded worker-health snapshot", () => {
+  const health = {
+    ok: true,
+    providerConfigured: true,
+    checkedAt: "2026-08-31T12:00:00.000Z",
+    lastDispatchAt: "2026-08-31T11:55:00.000Z",
+    lastSuccessAt: "2026-08-31T11:55:01.000Z",
+    lastFailureAt: null,
+    dueRequests: 0,
+    overdueRequests: 0,
+    staleProcessing: 0,
+    staleIdentityDeletion: 0,
+    failedRequests: 0,
+    deadCleanupItems: 0,
+    retryingCleanupItems: 0,
+  };
+  assert.equal(isAccountDeletionWorkerHealth(health), true);
+  assert.equal(isAccountDeletionWorkerHealth({ ...health, requestId }), false);
+  assert.equal(isAccountDeletionWorkerHealth({ ...health, dueRequests: -1 }), false);
+  assert.equal(isAccountDeletionWorkerHealth({ ...health, checkedAt: "not-a-date" }), false);
 });
 
 test("normalizes Storage and Auth responses without inspecting sensitive messages", () => {
@@ -212,8 +332,60 @@ test("worker uses exact durable RPCs and never logs identifiers or paths", async
   assert.match(source, /service_claim_pending_identity_deletions/);
   assert.match(source, /service_complete_account_deletion/);
   assert.match(source, /service_fail_account_deletion/);
+  assert.match(source, /service_account_deletion_worker_health/);
+  assert.match(source, /service_claim_account_deletion_scheduler_nonce/);
+  assert.match(source, /verifyProviderSchedulerCredential/);
   assert.match(source, /auth\.admin\.deleteUser\(claim\.user_id, false\)/);
   assert.match(source, /auth\.admin\.getUserById\(claim\.user_id\)/);
   assert.match(source, /request\.headers\.has\("origin"\)/);
   assert.doesNotMatch(source, /JSON\.stringify\([^\n]*(?:requestId|userId|storagePath)/);
+});
+
+test("provider scheduler is explicit and the GitHub processor stays backward compatible", async () => {
+  const migration = await readFile(
+    new URL(
+      "../../migrations/202608310018_account_deletion_scheduler_observability.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const workflow = await readFile(
+    new URL("../../../.github/workflows/account-deletion-worker.yml", import.meta.url),
+    "utf8",
+  );
+
+  const installFunction = migration.indexOf(
+    "create or replace function private.install_account_deletion_scheduler()",
+  );
+  const schedules = [...migration.matchAll(/cron\.schedule\(/g)].map((match) => match.index);
+  assert.equal(schedules.length, 2);
+  assert.ok(installFunction > 0);
+  assert.ok(schedules.every((index) => index > installFunction));
+  assert.doesNotMatch(migration, /vault\.create_secret/i);
+  assert.match(migration, /account_deletion_worker_secret/);
+  assert.match(migration, /service_account_deletion_worker_health/);
+  assert.doesNotMatch(migration, /'Authorization', 'Bearer ' \|\| v_secret/);
+  assert.match(migration, /extensions\.hmac/);
+  assert.match(migration, /X-Jaegun-Scheduler-Signature/);
+  assert.match(migration, /service_claim_account_deletion_scheduler_nonce/);
+  assert.match(migration, /delete from cron\.job_run_details/);
+  assert.match(migration, /using private\.account_deletion_scheduler_config as config/);
+  assert.match(migration, /run\.jobid = config\.dispatch_job_id/);
+  assert.match(migration, /dispatch_job\.username = 'postgres'/);
+  assert.match(migration, /dispatch_job\.database = pg_catalog\.current_database\(\)/);
+  assert.match(migration, /on conflict \(singleton\) do update/);
+  assert.match(migration, /pg_catalog\.trunc\(\(v_body ->> 'cleanupObjects'\)::numeric\)/);
+  assert.match(migration, /v_cleanup_objects := \(v_body ->> 'cleanupObjects'\)::numeric::integer/);
+  assert.match(workflow, /--data '\{"limit":5\}'/);
+  assert.match(workflow, /--data '\{"operation":"status"\}'/);
+  assert.match(
+    workflow,
+    /github\.event_name == 'workflow_dispatch' && inputs\.confirm_processing == 'PROCESS_DUE_ACCOUNT_DELETIONS'/,
+  );
+  assert.match(
+    workflow,
+    /github\.event_name == 'schedule' && vars\.ACCOUNT_DELETION_WORKER_ENABLED == 'true'/,
+  );
+  assert.match(workflow, /vars\.ACCOUNT_DELETION_PROVIDER_REQUIRED/);
+  assert.match(workflow, /Provider scheduler health is required but unavailable/);
 });

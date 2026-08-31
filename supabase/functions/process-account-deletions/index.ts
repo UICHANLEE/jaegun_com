@@ -6,11 +6,15 @@ import {
   type AccountDeletionClaim,
   identityPresence,
   isAccountDeletionClaim,
+  isAccountDeletionWorkerHealth,
   isIdentityDeletionClaim,
   parseWorkerBearer,
+  parseProviderSchedulerCredential,
   parseWorkerRequest,
+  PROVIDER_SCHEDULER_HEADER_NAMES,
   requestIdFromUnknown,
   storageDeleteOutcome,
+  verifyProviderSchedulerCredential,
   WorkerValidationError,
 } from "./security.ts";
 
@@ -240,13 +244,32 @@ Deno.serve(async (request: Request): Promise<Response> => {
   } catch {
     return response({ error: "service_unavailable" }, 503);
   }
-  if (!await secretsEqual(config.workerSecret, parseWorkerBearer(request.headers.get("authorization")))) {
+  const hasProviderCredential = PROVIDER_SCHEDULER_HEADER_NAMES.some((name) =>
+    request.headers.has(name)
+  );
+  const authorization = request.headers.get("authorization");
+  if (authorization !== null && hasProviderCredential) {
     return response({ error: "invalid_worker_credentials" }, 401);
   }
 
-  let limit: number;
+  let authentication: "bearer" | "provider" | null = null;
+  if (authorization !== null) {
+    if (await secretsEqual(config.workerSecret, parseWorkerBearer(authorization))) {
+      authentication = "bearer";
+    }
+  } else if (hasProviderCredential) {
+    const credential = parseProviderSchedulerCredential(request.headers);
+    if (credential && await verifyProviderSchedulerCredential(credential, config.workerSecret)) {
+      authentication = "provider";
+    }
+  }
+  if (authentication === null) {
+    return response({ error: "invalid_worker_credentials" }, 401);
+  }
+
+  let workerRequest: Awaited<ReturnType<typeof parseWorkerRequest>>;
   try {
-    ({ limit } = await parseWorkerRequest(request));
+    workerRequest = await parseWorkerRequest(request);
   } catch (error) {
     if (error instanceof WorkerValidationError) {
       return response({ error: error.code }, error.status);
@@ -255,6 +278,33 @@ Deno.serve(async (request: Request): Promise<Response> => {
   }
 
   const client = serviceClient(config);
+  if (authentication === "provider") {
+    if (workerRequest.operation !== "process" || workerRequest.limit !== 5) {
+      return response({ error: "invalid_provider_request" }, 400);
+    }
+    const credential = parseProviderSchedulerCredential(request.headers);
+    if (!credential) return response({ error: "invalid_worker_credentials" }, 401);
+    const { data, error } = await client.rpc(
+      "service_claim_account_deletion_scheduler_nonce",
+      {
+        p_nonce: credential.nonce,
+        p_issued_at: new Date(credential.issuedAtSeconds * 1000).toISOString(),
+      },
+    );
+    if (error || data !== true) {
+      return response({ error: "invalid_worker_credentials" }, 401);
+    }
+  }
+
+  if (workerRequest.operation === "status") {
+    const { data, error } = await client.rpc("service_account_deletion_worker_health");
+    if (error || !isAccountDeletionWorkerHealth(data)) {
+      return response({ error: "worker_health_unavailable" }, 503);
+    }
+    return response({ ...data }, 200);
+  }
+
+  const { limit } = workerRequest;
   const totals: Totals = {
     cleanupClaims: 0,
     cleanupObjects: 0,
