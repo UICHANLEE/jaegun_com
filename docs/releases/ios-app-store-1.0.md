@@ -21,7 +21,7 @@
 | 심사용 계정·합성 데이터 | BLOCK | 승인 대기 없이 핵심 기능을 확인할 일반 회원 계정과 역할별 테스트 계정 필요 |
 | 기기 지원 범위 | iOS 1.0 iPhone 세로 전용 고정 | 검증되지 않은 iPad·가로 회전 네이티브 UI를 1.0 범위에서 제외. Xcode Debug·Release 모두 `TARGETED_DEVICE_FAMILY = 1`, `Info.plist`는 portrait-only이며 동기화 후 preflight가 회귀를 차단 |
 | 실제 기기·TestFlight | BLOCK | 지원 대상 iPhone에서 설치·복구·오프라인·키보드·미디어·탈퇴 시험 필요 |
-| 익명 교회 디렉터리 RLS | 로컬 수정·검증 완료 / 운영 반영 대기 | `security_invoker` 뷰, 5개 공개 열 권한, 공개 상태 RLS와 7개 전용 pgTAP 추가. 019 마이그레이션 운영 반영 후 Advisor 재확인 필요 |
+| 익명 교회 디렉터리 RLS | 운영 반영·재검증 완료 | `security_invoker` 뷰, 5개 공개 열 권한, 공개 상태 RLS와 7개 전용 pgTAP 추가. 019 마이그레이션 반영 후 운영 Security Advisor 오류 0건 및 가입 교회 목록 정상 노출 확인 |
 
 ## 고정할 출시 구성
 
