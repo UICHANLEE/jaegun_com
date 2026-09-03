@@ -153,6 +153,7 @@ interface AppDataContextValue extends AppDataState {
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
 const REMOTE_LOAD_TIMEOUT_MS = 20_000;
+const TRANSIENT_REMOTE_LOAD_RETRY_DELAYS_MS = [750, 2_000] as const;
 const SIGNED_URL_TIMEOUT_MS = 10_000;
 const SIGNED_URL_TTL_SECONDS = {
   avatars: 60,
@@ -359,9 +360,28 @@ function createAuthState(
   };
 }
 
+function remoteLoadFailureDetails(reason: unknown) {
+  if (!reason || typeof reason !== "object") return { name: "", message: "" };
+  const failure = reason as { name?: unknown; message?: unknown };
+  return {
+    name: typeof failure.name === "string" ? failure.name.toLowerCase() : "",
+    message: typeof failure.message === "string" ? failure.message.toLowerCase() : "",
+  };
+}
+
+function isRetryableRemoteLoadFailure(reason: unknown) {
+  const { name, message } = remoteLoadFailureDetails(reason);
+  return name === "remoteloadtimeouterror"
+    || name === "aborterror"
+    || message.includes("timeout")
+    || message.includes("시간 초과")
+    || message.includes("network")
+    || message.includes("failed to fetch")
+    || message.includes("fetch failed");
+}
+
 function remoteLoadErrorMessage(reason: unknown) {
-  const name = reason instanceof Error ? reason.name.toLowerCase() : "";
-  const message = reason instanceof Error ? reason.message.toLowerCase() : "";
+  const { name, message } = remoteLoadFailureDetails(reason);
   if (name === "remoteloadtimeouterror" || message.includes("timeout") || message.includes("시간 초과")) {
     return "서비스 응답이 지연되고 있습니다. 잠시 후 다시 시도해 주세요.";
   }
@@ -898,6 +918,8 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const draftCleanupQueueRef = useRef(readDraftCleanupQueue());
   const optimisticMessageMediaRef = useRef(new Map<string, { conversationId: string; urls: string[] }>());
   const remoteLoadAbortControllerRef = useRef<AbortController | null>(null);
+  const remoteLoadRetryTimerRef = useRef<number | null>(null);
+  const remoteLoadRetryCountRef = useRef(0);
   const remoteLoadInFlightRef = useRef<{
     sessionEpoch: number;
     userId: string | null;
@@ -1204,6 +1226,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     optimisticMessageMediaRef.current.clear();
     remoteLoadAbortControllerRef.current?.abort();
     remoteLoadAbortControllerRef.current = null;
+    if (remoteLoadRetryTimerRef.current !== null) {
+      window.clearTimeout(remoteLoadRetryTimerRef.current);
+      remoteLoadRetryTimerRef.current = null;
+    }
   }, []);
 
   const invalidateRemoteWork = useCallback((nextUserId: string | null, preserveActiveLoad = false) => {
@@ -1214,6 +1240,11 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     }
     remoteLoadGenerationRef.current += 1;
     remoteSessionEpochRef.current += 1;
+    if (remoteLoadRetryTimerRef.current !== null) {
+      window.clearTimeout(remoteLoadRetryTimerRef.current);
+      remoteLoadRetryTimerRef.current = null;
+    }
+    remoteLoadRetryCountRef.current = 0;
     activeRemoteUserIdRef.current = nextUserId;
     postLimitRef.current = 30;
     pendingMessageBatchesRef.current.clear();
@@ -1268,6 +1299,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
 
   const loadRemote = useCallback(async () => {
     if (!supabase || remoteLoadsBlockedRef.current || stateRef.current.mode !== "supabase") return;
+    if (remoteLoadRetryTimerRef.current !== null) {
+      window.clearTimeout(remoteLoadRetryTimerRef.current);
+      remoteLoadRetryTimerRef.current = null;
+    }
     const existingLoad = remoteLoadInFlightRef.current;
     if (existingLoad
       && existingLoad.sessionEpoch === remoteSessionEpochRef.current
@@ -1337,6 +1372,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           organizations: mapOrganizationDirectory(organizationsResult.data),
           requiredConsentDocuments,
         });
+        remoteLoadRetryCountRef.current = 0;
         setGovernanceRefreshDeadline(null);
         setError(null);
         return;
@@ -1715,6 +1751,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       : serverClockCapturedAt + Math.max(nearestGovernanceExpiry - serverNow, 1));
     setServiceYear(serverServiceYear);
     setHasMorePosts(postRows.length === postLimit);
+    remoteLoadRetryCountRef.current = 0;
     setError(null);
     replaceState(nextState);
     })();
@@ -1737,6 +1774,16 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       setServerRolloverDeadline(performance.now() + 60_000);
       setError(remoteLoadErrorMessage(reason));
       updateState((previous) => previous.mode === "supabase" ? { ...previous, loading: false } : previous);
+      if (isRetryableRemoteLoadFailure(reason)
+        && remoteLoadRetryCountRef.current < TRANSIENT_REMOTE_LOAD_RETRY_DELAYS_MS.length
+        && !remoteLoadsBlockedRef.current) {
+        const retryDelay = TRANSIENT_REMOTE_LOAD_RETRY_DELAYS_MS[remoteLoadRetryCountRef.current];
+        remoteLoadRetryCountRef.current += 1;
+        remoteLoadRetryTimerRef.current = window.setTimeout(() => {
+          remoteLoadRetryTimerRef.current = null;
+          void loadRemoteRef.current().catch(() => undefined);
+        }, retryDelay);
+      }
       throw reason;
     } finally {
       window.clearTimeout(watchdogTimer);
@@ -1754,6 +1801,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         && remoteSessionEpochRef.current === inFlightEntry.sessionEpoch
         && activeRemoteUserIdRef.current === inFlightEntry.userId
         && !remoteLoadsBlockedRef.current) {
+        if (remoteLoadRetryTimerRef.current !== null) {
+          window.clearTimeout(remoteLoadRetryTimerRef.current);
+          remoteLoadRetryTimerRef.current = null;
+        }
         window.setTimeout(() => void loadRemoteRef.current().catch(() => undefined), 0);
       }
     }

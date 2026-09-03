@@ -286,6 +286,22 @@ describe("AppDataProvider password recovery trust boundary", () => {
     expect(remote.from).not.toHaveBeenCalledWith("organizations");
   });
 
+  it("automatically reconnects after a transient signed-out bootstrap failure", async () => {
+    remote.directoryError = new TypeError("Failed to fetch");
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+
+    await waitFor(() => expect(screen.getByTestId("provider-error")).toHaveTextContent(
+      "네트워크 연결을 확인한 뒤 다시 시도해 주세요.",
+    ));
+
+    remote.directoryError = null;
+
+    await waitFor(() => expect(latestData?.organizations).toHaveLength(2), { timeout: 3_000 });
+    expect(screen.getByTestId("provider-error")).toHaveTextContent("");
+    expect(remote.from.mock.calls.filter(([table]) => table === "public_organization_directory")).toHaveLength(2);
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+  });
+
   it("rejects a normal signed-in session and accepts only a verified PASSWORD_RECOVERY event", async () => {
     render(<AppDataProvider><AuthProbe /></AppDataProvider>);
     await waitFor(() => expect(remote.authCallback).not.toBeNull());
