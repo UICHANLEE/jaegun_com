@@ -96,6 +96,12 @@ function authSubmitError(reason: unknown, view: AuthView) {
 
 function providerLoadError(message: string) {
   const normalized = message.toLowerCase();
+  if (normalized.includes("지연") || normalized.includes("timeout")) {
+    return "서비스 연결이 지연되고 있어요. 잠시 기다린 뒤 다시 시도해 주세요.";
+  }
+  if (normalized.includes("세션")) {
+    return "로그인 상태를 확인하지 못했어요. 다시 로그인해 주세요.";
+  }
   return normalized.includes("network") || normalized.includes("fetch") || normalized.includes("네트워크")
     ? "네트워크에 연결하지 못해 서비스 데이터를 불러오지 못했습니다."
     : "서비스 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";

@@ -2015,6 +2015,10 @@ fieldset {
 .profile-card__identity > div > span em svg { width: 13px; height: 13px; }
 .profile-card__identity > button { color: #d6e6dd; }
 .profile-card__bio { margin-top: 15px; color: #dce8e1; font-size: 0.78rem; line-height: 1.55; }
+.profile-role-guide { margin-top: 16px; border-top: 1px solid #78968a; color: #fff; }
+.profile-role-guide summary { min-height: 44px; padding: 12px 0; cursor: pointer; font-size: .85rem; line-height: 1.5; }
+.profile-role-guide summary:focus-visible { outline: 2px solid #fff; outline-offset: 3px; border-radius: 4px; }
+.profile-role-guide p { margin-top: 8px; color: #fff; font-size: .8rem; line-height: 1.7; overflow-wrap: anywhere; }
 .profile-card__demo { display: inline-flex; margin-top: 14px; border-radius: 999px; padding: 4px 8px; color: #fae9cb; background: rgba(240, 142, 61, 0.17); font-size: 0.62rem; font-weight: 700; }
 .profile-section { margin-top: 24px; }
 .profile-section > h2,

@@ -1336,7 +1336,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       && stateRef.current.mode === "supabase";
 
     setError(null);
-    if (!stateRef.current.viewer) {
+    // Keep an already displayed auth form mounted during retries. Account
+    // changes explicitly set loading in createAuthState instead.
+    if (!stateRef.current.viewer && stateRef.current.loading) {
       updateState((previous) => previous.mode === "supabase" ? { ...previous, loading: true } : previous);
     }
 
@@ -1405,6 +1407,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         setGovernanceRefreshDeadline(null);
         setServerRolloverDeadline(null);
         setHasMorePosts(false);
+        remoteLoadRetryCountRef.current = 0;
         setError(null);
         return;
       }
@@ -1781,6 +1784,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         remoteLoadRetryCountRef.current += 1;
         remoteLoadRetryTimerRef.current = window.setTimeout(() => {
           remoteLoadRetryTimerRef.current = null;
+          if (remoteSessionEpochRef.current !== sessionEpoch
+            || activeRemoteUserIdRef.current !== requestUserId
+            || remoteLoadsBlockedRef.current) return;
           void loadRemoteRef.current().catch(() => undefined);
         }, retryDelay);
       }

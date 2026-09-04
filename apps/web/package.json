@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "native:check:store": "node scripts/check-store-readiness.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "postbuild": "node scripts/verify-production-bundle.mjs dist",

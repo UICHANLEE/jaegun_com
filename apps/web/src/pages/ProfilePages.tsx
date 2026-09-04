@@ -92,6 +92,12 @@ export function ProfilePage() {
           <div><h2>{viewer?.profile.displayName}</h2><p>{viewer?.profile.email}</p><span>{membership?.churchTitleCode ? <em className="church-title-badge">{CHURCH_TITLE_LABELS[membership.churchTitleCode]}</em> : null}{membership ? <RoleBadge role={membership.role} /> : null}{membership?.role === "executive" ? membership.executiveOfficeCodes.map((code) => <em className="executive-office-badge" key={code}>{EXECUTIVE_OFFICE_LABELS[code]}</em>) : null}{viewer?.profile.globalRole === "platform_admin" ? <em><ShieldCheck weight="fill" /> 플랫폼 관리자</em> : null}</span></div>
         </div>
         <p className="profile-card__bio">{viewer?.profile.bio ?? "공동체 안에서 믿음과 일상을 함께 나누고 있어요."}</p>
+        <details className="profile-role-guide">
+          <summary>직분과 관리 역할은 어떻게 다른가요?</summary>
+          <p>집사·장로 등 교회 직분은 소개 정보입니다. 회원 승인과 운영 기능은 승인받은 사역자·임원 역할에 따라 달라집니다.</p>
+          <p>총회·노회·교회 임원직은 해당 조직과 연도에만 적용됩니다. 장년부·청년부·청소년부·초등부 임원직만으로 회원 승인이나 회계장부 권한이 생기지는 않습니다.</p>
+          <p>사역자 역할과 담임목사 배정은 별개입니다. 부서 임원은 해당 연도의 담임목사로 배정된 분이나 플랫폼 관리자가 설정합니다.</p>
+        </details>
         {import.meta.env.DEV && mode === "demo" ? <span className="profile-card__demo">로컬 데모 계정</span> : null}
       </section>
 

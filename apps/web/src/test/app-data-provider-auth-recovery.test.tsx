@@ -302,6 +302,54 @@ describe("AppDataProvider password recovery trust boundary", () => {
     expect(remote.from).not.toHaveBeenCalledWith("organizations");
   });
 
+  it("preserves signup inputs while a failed bootstrap is retried", async () => {
+    remote.directoryError = new Error("directory unavailable");
+    render(<MemoryRouter initialEntries={["/auth"]}><AppDataProvider><App /></AppDataProvider></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "재시도 사용자" } });
+    fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "retry@example.com" } });
+    remote.directoryError = null;
+    fireEvent.click(screen.getByRole("button", { name: "데이터 다시 불러오기" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "데이터 다시 불러오기" })).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "공동체에 함께해요" })).toBeInTheDocument();
+    expect(screen.getByLabelText("이름")).toHaveValue("재시도 사용자");
+    expect(screen.getByLabelText("이메일")).toHaveValue("retry@example.com");
+  });
+
+  it("stops transient retries after two attempts", async () => {
+    vi.useFakeTimers();
+    remote.directoryError = new TypeError("Failed to fetch");
+    const { unmount } = render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(remote.from.mock.calls.filter(([table]) => table === "public_organization_directory")).toHaveLength(3);
+      expect(latestData?.loading).toBe(false);
+      expect(latestData?.organizations).toEqual([]);
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(remote.from.mock.calls.filter(([table]) => table === "public_organization_directory")).toHaveLength(3);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a pending bootstrap retry when unmounted", async () => {
+    vi.useFakeTimers();
+    remote.directoryError = new TypeError("Failed to fetch");
+    const { unmount } = render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+      expect(remote.from.mock.calls.filter(([table]) => table === "public_organization_directory")).toHaveLength(1);
+      unmount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(remote.from.mock.calls.filter(([table]) => table === "public_organization_directory")).toHaveLength(1);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects a normal signed-in session and accepts only a verified PASSWORD_RECOVERY event", async () => {
     render(<AppDataProvider><AuthProbe /></AppDataProvider>);
     await waitFor(() => expect(remote.authCallback).not.toBeNull());
