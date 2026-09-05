@@ -15,11 +15,11 @@ const prefixes = new Set();
 const combinedSql = [];
 
 for (const file of migrationFiles) {
-  if (!/^\d{12}_[a-z0-9_]+\.sql$/.test(file)) {
-    errors.push(`${file}: expected YYYYMMDDNNNN_snake_case.sql naming`);
+  if (!/^(?:\d{12}|\d{14})_[a-z0-9_]+\.sql$/.test(file)) {
+    errors.push(`${file}: expected legacy 12-digit or CLI 14-digit timestamp naming`);
   }
 
-  const prefix = file.slice(0, 12);
+  const prefix = file.split("_")[0];
   if (prefixes.has(prefix)) errors.push(`${file}: duplicate migration prefix ${prefix}`);
   prefixes.add(prefix);
 

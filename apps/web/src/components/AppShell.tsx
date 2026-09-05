@@ -29,7 +29,8 @@ export function AppShell() {
   const unreadCount = notifications.filter((item) => !item.readAt).length;
   const canManage = canManageChurch(viewer);
   const isFocusedRoute =
-    /\/app\/(posts|chats|churches|events)\/.+/.test(location.pathname) ||
+    (/\/app\/(posts|chats|churches|events)\/.+/.test(location.pathname)
+      && location.pathname !== "/app/chats/channels") ||
     location.pathname === "/app/notifications" ||
     location.pathname.startsWith("/manage/");
   const church = organizations.find((item) => item.id === viewer?.membership?.organizationId);

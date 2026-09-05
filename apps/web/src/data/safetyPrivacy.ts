@@ -20,7 +20,7 @@ import { isSupabaseConfigured, supabase } from "./supabase";
 
 export const ACCOUNT_DELETION_CONFIRMATION = "계정 삭제";
 
-export const REPORT_TARGET_TYPES = ["post", "comment", "message", "profile"] as const;
+export const REPORT_TARGET_TYPES = ["post", "comment", "message", "profile", "channel_message"] as const;
 export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number];
 
 export const REPORT_REASONS = [
@@ -52,6 +52,7 @@ export const REPORT_TARGET_LABELS: Readonly<Record<ReportTargetType, string>> = 
   post: "게시글",
   comment: "댓글",
   message: "메시지",
+  channel_message: "채널 메시지",
   profile: "사용자",
 };
 
@@ -659,8 +660,8 @@ export async function submitContentReport(mode: AppMode, userId: string, input: 
   if (issue) throw new Error(issue);
   const client = requireMode(mode, userId);
   if (!client) return `demo-report-${crypto.randomUUID()}`;
-  const data = await callRpc("create_content_report", {
-    p_target_type: input.targetType,
+  const data = await callRpc(input.targetType === "channel_message" ? "report_channel_message" : "create_content_report", {
+    ...(input.targetType === "channel_message" ? {} : { p_target_type: input.targetType }),
     p_target_id: input.targetId,
     p_reason_code: input.reason,
     p_details: input.details?.trim() || null,

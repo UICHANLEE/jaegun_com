@@ -22,6 +22,7 @@ const FeedPage = lazy(() => import("./pages/FeedPages").then((module) => ({ defa
 const ComposerPage = lazy(() => import("./pages/FeedPages").then((module) => ({ default: module.ComposerPage })));
 const PostDetailPage = lazy(() => import("./pages/FeedPages").then((module) => ({ default: module.PostDetailPage })));
 const ChatListPage = lazy(() => import("./pages/ChatPages").then((module) => ({ default: module.ChatListPage })));
+const ChannelPage = lazy(() => import("./pages/ChannelPages").then((module) => ({ default: module.ChannelPage })));
 const ConversationPage = lazy(() => import("./pages/ChatPages").then((module) => ({ default: module.ConversationPage })));
 const ChurchDirectoryPage = lazy(() => import("./pages/ChurchPages").then((module) => ({ default: module.ChurchDirectoryPage })));
 const ChurchDetailPage = lazy(() => import("./pages/ChurchPages").then((module) => ({ default: module.ChurchDetailPage })));
@@ -262,6 +263,8 @@ function AuthenticatedRoutes() {
             <Route path="/app/posts/new" element={<MemberOnly><ComposerPage /></MemberOnly>} />
             <Route path="/app/posts/:postId" element={<PostDetailPage />} />
             <Route path="/app/chats" element={<ChatListPage />} />
+            <Route path="/app/chats/channels" element={<MemberOnly><ChannelPage /></MemberOnly>} />
+            <Route path="/app/chats/channels/:channelId" element={<MemberOnly><ChannelPage /></MemberOnly>} />
             <Route path="/app/chats/:conversationId" element={<ConversationPage />} />
             <Route path="/app/churches" element={<ChurchDirectoryPage />} />
             <Route path="/app/churches/:organizationId" element={<ChurchDetailPage />} />

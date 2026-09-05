@@ -14,6 +14,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import "./channel-pages.css";
 import { Avatar, EmptyState, ErrorBanner, formatRelativeKorean, PageIntro } from "../components/ui";
 import { ProtectedImage } from "../components/ProtectedImage";
 import { ProtectedVideo } from "../components/ProtectedVideo";
@@ -134,6 +135,7 @@ export function ChatListPage() {
   return (
     <div className="page chat-list-page">
       <div className="chat-list-page__content" inert={newChatOpen}>
+        <nav className="channel-tabs" aria-label="소통 유형"><Link to="/app/chats/channels">채널</Link><Link to="/app/chats" aria-current="page">개인 대화</Link></nav>
         <PageIntro eyebrow="DIRECT MESSAGE" title="채팅" description="공동체 안에서 필요한 이야기를 안전하게 나눠요." action={hasMembership ? <button ref={newChatTriggerRef} className="button button--primary" type="button" onClick={() => setNewChatOpen(true)}><Plus weight="bold" /> 새 대화</button> : undefined} />
         <div className="chat-list-card">
           <div className="chat-list-card__heading"><strong>대화 {conversations.length}</strong>{unreadTotal ? <span>읽지 않음 {unreadTotal}</span> : <span>모두 읽음</span>}</div>
