@@ -160,6 +160,7 @@ describe("direct private media upload", () => {
   it.each([
     ["post", "community-media", [ORGANIZATION_ID, "posts", TARGET_ID], 60],
     ["message", "community-media", [ORGANIZATION_ID, "messages", TARGET_ID], 60],
+    ["channel", "community-media", [ORGANIZATION_ID, "channels", TARGET_ID], 60],
     ["application_evidence", "community-media", [ORGANIZATION_ID, "applications", TARGET_ID], 60],
     ["organization_hero", "community-media", [ORGANIZATION_ID, "organization"], 60],
     ["avatar", "avatars", [USER_ID], 60],

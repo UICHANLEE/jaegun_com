@@ -46,6 +46,7 @@ const CANONICAL_EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
 const DIRECTORY_BY_PURPOSE = {
   post: "posts",
   message: "messages",
+  channel: "channels",
   organization_hero: "organization",
   application_evidence: "applications",
 } as const;
@@ -53,6 +54,7 @@ const DIRECTORY_BY_PURPOSE = {
 export type MediaUploadPurpose =
   | "post"
   | "message"
+  | "channel"
   | "organization_hero"
   | "application_evidence"
   | "avatar";

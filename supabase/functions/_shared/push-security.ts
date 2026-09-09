@@ -304,6 +304,8 @@ export function safePushRoute(entityType: string, entityId: string | null): stri
     case "conversation":
     case "message":
       return `/app/chats/${entityId}`;
+    case "channel":
+      return `/app/chats/channels/${entityId}`;
     case "post":
     case "post_comment":
       return `/app/posts/${entityId}`;

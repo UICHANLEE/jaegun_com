@@ -33,6 +33,7 @@
 ## Production Service
 
 - Channels are member-created collaboration spaces, not administrator-provisioned rooms. Any active, consent-current church member may create public (within that church) or invitation-only private channels. Channel ownership/management must never grant church, executive, department, or governance authority. Preserve direct messages; introduce channels first, then threads/mentions and shared tasks/calendar in later stages. Invitations require acceptance; revocation of church membership must revoke private-channel participation permanently until explicitly invited again.
+- Channel messages support bounded emoji reactions, explicit member mentions, text forwarding to another channel the actor currently participates in, and up to four hardened image/video attachments. Forwarding copies text with attribution but never copies attachments or mention notifications across channel boundaries. Arbitrary documents and archives stay disabled until the dormant scanner pipeline is production-approved.
 
 - Build production UI, routing, authentication, organization onboarding, boards, direct chat, media uploads, church profiles, and management screens in `apps/web/`.
 - Keep Supabase migrations, RLS policies, secure approval RPCs, and organization seed data in `supabase/`.

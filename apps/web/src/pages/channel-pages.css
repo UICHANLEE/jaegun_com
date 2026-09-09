@@ -19,6 +19,18 @@
 .channel-messages time { font-size: .75rem; color: #526357; }
 .channel-messages p { white-space: pre-wrap; }
 .channel-message--mine { background: #eff6f0; border-radius: 12px; }
+.channel-forwarded { display: block; margin-top: 8px; color: #526357; }
+.channel-message-actions, .channel-composer-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.channel-message-actions button { min-height: 44px; min-width: 44px; border: 1px solid #cbd8ce; border-radius: 999px; background: #fff; color: #183f30; }
+.channel-message-actions button.is-active { border-color: #1d513f; background: #e2f1e7; }
+.channel-forward-box { padding: 12px; margin-top: 10px; border: 1px solid #cbd8ce; border-radius: 12px; }
+.channel-forward-box select, .channel-composer-tools select { min-height: 44px; margin-left: 8px; }
+.channel-attachments { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); margin: 10px 0; }
+.channel-attachments img, .channel-attachments video { width: 100%; max-height: 420px; object-fit: contain; border-radius: 12px; background: #eef2ed; }
+.channel-file-list { margin: 0; padding-left: 20px; }
+.channel-file-list button { min-height: 44px; }
+.channel-selection-summary { font-size: .9rem; }
+.channel-selection-summary button { margin-left: 8px; min-height: 44px; border: 1px solid #b8c9c1; border-radius: 999px; background: #f4f8f6; color: var(--forest); padding: 8px 12px; font: inherit; }
 .channel-member-list li { padding: 12px 0; border-bottom: 1px solid #e3e9e2; }
 .channel-member-list li > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .channel-confirm { border: 2px solid #2f664d; padding: 14px; border-radius: 12px; margin-top: 12px; }

@@ -860,6 +860,8 @@ function mapNotification(row: Record<string, unknown>): Notification {
   const entityId = row.entity_id ? String(row.entity_id) : undefined;
   const href = entityType === "conversation" && entityId
     ? `/app/chats/${entityId}`
+    : entityType === "channel" && entityId
+      ? `/app/chats/channels/${entityId}`
     : entityType === "post" && entityId
       ? `/app/posts/${entityId}`
       : entityType === "membership_application"

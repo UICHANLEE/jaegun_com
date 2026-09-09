@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const api=vi.hoisted(() => ({rpc:vi.fn(),abort:vi.fn()}));
-vi.mock("../data/supabase",() => ({supabase:{rpc:api.rpc}}));
-import { channelCommand, channelError, fetchChannels } from "../data/channels";
-beforeEach(() => {vi.resetAllMocks();api.rpc.mockReturnValue({abortSignal:api.abort});api.abort.mockResolvedValue({data:{actorId:"a",channels:[],messages:[],members:[]},error:null});});
+const api=vi.hoisted(() => ({rpc:vi.fn(),abort:vi.fn(),signed:vi.fn()}));
+vi.mock("../data/supabase",() => ({supabase:{rpc:api.rpc,storage:{from:()=>({createSignedUrl:api.signed})}}}));
+import { channelCommand, channelError, channelRichCommand, fetchChannels } from "../data/channels";
+beforeEach(() => {vi.resetAllMocks();api.rpc.mockReturnValue({abortSignal:api.abort});api.abort.mockResolvedValue({data:{actorId:"a",channels:[],messages:[],members:[]},error:null});api.signed.mockResolvedValue({data:{signedUrl:"https://signed.test/channel"},error:null});});
 describe("channel API boundaries",()=>{
   it("binds a snapshot to the requesting actor",async()=>{
     await expect(fetchChannels("b","org")).rejects.toThrow("channel_access_denied");
@@ -14,6 +14,17 @@ describe("channel API boundaries",()=>{
   it("overrides any caller-supplied expected actor",async()=>{
     await channelCommand("a","send","channel",{expectedActorId:"b",body:"hello",messageId:"nonce"});
     expect(api.rpc).toHaveBeenCalledWith("channel_command",expect.objectContaining({p_payload:expect.objectContaining({expectedActorId:"a"})}));
+  });
+  it("binds rich message operations to the current actor",async()=>{
+    api.rpc.mockResolvedValueOnce({data:{id:"message"},error:null});
+    await channelRichCommand("a","react","channel",{expectedActorId:"b",messageId:"message",emoji:"🙏"});
+    expect(api.rpc).toHaveBeenCalledWith("channel_rich_command",expect.objectContaining({p_payload:expect.objectContaining({expectedActorId:"a"})}));
+  });
+  it("signs only server-returned channel attachment paths for sixty seconds",async()=>{
+    api.abort.mockResolvedValueOnce({data:{actorId:"a",channels:[],members:[],messages:[{id:"m",seq:1,body:"",senderId:"a",senderName:"가",createdAt:"now",attachments:[{id:"x",path:"00000000-0000-4000-8000-000000000001/channels/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003.jpg",kind:"image",mimeType:"image/jpeg",byteSize:1,fileName:"a.jpg"}]}]},error:null});
+    const result=await fetchChannels("a","org","channel");
+    expect(api.signed).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001/channels/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003.jpg",60);
+    expect(result.messages?.[0].attachments[0].url).toBe("https://signed.test/channel");
   });
   it("aborts a pending snapshot after fifteen seconds",async()=>{
     vi.useFakeTimers();

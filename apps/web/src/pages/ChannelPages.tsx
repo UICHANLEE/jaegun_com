@@ -2,9 +2,13 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAppData } from "../data/AppDataProvider";
 import { supabase } from "../data/supabase";
-import { channelCommand, channelError, fetchChannels, type ChannelSnapshot } from "../data/channels";
+import { channelCommand, channelError, clearChannelMediaCache, fetchChannels, type ChannelSnapshot } from "../data/channels";
 import { ErrorBanner, PageIntro, formatRelativeKorean } from "../components/ui";
 import { BlockUserControl, ReportActionLink } from "../components/SafetyControls";
+import { ProtectedImage } from "../components/ProtectedImage";
+import { ProtectedVideo } from "../components/ProtectedVideo";
+import { uploadCommunityFile } from "../data/mediaUpload";
+import { channelRichCommand, refreshChannelMediaUrl } from "../data/channels";
 import "./channel-pages.css";
 
 export function ChannelPage() {
@@ -14,6 +18,7 @@ export function ChannelPage() {
   useEffect(() => {
     const subscription = supabase?.auth.onAuthStateChange((event) => {
       if (event !== "INITIAL_SESSION" && event !== "TOKEN_REFRESHED") setEpoch((value) => value + 1);
+      if (event !== "INITIAL_SESSION" && event !== "TOKEN_REFRESHED") clearChannelMediaCache();
     });
     return () => subscription?.data.subscription.unsubscribe();
   }, []);
@@ -37,6 +42,12 @@ function ChannelWorkspace({ actorId, organizationId, channelId }: { actorId: str
   const [description, setDescription] = useState("");
   const [visibility, setVisibility] = useState("private");
   const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [mentionIds, setMentionIds] = useState<string[]>([]);
+  const [mentionId, setMentionId] = useState("");
+  const [forwarding, setForwarding] = useState<string | null>(null);
+  const [forwardTarget, setForwardTarget] = useState("");
   const [targetId, setTargetId] = useState("");
   const [confirmation, setConfirmation] = useState<{ action: string; userId?: string; label: string } | null>(null);
   const busy = useRef(false);
@@ -114,14 +125,49 @@ function ChannelWorkspace({ actorId, organizationId, channelId }: { actorId: str
   }
   async function send(event: FormEvent) {
     event.preventDefault();
-    if (!channelId || !body.trim()) return;
+    if (!channelId || (!body.trim() && files.length === 0)) return;
     const submitted = body;
-    const id = requestId(submitted.trim());
-    if (await execute("send", channelId, { messageId: id, body: submitted.trim() })) {
+    const submittedFiles = files;
+    const signature = JSON.stringify([submitted.trim(), mentionIds, submittedFiles.map((file) => [file.name,file.size,file.type])]);
+    const id = requestId(signature);
+    if (busy.current) return;
+    busy.current = true; setPending(true); setError(null); setUploadProgress(0);
+    const uploadedPaths: string[] = [];
+    try {
+      const attachments = [];
+      for (let index=0; index<submittedFiles.length; index+=1) {
+        const file = submittedFiles[index];
+        const uploaded = await uploadCommunityFile(file, { purpose:"channel", targetId:channelId, organizationId, onObjectPathCreated:(path)=>uploadedPaths.push(path) }, (value)=>setUploadProgress((index+value)/submittedFiles.length));
+        attachments.push({id:crypto.randomUUID(),path:uploaded.path,kind:uploaded.kind,mimeType:uploaded.mimeType,byteSize:uploaded.byteSize,fileName:file.name});
+      }
+      await channelRichCommand(actorId,"send",channelId,{messageId:id,body:submitted.trim(),mentionUserIds:mentionIds,attachments});
+      if (!alive.current) return;
       operation.current = null;
       setBody((current) => current === submitted ? "" : current);
+      setFiles((current) => current === submittedFiles ? [] : current);
+      setMentionIds([]);
       setBeforeSeq(undefined);
-    }
+      setRefresh((value)=>value+1);
+    } catch (reason) {
+      if (uploadedPaths.length) await supabase?.storage.from("community-media").remove(uploadedPaths);
+      if (alive.current) setError(channelError(reason));
+    } finally { busy.current=false; if (alive.current) {setPending(false);setUploadProgress(0);} }
+  }
+
+  async function react(messageId: string, emoji: string) {
+    if (busy.current || !channelId) return;
+    busy.current=true; setPending(true);
+    try { await channelRichCommand(actorId,"react",channelId,{messageId,emoji}); setRefresh((value)=>value+1); }
+    catch(reason) { setError(channelError(reason)); }
+    finally { busy.current=false; setPending(false); }
+  }
+
+  async function forward() {
+    if (!channelId || !forwarding || !forwardTarget || busy.current) return;
+    busy.current=true; setPending(true);
+    try { await channelRichCommand(actorId,"forward",channelId,{messageId:forwarding,targetChannelId:forwardTarget,operationId:crypto.randomUUID()}); setForwarding(null); setForwardTarget(""); setError(null); }
+    catch(reason) { setError(channelError(reason)); }
+    finally { busy.current=false; setPending(false); }
   }
 
   return <div className="page channel-page">
@@ -171,11 +217,29 @@ function ChannelWorkspace({ actorId, organizationId, channelId }: { actorId: str
         <div className="channel-toolbar"><button className="button button--quiet" disabled={(snapshot.messages?.length ?? 0)<50} onClick={() => { setSnapshot(null); setBeforeSeq(snapshot.messages?.[0]?.seq); }}>이전 대화</button>{beforeSeq ? <button className="button button--quiet" onClick={() => {setSnapshot(null); setBeforeSeq(undefined);}}>최근 대화로</button> : null}</div>
         {!snapshot.messages?.length ? <p>표시할 대화가 없어요. 첫 인사를 나눠 보세요.</p> : null}
         <ol className="channel-messages">{snapshot.messages?.map((message) => <li key={message.id} className={message.senderId===actorId ? "channel-message--mine" : ""}>
-          <header><strong>{message.senderName}</strong><time dateTime={message.createdAt}>{formatRelativeKorean(message.createdAt)}</time></header><p>{message.body}</p>
+          <header><strong>{message.senderName}</strong><time dateTime={message.createdAt}>{formatRelativeKorean(message.createdAt)}</time></header>
+          {message.forwardedSenderName ? <small className="channel-forwarded">{message.forwardedSenderName}님의 메시지를 전달함</small> : null}
+          {message.body ? <p>{message.body}</p> : null}
+          {message.attachments?.length ? <div className="channel-attachments">{message.attachments.map((attachment) => attachment.url ? attachment.kind==="image"
+            ? <ProtectedImage key={attachment.id} src={attachment.url} storagePath={attachment.path} refreshUrl={refreshChannelMediaUrl} alt={attachment.fileName} />
+            : <ProtectedVideo key={attachment.id} src={attachment.url} storagePath={attachment.path} refreshUrl={refreshChannelMediaUrl} controls preload="metadata" aria-label={attachment.fileName} />
+            : <span key={attachment.id}>첨부 파일을 불러올 수 없어요.</span>)}</div> : null}
+          <div className="channel-message-actions" aria-label="메시지 반응과 전달">
+            {(["👍","❤️","🙏","😂","😮","😢"] as const).map((emoji) => { const reaction=message.reactions?.find((item)=>item.emoji===emoji); return <button key={emoji} type="button" className={reaction?.reacted ? "is-active" : ""} aria-pressed={reaction?.reacted ?? false} aria-label={`${emoji} 반응${reaction?.count ? ` ${reaction.count}개` : ""}`} disabled={pending} onClick={()=>void react(message.id,emoji)}>{emoji}{reaction?.count ? ` ${reaction.count}` : ""}</button>; })}
+            <button type="button" disabled={pending} onClick={()=>{setForwarding(message.id);setForwardTarget("");}}>전달</button>
+          </div>
+          {forwarding===message.id ? <div className="channel-forward-box"><label>전달할 채널<select value={forwardTarget} onChange={(event)=>setForwardTarget(event.target.value)}><option value="">채널 선택</option>{snapshot.channels.filter((item)=>item.id!==channelId&&item.status==="active"&&!item.archived).map((item)=><option key={item.id} value={item.id}># {item.name}</option>)}</select></label><p>텍스트와 원 작성자 표시만 전달하며 첨부와 태그 알림은 복사하지 않습니다.</p><button type="button" disabled={!forwardTarget||pending} onClick={()=>void forward()}>전달하기</button><button type="button" onClick={()=>setForwarding(null)}>취소</button></div> : null}
           {message.senderId!==actorId ? <ReportActionLink targetType="channel_message" targetId={message.id} targetLabel="채널 메시지" returnTo={`/app/chats/channels/${channelId}`} className="button button--quiet" /> : null}
         </li>)}</ol>
       </section>
-      {!channel.archived ? <form className="channel-panel channel-form" onSubmit={send}><label>채널 메시지<textarea required maxLength={4000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="함께 나눌 이야기를 적어 주세요" /></label><button className="button button--primary" disabled={pending || !body.trim()}>{pending ? "처리 중…" : "보내기"}</button><Link to="/app/blocked-users">차단한 사용자 관리</Link></form> : null}
+      {!channel.archived ? <form className="channel-panel channel-form" onSubmit={send}><label>채널 메시지<textarea maxLength={4000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="함께 나눌 이야기를 적어 주세요" /></label>
+        <div className="channel-composer-tools"><label>참여자 태그<select value={mentionId} onChange={(event)=>{const id=event.target.value;setMentionId("");if(!id||mentionIds.includes(id))return;const member=snapshot.members?.find((item)=>item.userId===id);setMentionIds((current)=>[...current,id]);if(member)setBody((current)=>`${current}${current&&!current.endsWith(" ")?" ":""}@${member.name} `);}}><option value="">@ 이름 선택</option>{snapshot.members?.filter((item)=>item.status==="active"&&item.userId!==actorId).map((item)=><option key={item.userId} value={item.userId}>{item.name}</option>)}</select></label>
+        <label>사진·영상 첨부<input type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,video/mp4,video/quicktime,video/webm" multiple onChange={(event)=>{const next=Array.from(event.target.files??[]).slice(0,4);setFiles(next);event.currentTarget.value="";}} /></label></div>
+        {mentionIds.length ? <div className="channel-selection-summary" aria-label="선택한 태그">태그 {mentionIds.map((id)=>{const member=snapshot.members?.find((item)=>item.userId===id);return member ? <button type="button" key={id} onClick={()=>setMentionIds((current)=>current.filter((item)=>item!==id))}>@{member.name} 제거</button> : null;})}</div> : null}
+        {files.length ? <ul className="channel-file-list">{files.map((file,index)=><li key={`${file.name}:${file.lastModified}`}>{file.name} · {(file.size/1024/1024).toFixed(1)}MB <button type="button" onClick={()=>setFiles((current)=>current.filter((_,i)=>i!==index))}>제거</button></li>)}</ul> : null}
+        {pending&&files.length ? <progress max={1} value={uploadProgress} aria-label="첨부 업로드 진행률" /> : null}
+        <p>사진은 15MB, 영상은 500MB까지 최대 4개입니다. 전송 실패 시 업로드 파일은 즉시 정리합니다.</p>
+        <button className="button button--primary" disabled={pending || (!body.trim()&&!files.length)}>{pending ? "처리 중…" : "보내기"}</button><Link to="/app/blocked-users">차단한 사용자 관리</Link></form> : null}
     </> : null}
   </div>;
 }

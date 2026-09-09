@@ -101,6 +101,7 @@ test("requires an exact worker secret without a length timing shortcut", async (
 test("maps only allowlisted entity types to in-app routes", () => {
   const id = "123e4567-e89b-42d3-a456-426614174000";
   assert.equal(safePushRoute("conversation", id), `/app/chats/${id}`);
+  assert.equal(safePushRoute("channel", id), `/app/chats/channels/${id}`);
   assert.equal(safePushRoute("post", id), `/app/posts/${id}`);
   assert.equal(safePushRoute("event_occurrence", id), `/app/events/${id}`);
   assert.equal(safePushRoute("../../admin", id), "/app/notifications");
