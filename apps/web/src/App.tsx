@@ -23,6 +23,7 @@ const ComposerPage = lazy(() => import("./pages/FeedPages").then((module) => ({ 
 const PostDetailPage = lazy(() => import("./pages/FeedPages").then((module) => ({ default: module.PostDetailPage })));
 const ChatListPage = lazy(() => import("./pages/ChatPages").then((module) => ({ default: module.ChatListPage })));
 const ChannelPage = lazy(() => import("./pages/ChannelPages").then((module) => ({ default: module.ChannelPage })));
+const AIAssistantPage = lazy(() => import("./pages/AIAssistantPage").then((module) => ({ default: module.AIAssistantPage })));
 const ConversationPage = lazy(() => import("./pages/ChatPages").then((module) => ({ default: module.ConversationPage })));
 const ChurchDirectoryPage = lazy(() => import("./pages/ChurchPages").then((module) => ({ default: module.ChurchDirectoryPage })));
 const ChurchDetailPage = lazy(() => import("./pages/ChurchPages").then((module) => ({ default: module.ChurchDetailPage })));
@@ -259,6 +260,7 @@ function AuthenticatedRoutes() {
           <Route path="/app/mfa-challenge" element={<MfaChallengePage />} />
           <Route element={<AppShell />}>
             <Route path="/app/home" element={<MemberHomePage />} />
+            <Route path="/app/ai" element={<AIAssistantPage />} />
             <Route path="/app/posts" element={<FeedPage />} />
             <Route path="/app/posts/new" element={<MemberOnly><ComposerPage /></MemberOnly>} />
             <Route path="/app/posts/:postId" element={<PostDetailPage />} />
@@ -311,7 +313,8 @@ function AppRoutes() {
     return <AccountSetupRoutes pending={viewer.application?.status === "pending"} />;
   }
 
-  return <AuthenticatedRoutes />;
+  // Drafts and page-local state must not survive a switch to another account.
+  return <AuthenticatedRoutes key={viewer.profile.id} />;
 }
 
 export default function App() {

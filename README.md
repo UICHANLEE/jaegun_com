@@ -31,13 +31,17 @@ npm run dev:web
 환경 변수가 없으면 실제 서비스와 동일한 화면·상호작용을 확인하는 명시적 데모 모드로 실행됩니다. 실제 인증과 저장을 연결하려면 다음 파일을 만듭니다.
 
 ```bash
-cp apps/web/.env.example apps/web/.env.local
+cp apps/web/.env.example apps/web/.env.development.local
 ```
 
 ```dotenv
 VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_OR_PUBLISHABLE_KEY
 ```
+
+개발용 연결은 `.env.development.local`, 배포 빌드는 `.env.production.local` 또는 배포 환경 변수로 분리합니다. 이렇게 하면 단위 테스트(`test` 모드)가 운영 DB를 사용하지 않습니다. 실제 프로젝트를 연결한 로컬 앱의 작성·삭제 작업은 운영 데이터에 반영되므로 데모 계정처럼 사용하지 마세요. 공개 키만 사용하고 로컬 환경 파일은 커밋하지 않습니다.
+
+2026-10-11 실제 연결 및 채널 마이그레이션 적용 근거: [운영 DB 연결 점검](docs/qa/2026-10-11/live-connection.md).
 
 ## Supabase 적용
 

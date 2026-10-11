@@ -14,6 +14,7 @@ import {
   UserCheck,
   UserCircle,
   UsersThree,
+  Sparkle,
   type Icon,
 } from "@phosphor-icons/react";
 import { NavLink, Outlet } from "react-router-dom";
@@ -22,6 +23,7 @@ import { Brand } from "./Brand";
 import { useAppData } from "../data/AppDataProvider";
 import { canManageDepartmentOfficers } from "../data/departmentGovernance";
 import { ServiceErrorNotice } from "./ServiceErrorNotice";
+import "./community-navigation.css";
 
 interface ManagerNavItem {
   to: string;
@@ -138,6 +140,7 @@ export function ManagerShell() {
 
   return (
     <div className={`app-shell manager-shell manager-shell--${branch}`}>
+      <a className="community-skip-link" href="#community-main">본문으로 건너뛰기</a>
       <aside className="desktop-sidebar manager-sidebar" aria-label="관리자 메뉴">
         <Brand />
         <div className="manager-sidebar__scope">
@@ -146,6 +149,10 @@ export function ManagerShell() {
           <small>{roleLabel}</small>
         </div>
         <ManagerNavigation className="desktop-nav manager-desktop-nav" label={`${roleLabel} 주요 메뉴`} branch={branch} hasGovernanceAccess={hasGovernanceAccess} hasDepartmentOfficerAccess={hasDepartmentOfficerAccess} />
+        <nav className="community-shortcuts" aria-label="공동체 도구">
+          <NavLink to="/app/chats/channels"><UsersThree /> 소모임·채널</NavLink>
+          <NavLink to="/app/ai"><Sparkle /> 공동체 AI</NavLink>
+        </nav>
         <NavLink className="manager-community-switch manager-community-switch--sidebar" to="/app/home">
           <House weight="fill" />
           <span><strong>성도 화면</strong><small>공동체 홈으로 전환</small></span>
@@ -190,7 +197,12 @@ export function ManagerShell() {
 
         {import.meta.env.DEV && mode === "demo" ? <div className="demo-ribbon">안전한 로컬 데모 데이터로 {modeLabel} 기능을 둘러보는 중입니다.</div> : null}
         <ServiceErrorNotice />
-        <main className="app-main manager-main">
+        <nav className="manager-community-tools" aria-label="공동체 바로가기">
+          <NavLink to="/app/chats/channels"><UsersThree /> 소모임·채널</NavLink>
+          <NavLink to="/app/events">모임 일정</NavLink>
+          <NavLink to="/app/ai"><Sparkle /> 공동체 AI</NavLink>
+        </nav>
+        <main id="community-main" className="app-main manager-main" tabIndex={-1}>
           <Outlet />
         </main>
         <ManagerNavigation className="bottom-nav manager-bottom-nav" label={`${roleLabel} 주요 메뉴`} branch={branch} hasGovernanceAccess={hasGovernanceAccess} hasDepartmentOfficerAccess={hasDepartmentOfficerAccess} compact />

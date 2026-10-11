@@ -1,0 +1,119 @@
+.church-directory-hierarchy {
+  display: grid;
+  gap: 7px;
+  margin: -2px 0 20px;
+  border: 1px solid #e4e9df;
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: #fbfcf8;
+}
+
+.church-directory-hierarchy > .eyebrow {
+  margin: 0;
+  color: #657666;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.church-directory-hierarchy__path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #285d43;
+  font-size: 0.92rem;
+}
+
+.church-directory-hierarchy__path svg {
+  width: 15px;
+  height: 15px;
+  color: #9aa99e;
+}
+
+.church-directory-hierarchy > p:last-of-type {
+  margin: 0;
+  color: #626e65;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.church-directory-hierarchy > a {
+  width: fit-content;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  border-radius: 11px;
+  padding: 0 11px;
+  color: #24543c;
+  background: #e7f0e6;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.church-directory-hierarchy > a svg {
+  width: 17px;
+  height: 17px;
+}
+
+.church-directory-hierarchy > a:focus-visible,
+.church-detail-community-actions a:focus-visible {
+  outline: 3px solid #7aa687;
+  outline-offset: 2px;
+}
+
+.church-detail-community-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 2px 0 4px;
+}
+
+.church-detail-community-actions a {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #dfe8e0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  color: #2d543e;
+  background: white;
+  font-size: 0.76rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.church-detail-community-actions a:hover {
+  border-color: #a8c5ad;
+  background: #f7faf5;
+}
+
+.church-detail-community-actions a > svg:first-child {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #457651;
+}
+
+.church-detail-community-actions a > span {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.church-detail-community-actions a > svg:last-child {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: #849186;
+}
+
+@media (max-width: 380px) {
+  .church-detail-community-actions {
+    grid-template-columns: 1fr;
+  }
+}

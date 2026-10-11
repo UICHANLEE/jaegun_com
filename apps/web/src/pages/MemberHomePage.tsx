@@ -7,8 +7,12 @@ import {
   HandsPraying,
   ImageSquare,
   NotePencil,
+  Plus,
+  Sparkle,
+  UsersThree,
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
+import "./member-community-home.css";
 import { ProtectedImage } from "../components/ProtectedImage";
 import { Avatar, EmptyState, formatDateTime, formatRelativeKorean } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
@@ -79,6 +83,11 @@ export function MemberHomePage() {
           <p className="eyebrow">{church?.name ?? "재건 공동체"}</p>
           <h1>안녕하세요, {firstName} {officeTitle}님</h1>
           <p>오늘도 은혜 안에서 함께해요.</p>
+          {church ? (
+            <nav className="member-community-home__breadcrumb" aria-label="소속 공동체">
+              <span>{church.presbytery}</span><CaretRight aria-hidden="true" /><strong>{church.name}</strong>
+            </nav>
+          ) : null}
         </div>
         <img src="/assets/church-retreat-landscape.png" alt="산과 나무 사이에 자리한 교회" />
       </section>
@@ -108,6 +117,32 @@ export function MemberHomePage() {
               description="교회 소식이 등록되면 이곳에서 가장 먼저 알려드릴게요."
             />
           )}
+
+          <section className="member-community-home__groups" aria-labelledby="member-groups-heading">
+            <div className="member-community-home__groups-copy">
+              <span className="member-community-home__groups-icon"><UsersThree weight="fill" /></span>
+              <div>
+                <p className="eyebrow">함께하는 작은 모임</p>
+                <h2 id="member-groups-heading">마음 맞는 사람들과 시작해요</h2>
+                <p>찬양 연습, 성경 읽기, 봉사와 일상 나눔까지. 우리 교회 안에서 편하게 모여요.</p>
+              </div>
+            </div>
+            <div className="member-community-home__group-links">
+              <Link className="member-community-home__group-link member-community-home__group-link--primary" to="/app/chats/channels">
+                <UsersThree weight="fill" /><span>소모임 찾기</span><CaretRight aria-hidden="true" />
+              </Link>
+              <Link className="member-community-home__group-link" to="/app/chats/channels?create=1">
+                <Plus weight="bold" /><span>모임 만들기</span><CaretRight aria-hidden="true" />
+              </Link>
+              <Link className="member-community-home__group-link" to="/app/events">
+                <CalendarBlank weight="fill" /><span>모임 일정</span><CaretRight aria-hidden="true" />
+              </Link>
+              <Link className="member-community-home__group-link member-community-home__group-link--ai" to="/app/ai">
+                <Sparkle weight="fill" /><span>공동체 AI 둘러보기</span><CaretRight aria-hidden="true" />
+              </Link>
+            </div>
+            <p className="member-community-home__scope-note">소모임은 소속 교회 회원끼리 함께하는 공간이에요.</p>
+          </section>
 
           <section className="member-quick-actions" aria-labelledby="member-quick-actions-heading">
             <div className="section-heading section-heading--compact">

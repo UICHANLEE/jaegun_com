@@ -160,6 +160,12 @@ describe("primary service journeys", () => {
     fireEvent.click(memberLabel.closest("button")!);
     expect(await screen.findByRole("heading", { name: /안녕하세요, 이재건/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "바로 참여하기" })).toBeInTheDocument();
+    const smallGroups = screen.getByRole("region", { name: "마음 맞는 사람들과 시작해요" });
+    expect(within(smallGroups).getByRole("link", { name: /소모임 찾기/ })).toHaveAttribute("href", "/app/chats/channels");
+    expect(within(smallGroups).getByRole("link", { name: /모임 만들기/ })).toHaveAttribute("href", "/app/chats/channels?create=1");
+    expect(within(smallGroups).getByRole("link", { name: /모임 일정/ })).toHaveAttribute("href", "/app/events");
+    expect(within(smallGroups).getByRole("link", { name: /공동체 AI 둘러보기/ })).toHaveAttribute("href", "/app/ai");
+    expect(screen.getByRole("navigation", { name: "소속 공동체" })).toBeInTheDocument();
     expect(screen.queryByText(/승인 대기/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /회원 관리/ })).not.toBeInTheDocument();
   });

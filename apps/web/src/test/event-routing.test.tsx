@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe("event route integration", () => {
-  it("opens the signed-in event calendar while preserving exactly five bottom tabs", async () => {
+  it("opens the signed-in event calendar with the shared AI tab and no extra calendar tab", async () => {
     setOrdinaryMember();
     const { container } = renderApp("/app/events");
 
@@ -63,7 +63,8 @@ describe("event route integration", () => {
     expect(await screen.findByText("공동체 연합 기도회")).toBeInTheDocument();
     const bottomNavigation = container.querySelector(".bottom-nav");
     expect(bottomNavigation).not.toBeNull();
-    expect(within(bottomNavigation as HTMLElement).getAllByRole("link")).toHaveLength(5);
+    expect(within(bottomNavigation as HTMLElement).getAllByRole("link")).toHaveLength(6);
+    expect(within(bottomNavigation as HTMLElement).getByRole("link", { name: "AI" })).toHaveAttribute("href", "/app/ai");
     expect(within(bottomNavigation as HTMLElement).queryByRole("link", { name: /일정/ })).not.toBeInTheDocument();
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
