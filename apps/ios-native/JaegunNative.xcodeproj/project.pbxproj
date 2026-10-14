@@ -16,6 +16,7 @@
 		3C8EB1A2C089A1CB7D8D7F46 /* NativeCollaborationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */; };
 		42CFEFA8E03967008AAE4864 /* JaegunNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC000B221F723B87A9E585E /* JaegunNativeApp.swift */; };
 		44ED8BE983CB3AF105BAF4F1 /* FaithConsent.md in Resources */ = {isa = PBXBuildFile; fileRef = B6AD8F9F82B973B4774FA4D2 /* FaithConsent.md */; };
+		68C405706612E67DF7F654D6 /* NativeEventRecurrenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35BA73B5247793A3D161D6A /* NativeEventRecurrenceTests.swift */; };
 		75CAF80A98823F59DE8300BA /* NativeCommunityCollaboration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3D66C83AEDE790E890913 /* NativeCommunityCollaboration.swift */; };
 		7EFF8D79FC827013012D5356 /* NativeDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E365B8E3A54D5777FD40343 /* NativeDesign.swift */; };
 		A3F021AB74EBA29D39B0635E /* NativeApprovalOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA9B0FE847661DAE51729C82 /* NativeApprovalOperations.swift */; };
@@ -67,6 +68,7 @@
 		C6C17AB09F50B9066DE2595F /* JaegunNative.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = JaegunNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D76F13114AC9977C7C9E33C4 /* JaegunNativeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = JaegunNativeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DB70652F0E147C4483931E8E /* NativePublicConfig.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = NativePublicConfig.xcconfig; sourceTree = "<group>"; };
+		E35BA73B5247793A3D161D6A /* NativeEventRecurrenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventRecurrenceTests.swift; sourceTree = "<group>"; };
 		EA9B0FE847661DAE51729C82 /* NativeApprovalOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeApprovalOperations.swift; sourceTree = "<group>"; };
 		FAA28B2098A596187BD46A4A /* NativeRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRootView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -128,6 +130,7 @@
 			isa = PBXGroup;
 			children = (
 				1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */,
+				E35BA73B5247793A3D161D6A /* NativeEventRecurrenceTests.swift */,
 				1C91154CAB59C1C64DC10AF6 /* NativeFaithTests.swift */,
 				940E4A821DA8DB38946024EC /* NativeSecurityTests.swift */,
 			);
@@ -266,6 +269,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				3C8EB1A2C089A1CB7D8D7F46 /* NativeCollaborationTests.swift in Sources */,
+				68C405706612E67DF7F654D6 /* NativeEventRecurrenceTests.swift in Sources */,
 				12E1AEA343EB730AF0AA1454 /* NativeFaithTests.swift in Sources */,
 				E623690B69A8C0C18DDD8858 /* NativeSecurityTests.swift in Sources */,
 			);

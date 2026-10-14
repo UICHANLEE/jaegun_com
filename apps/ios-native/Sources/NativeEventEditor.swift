@@ -149,7 +149,7 @@ struct NativeEventOperationsView: View {
         defer { busy = false }
         do {
             // Load the series definition, never overwrite its initial date with a later occurrence.
-            let rows = try await session.api.rows("events", query: "select=id,scope_id,title,host_name,description,location_text,starts_at,ends_at,capacity,recurrence_frequency,recurrence_interval,recurrence_weekdays,recurrence_month_day,recurrence_until,recurrence_count,reminder_offsets_minutes,status,revision&id=eq.\(id.uuidString)&limit=1")
+            let rows = try await session.api.rows("events", query: "select=id,scope_id,title,host_name,description,location_text,starts_at,ends_at,capacity,recurrence_frequency,recurrence_interval,recurrence_weekdays,recurrence_month_day,recurrence_month_week,recurrence_month_weekday,recurrence_until,recurrence_count,reminder_offsets_minutes,status,revision&id=eq.\(id.uuidString)&limit=1")
             guard let row = rows.first, nativeText(row, "status") == "scheduled", writableScopes.contains(where: { $0.id == nativeText(row, "scope_id") }) else { throw NativeAPIError.security("수정 권한 또는 일정 상태가 변경되었습니다. 다시 불러와 주세요.") }
             guard session.signedIn, !session.consentRequired, actor == actorID else { return }
             draft = try NativeEventDraft(row: row)
@@ -202,6 +202,8 @@ struct NativeEventDraft: Identifiable {
     var interval = 1
     var weekdays: [Int] = []
     var monthDay: Int?
+    var monthWeek: Int?
+    var monthWeekday: Int?
     var recurrenceUntil: String?
     var recurrenceCount: Int?
     var reminders: [Int] = []
@@ -215,6 +217,7 @@ struct NativeEventDraft: Identifiable {
         capacity = (row["capacity"] as? Int).map(String.init) ?? ""
         frequency = nativeText(row, "recurrence_frequency", fallback: "none"); interval = row["recurrence_interval"] as? Int ?? 1
         weekdays = row["recurrence_weekdays"] as? [Int] ?? []; monthDay = row["recurrence_month_day"] as? Int
+        monthWeek = row["recurrence_month_week"] as? Int; monthWeekday = row["recurrence_month_weekday"] as? Int
         recurrenceUntil = row["recurrence_until"] as? String; recurrenceCount = row["recurrence_count"] as? Int
         reminders = row["reminder_offsets_minutes"] as? [Int] ?? []; originalRevision = revision
     }
@@ -237,18 +240,52 @@ struct NativeEventDraft: Identifiable {
         if !capacity.isEmpty && (Int(capacity) == nil || (Int(capacity) ?? 0) < 1 || (Int(capacity) ?? 0) > 100000) { return "정원은 1~100,000명 또는 비워 두세요." }
         if !["none", "daily", "weekly", "monthly"].contains(frequency) { return "반복 방식을 확인해 주세요." }
         if reminders.count > 5 || Set(reminders).count != reminders.count || reminders.contains(where: { $0 < 0 || $0 > 40320 }) { return "알림은 최대 5개, 시작 4주 전까지 설정할 수 있습니다." }
-        if frequency != "none" && recurrenceUntil == nil && ((recurrenceCount ?? 0) < 2 || (recurrenceCount ?? 0) > 366) { return "반복 횟수는 2~366회로 지정해 주세요." }
+        if frequency != "none" && recurrenceUntil == nil && ((recurrenceCount ?? 0) < 2 || (recurrenceCount ?? 0) > (frequency == "monthly" ? 25 : 366)) { return frequency == "monthly" ? "매월 반복은 2~25회로 지정해 주세요. 서버에서 2년 이내 생성 가능한지도 확인합니다." : "반복 횟수는 2~366회로 지정해 주세요." }
         if frequency != "none" && interval < 1 { return "반복 간격을 확인해 주세요." }
         if frequency == "daily" && interval > 30 || frequency == "weekly" && interval > 4 || frequency == "monthly" && interval > 12 { return "반복 간격을 확인해 주세요." }
         if let until = recurrenceUntil, frequency != "none" {
             guard let date = Self.parseDate(until), date > startsAt, date.timeIntervalSince(startsAt) <= 2 * 366 * 86400 else { return "반복 종료일은 시작 이후 2년 이내여야 합니다." }
         }
-        if frequency == "monthly" && !(1...31).contains(monthDay ?? 0) { return "매월 반복할 날짜를 선택해 주세요." }
+        if frequency == "monthly" && monthWeek != nil {
+            guard [-1, 1, 2, 3, 4].contains(monthWeek!), (1...7).contains(monthWeekday ?? 0),
+                  Self.matchesMonthWeekday(startsAt, week: monthWeek!, weekday: monthWeekday!) else { return "첫 시작일이 선택한 주차·요일과 일치해야 합니다." }
+        } else if frequency == "monthly" && !(1...31).contains(monthDay ?? 0) { return "매월 반복할 날짜를 선택해 주세요." }
         if frequency == "weekly" && weekdays.isEmpty { return "매주 반복할 요일을 선택해 주세요." }
         return nil
     }
+    static var seoulCalendar: Calendar { var value = Calendar(identifier: .gregorian); value.timeZone = TimeZone(identifier: "Asia/Seoul")!; return value }
+    static func matchesMonthWeekday(_ date: Date, week: Int, weekday: Int) -> Bool {
+        let calendar = seoulCalendar
+        let isoDay = (calendar.component(.weekday, from: date) + 5) % 7 + 1
+        guard isoDay == weekday else { return false }
+        if week == -1 { return calendar.component(.month, from: calendar.date(byAdding: .day, value: 7, to: date)!) != calendar.component(.month, from: date) }
+        return (calendar.component(.day, from: date) - 1) / 7 + 1 == week
+    }
+    mutating func alignMonthlyStart() {
+        guard let week = monthWeek, let weekday = monthWeekday else { return }
+        let calendar = Self.seoulCalendar, duration = endsAt.timeIntervalSince(startsAt)
+        for offset in 0...62 {
+            guard let candidate = calendar.date(byAdding: .day, value: offset, to: startsAt) else { continue }
+            if Self.matchesMonthWeekday(candidate, week: week, weekday: weekday) { startsAt = candidate; endsAt = candidate.addingTimeInterval(duration); return }
+        }
+    }
+    mutating func alignWeeklyStart() {
+        let calendar = Self.seoulCalendar, duration = endsAt.timeIntervalSince(startsAt)
+        guard !weekdays.isEmpty else { return }
+        for offset in 0...6 {
+            guard let candidate = calendar.date(byAdding: .day, value: offset, to: startsAt) else { continue }
+            if weekdays.contains((calendar.component(.weekday, from: candidate) + 5) % 7 + 1) { startsAt = candidate; endsAt = candidate.addingTimeInterval(duration); return }
+        }
+    }
     var body: [String: Any] {
         ["p_id": id.uuidString, "p_create": create, "p_scope_id": scopeId, "p_title": title.trimmingCharacters(in: .whitespacesAndNewlines), "p_host_name": host.trimmingCharacters(in: .whitespacesAndNewlines), "p_description": description.trimmingCharacters(in: .whitespacesAndNewlines), "p_location_text": location.trimmingCharacters(in: .whitespacesAndNewlines), "p_starts_at": Self.iso(startsAt), "p_ends_at": Self.iso(endsAt), "p_capacity": Int(capacity).map { $0 as Any } ?? NSNull(), "p_recurrence_frequency": frequency, "p_recurrence_interval": frequency == "none" ? 1 : interval, "p_recurrence_weekdays": frequency == "weekly" ? weekdays.sorted() : [], "p_recurrence_month_day": frequency == "monthly" ? (monthDay.map { $0 as Any } ?? NSNull()) : NSNull(), "p_recurrence_until": frequency == "none" ? NSNull() : (recurrenceUntil.map { $0 as Any } ?? NSNull()), "p_recurrence_count": frequency == "none" ? NSNull() : (recurrenceCount.map { $0 as Any } ?? NSNull()), "p_reminder_offsets_minutes": reminders]
+    }
+    var recurrenceBody: [String: Any] {
+        var value = body
+        if frequency == "monthly" && monthWeek != nil { value["p_recurrence_month_day"] = NSNull() }
+        value["p_recurrence_month_week"] = frequency == "monthly" ? monthWeek.map { $0 as Any } ?? NSNull() : NSNull()
+        value["p_recurrence_month_weekday"] = frequency == "monthly" ? monthWeekday.map { $0 as Any } ?? NSNull() : NSNull()
+        return value
     }
 }
 
@@ -284,24 +321,36 @@ private struct NativeEventEditorView: View {
             Section("반복 일정") {
                 Picker("반복", selection: $draft.frequency) { Text("반복 안 함").tag("none"); Text("매일").tag("daily"); Text("매주").tag("weekly"); Text("매월").tag("monthly") }
                     .onChange(of: draft.frequency) { _, frequency in
-                        draft.interval = 1; draft.weekdays = []; draft.monthDay = frequency == "monthly" ? 1 : nil
+                        draft.interval = 1; draft.weekdays = frequency == "weekly" ? [(NativeEventDraft.seoulCalendar.component(.weekday, from: draft.startsAt) + 5) % 7 + 1] : []; draft.monthDay = frequency == "monthly" ? NativeEventDraft.seoulCalendar.component(.day, from: draft.startsAt) : nil
+                        draft.monthWeek = nil; draft.monthWeekday = nil
                         draft.recurrenceUntil = nil; draft.recurrenceCount = frequency == "none" ? nil : 12
                     }
                 if draft.frequency != "none" {
                     Stepper("\(draft.interval)\(draft.frequency == "daily" ? "일" : draft.frequency == "weekly" ? "주" : "개월")마다", value: $draft.interval, in: 1...(draft.frequency == "weekly" ? 4 : draft.frequency == "daily" ? 30 : 12))
                     if draft.frequency == "weekly" {
                         ForEach(1...7, id: \.self) { weekday in
-                            Toggle(["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"][weekday - 1], isOn: Binding(get: { draft.weekdays.contains(weekday) }, set: { enabled in draft.weekdays.removeAll { $0 == weekday }; if enabled { draft.weekdays.append(weekday) } }))
+                            Toggle(["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"][weekday - 1], isOn: Binding(get: { draft.weekdays.contains(weekday) }, set: { enabled in draft.weekdays.removeAll { $0 == weekday }; if enabled { draft.weekdays.append(weekday) }; draft.alignWeeklyStart() }))
                         }
+                        Text("여러 요일을 선택할 수 있습니다. 첫 시작일도 선택한 요일에 맞춰 변경되므로 위의 일시를 확인해 주세요.").font(.caption).foregroundStyle(NativePalette.muted)
                     }
                     if draft.frequency == "monthly" {
-                        Picker("매월 날짜", selection: Binding(get: { draft.monthDay ?? 1 }, set: { draft.monthDay = $0 })) { ForEach(1...31, id: \.self) { Text("\($0)일").tag($0) } }
+                        Picker("매월 반복 기준", selection: Binding(get: { draft.monthWeek == nil ? "date" : "weekday" }, set: { mode in
+                            if mode == "date" { draft.monthWeek = nil; draft.monthWeekday = nil; draft.monthDay = NativeEventDraft.seoulCalendar.component(.day, from: draft.startsAt) }
+                            else { draft.monthWeek = 1; draft.monthWeekday = (NativeEventDraft.seoulCalendar.component(.weekday, from: draft.startsAt) + 5) % 7 + 1; draft.monthDay = nil; draft.alignMonthlyStart() }
+                        })) { Text("날짜 기준").tag("date"); Text("주차·요일 기준").tag("weekday") }
+                        if draft.monthWeek != nil {
+                            Picker("주차", selection: Binding(get: { draft.monthWeek ?? 1 }, set: { draft.monthWeek = $0; draft.alignMonthlyStart() })) { Text("첫째").tag(1); Text("둘째").tag(2); Text("셋째").tag(3); Text("넷째").tag(4); Text("마지막").tag(-1) }
+                            Picker("요일", selection: Binding(get: { draft.monthWeekday ?? 1 }, set: { draft.monthWeekday = $0; draft.alignMonthlyStart() })) { ForEach(1...7, id: \.self) { Text(["월요일","화요일","수요일","목요일","금요일","토요일","일요일"][$0-1]).tag($0) } }
+                            Text("선택한 규칙에 맞는 다음 날짜로 첫 시작일을 맞춥니다. 위의 시작·종료 일시를 확인해 주세요. 마지막 주는 해당 요일의 마지막 날짜입니다.").font(.caption).foregroundStyle(NativePalette.muted)
+                        } else {
+                            Picker("매월 날짜", selection: Binding(get: { draft.monthDay ?? 1 }, set: { draft.monthDay = $0 })) { ForEach(1...31, id: \.self) { Text("\($0)일").tag($0) } }
+                        }
                     }
                     if let until = draft.recurrenceUntil {
                         Text("기존 반복 종료: " + NativeEventDraft.dateLabel(until)).font(.subheadline)
                         Button("반복 횟수로 변경") { draft.recurrenceUntil = nil; draft.recurrenceCount = 12 }
                     } else {
-                        Stepper("반복 \(draft.recurrenceCount ?? 12)회", value: Binding(get: { draft.recurrenceCount ?? 12 }, set: { draft.recurrenceCount = $0 }), in: 2...366)
+                        Stepper("반복 \(draft.recurrenceCount ?? 12)회", value: Binding(get: { draft.recurrenceCount ?? 12 }, set: { draft.recurrenceCount = $0 }), in: 2...(draft.frequency == "monthly" ? 25 : 366))
                     }
                     Text("수정과 취소는 반복 일정 전체에 적용됩니다.").font(.caption).foregroundStyle(NativePalette.muted)
                 }
@@ -335,7 +384,7 @@ private struct NativeEventEditorView: View {
         guard !busy, draft.validation == nil, session.signedIn, !session.consentRequired else { return }
         busy = true; error = nil
         let actor = actorID
-        var payload = retryPayload ?? draft.body
+        var payload = retryPayload ?? draft.recurrenceBody
         payload["p_expected_revision"] = draft.originalRevision.map { $0 as Any } ?? NSNull()
         var attempted = false
         defer { busy = false }
@@ -349,7 +398,7 @@ private struct NativeEventEditorView: View {
             }
             guard actor == actorID, session.signedIn, !session.consentRequired else { dismiss(); return }
             attempted = true
-            let result = try await session.api.rpc("save_event_checked", body: payload)
+            let result = try await session.api.rpc("save_event_recurrence_checked", body: payload)
             guard let id = result as? String, UUID(uuidString: id) == draft.id else { throw NativeAPIError.invalidData }
             dismiss(); await saved()
         } catch {
