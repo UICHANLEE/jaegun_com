@@ -3,6 +3,9 @@ node_modules/
 dist/
 **/dist/
 **/.native-build/
+**/.native-device-build/
+**/*.tsbuildinfo
+**/.DS_Store
 apps/web/ios/
 apps/web/android/
 design/
