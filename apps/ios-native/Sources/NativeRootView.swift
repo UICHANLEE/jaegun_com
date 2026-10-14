@@ -1,17 +1,40 @@
 import SwiftUI
 
+enum NativeRootRoute: Equatable {
+    case login, consent, community, onboarding
+    static func resolve(loading _: Bool, signedIn: Bool, consentRequired: Bool, administrator: Bool, activeMember: Bool) -> Self {
+        // Busy state must never remove forms or their in-memory consent choices.
+        guard signedIn else { return .login }
+        guard !consentRequired else { return .consent }
+        return administrator || activeMember ? .community : .onboarding
+    }
+}
+
 struct NativeRootView: View {
     @EnvironmentObject private var session: NativeSession
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         Group {
-            if session.loading { ProgressView("계정을 확인하고 있습니다") }
-            else if !session.signedIn { NativeLoginView() }
-            else if session.consentRequired { NativeConsentView() }
-            else if session.context["is_platform_admin"] as? Bool == true ||
-                        (session.context["membership"] as? [String: Any])?["status"] as? String == "active" {
-                NativeCommunityTabs()
-            } else { NativeOnboardingView() }
+            switch NativeRootRoute.resolve(
+                loading: session.loading,
+                signedIn: session.signedIn,
+                consentRequired: session.consentRequired,
+                administrator: session.context["is_platform_admin"] as? Bool == true,
+                activeMember: (session.context["membership"] as? [String: Any])?["status"] as? String == "active"
+            ) {
+            case .login: NativeLoginView()
+            case .consent: NativeConsentView()
+            case .community: NativeCommunityTabs()
+            case .onboarding: NativeOnboardingView()
+            }
+        }
+        .disabled(session.loading)
+        .overlay(alignment: .top) {
+            if session.loading {
+                ProgressView("처리 중입니다")
+                    .padding().background(.regularMaterial, in: Capsule())
+                    .padding(.top, 12).accessibilityAddTraits(.updatesFrequently)
+            }
         }
         .privacySensitive()
         .overlay {

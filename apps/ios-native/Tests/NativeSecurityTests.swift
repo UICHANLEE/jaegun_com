@@ -2,6 +2,20 @@ import XCTest
 @testable import JaegunNative
 
 final class NativeSecurityTests: XCTestCase {
+    func testLoginRouteSurvivesGoogleBusyState() {
+        for busy in [false, true, false] {
+            XCTAssertEqual(NativeRootRoute.resolve(loading: busy, signedIn: false, consentRequired: true, administrator: false, activeMember: false), .login)
+        }
+    }
+    func testConsentRouteSurvivesFailedSaveBusyState() {
+        for busy in [false, true, false] {
+            XCTAssertEqual(NativeRootRoute.resolve(loading: busy, signedIn: true, consentRequired: true, administrator: true, activeMember: true), .consent)
+        }
+    }
+    func testAdministratorCannotSkipRequiredConsent() {
+        XCTAssertEqual(NativeRootRoute.resolve(loading: false, signedIn: true, consentRequired: true, administrator: true, activeMember: false), .consent)
+        XCTAssertEqual(NativeRootRoute.resolve(loading: false, signedIn: true, consentRequired: false, administrator: true, activeMember: false), .community)
+    }
     private let routes = ["privacy_policy": "privacy", "sensitive_information": "sensitive", "overseas_transfer": "overseas", "terms_of_service": "terms", "community_guidelines": "community"]
     private var local: [[String: Any]] {
         routes.keys.sorted().map { ["key": $0, "version": "2026-10-14", "title": $0, "sha256": String(repeating: "a", count: 64)] }
