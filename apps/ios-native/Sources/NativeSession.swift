@@ -94,6 +94,7 @@ private enum NativeKeychain {
         }
         loading = true; error = nil
         let presentation = NativeAuthPresentationContext(window: window)
+        let startedAt = ProcessInfo.processInfo.systemUptime
         authPresentationContext = presentation
         defer { loading = false; authSession = nil; authPresentationContext = nil }
         do {
@@ -123,14 +124,23 @@ private enum NativeKeychain {
                 }
                 let session = ASWebAuthenticationSession(url: authorize.url!, callback: .https(host: callbackHost, path: callbackPath)) { url, failure in
                     Task { @MainActor in
-                        if let failure { complete(.failure(failure)) }
+                        if let failure {
+                            NativeOAuthDiagnostics.failure(failure as NSError)
+                            complete(.failure(failure))
+                        }
                         else if let url { complete(.success(url)) }
                         else { complete(.failure(NativeAPIError.invalidData)) }
                     }
                 }
                 session.presentationContextProvider = presentation
+                // Keep authentication separate from the user's shared Safari cookies.
+                // This does not change PKCE, callback validation, or application consent.
+                session.prefersEphemeralWebBrowserSession = true
                 self.authSession = session
-                if !session.start() { complete(.failure(NativeAPIError.security("Google 인증 창을 시작하지 못했습니다. (AUTH-START)"))) }
+                NativeOAuthDiagnostics.write("canStart=\(session.canStart)")
+                let didStart = session.start()
+                NativeOAuthDiagnostics.write("started=\(didStart)")
+                if !didStart { complete(.failure(NativeAPIError.security("Google 인증 창을 시작하지 못했습니다. (AUTH-START)"))) }
             }
             let code = try NativeOAuthCallback.authorizationCode(result, expectedIntent: intent)
             let tokens = try await api.authenticate(grant: "pkce", body: ["auth_code": code, "code_verifier": verifier])
@@ -141,7 +151,7 @@ private enum NativeKeychain {
             let failure = error as NSError
             if failure.domain == ASWebAuthenticationSessionErrorDomain {
                 self.error = failure.code == 1
-                    ? "Google 로그인이 취소되었습니다. 선택한 동의는 유지됩니다."
+                    ? "iOS에서 Google 인증 세션이 종료되었습니다. 직접 취소하지 않았다면 아래 진단 코드를 알려주세요. 선택한 동의는 유지됩니다. (AUTH-CANCEL-\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms)"
                     : "iOS에서 Google 인증 창을 열지 못했습니다. (AUTH-\(failure.code))"
             } else { self.error = error.localizedDescription }
         }
@@ -221,6 +231,23 @@ private enum NativeKeychain {
     }
 }
 
+private enum NativeOAuthDiagnostics {
+    // Never log URLs, OAuth codes, cookies, tokens, accounts, or raw userInfo.
+    static func write(_ message: String) {
+        fputs("JAEGUN_AUTH_DIAGNOSTIC \(message)\n", stderr)
+        fflush(stderr)
+    }
+    static func failure(_ error: NSError) {
+        var current: NSError? = error
+        for depth in 0..<4 {
+            guard let item = current else { break }
+            let domain = String(item.domain.filter { $0.isLetter || $0.isNumber || ".-_".contains($0) }.prefix(120))
+            write("error[\(depth)]=\(domain):\(item.code)")
+            current = item.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+    }
+}
+
 @MainActor private final class NativeAuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
     private let window: UIWindow
     init(window: UIWindow) { self.window = window }
@@ -265,18 +292,31 @@ enum NativeConsentContract {
 
 enum NativeOAuthCallback {
     static func authorizationCode(_ result: URL, expectedIntent: String) throws -> String {
-        guard !expectedIntent.isEmpty, let returned = URLComponents(url: result, resolvingAgainstBaseURL: false),
-              returned.scheme == "https", returned.host == "jaegun-com.vercel.app", returned.port == nil,
-              returned.user == nil, returned.password == nil, returned.fragment == nil,
-              returned.path == "/auth/callback/social",
-              returned.queryItems?.contains(where: { $0.name == "error" || $0.name == "error_description" }) != true,
-              returned.queryItems?.filter({ $0.name == "social_intent" }).count == 1,
-              returned.queryItems?.first(where: { $0.name == "social_intent" })?.value == expectedIntent,
-              returned.queryItems?.filter({ $0.name == "code" }).count == 1,
-              let code = returned.queryItems?.first(where: { $0.name == "code" })?.value, !code.isEmpty else {
-            throw NativeAPIError.security("Google 로그인 반환 정보를 확인하지 못했습니다. 다시 시작해 주세요.")
+        guard let returned = URLComponents(url: result, resolvingAgainstBaseURL: false) else {
+            throw NativeAPIError.security("Google 로그인 반환 주소를 읽지 못했습니다. (CALLBACK-PARSE)")
         }
-        return code
+        let items = returned.queryItems ?? []
+        let codes = items.filter { $0.name == "code" }
+        let intents = items.filter { $0.name == "social_intent" }
+        let checks: [(String, Bool)] = [
+            ("ORIGIN", returned.scheme == "https" && returned.host == "jaegun-com.vercel.app" && returned.port == nil),
+            ("CREDENTIALS", returned.user == nil && returned.password == nil),
+            ("PATH", returned.path == "/auth/callback/social"),
+            // A trailing '#' is an empty delimiter, not an implicit token response.
+            // Never accept any non-empty fragment, including tokens or whitespace.
+            ("FRAGMENT", returned.fragment == nil || returned.fragment == ""),
+            ("PROVIDER-ERROR", !items.contains { ["error", "error_description", "error_code"].contains($0.name) }),
+            ("INTENT", !expectedIntent.isEmpty && intents.count == 1 && intents.first?.value == expectedIntent),
+            ("CODE", codes.count == 1 && !(codes.first?.value ?? "").isEmpty)
+        ]
+        let failures = checks.filter { !$0.1 }.map { $0.0 }
+        guard failures.isEmpty else {
+            let diagnostic = "CALLBACK-" + failures.joined(separator: ",")
+            NativeOAuthDiagnostics.write(diagnostic)
+            throw NativeAPIError.security("Google 로그인 반환 정보를 확인하지 못했습니다. 다시 시작해 주세요. (\(diagnostic))")
+        }
+        NativeOAuthDiagnostics.write("callbackValidated=true")
+        return codes[0].value!
     }
 }
 

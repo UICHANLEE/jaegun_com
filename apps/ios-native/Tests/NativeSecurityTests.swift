@@ -59,5 +59,26 @@ final class NativeSecurityTests: XCTestCase {
     func testOAuthErrorFails() { rejectCallback("https://jaegun-com.vercel.app/auth/callback/social?code=a&social_intent=known&error=denied") }
     func testOAuthCredentialsFails() { rejectCallback("https://user@jaegun-com.vercel.app/auth/callback/social?code=a&social_intent=known") }
     func testOAuthEmptyCodeFails() { rejectCallback("https://jaegun-com.vercel.app/auth/callback/social?code=&social_intent=known") }
+    func testOAuthEmptyFragmentPasses() throws {
+        let callback = URL(string: "https://jaegun-com.vercel.app/auth/callback/social?code=one-use-code&social_intent=known#")!
+        XCTAssertEqual(try NativeOAuthCallback.authorizationCode(callback, expectedIntent: "known"), "one-use-code")
+    }
+    func testOAuthNonEmptyFragmentFailsWithSafeDiagnostic() {
+        for fragment in ["access_token=secret-token", "error=denied", "%20", "code=secret-code"] {
+            let callback = URL(string: "https://jaegun-com.vercel.app/auth/callback/social?code=secret-code&social_intent=known#\(fragment)")!
+            XCTAssertThrowsError(try NativeOAuthCallback.authorizationCode(callback, expectedIntent: "known")) { error in
+                XCTAssertTrue(error.localizedDescription.contains("CALLBACK-FRAGMENT"))
+                XCTAssertFalse(error.localizedDescription.contains("secret-code"))
+                XCTAssertFalse(error.localizedDescription.contains("secret-token"))
+                XCTAssertFalse(error.localizedDescription.contains("https://"))
+            }
+        }
+    }
+    func testOAuthEmptyFragmentDoesNotBypassIntentOrCode() {
+        rejectCallback("https://jaegun-com.vercel.app/auth/callback/social?code=a&social_intent=other#")
+        rejectCallback("https://jaegun-com.vercel.app/auth/callback/social?code=a&code=b&social_intent=known#")
+        rejectCallback("https://attacker.invalid/auth/callback/social?code=a&social_intent=known#")
+    }
+    func testOAuthProviderErrorCodeFails() { rejectCallback("https://jaegun-com.vercel.app/auth/callback/social?code=a&social_intent=known&error_code=denied") }
     private func rejectCallback(_ value: String) { XCTAssertThrowsError(try NativeOAuthCallback.authorizationCode(URL(string: value)!, expectedIntent: "known")) }
 }
