@@ -16,6 +16,20 @@ struct NativeEventOperationsView: View {
 
     var body: some View {
         List {
+            Section {
+                Button {
+                    if let first = writableScopes.first { draft = NativeEventDraft(scopeId: first.id) }
+                } label: {
+                    Label("일정·모임 추가", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(NativePrimaryButtonStyle())
+                    .disabled(busy || writableScopes.isEmpty)
+                if busy { Text("등록 가능한 범위를 확인하고 있습니다.").font(.caption).foregroundStyle(NativePalette.muted) }
+                else if writableScopes.isEmpty {
+                    Text(error == nil ? "해당 범위의 회장·목사 또는 일정 관리 위임을 받은 계정에서 등록할 수 있습니다." : "등록 권한을 확인하지 못했습니다. 아래에서 다시 불러와 주세요.")
+                        .font(.caption).foregroundStyle(NativePalette.muted)
+                }
+            }
             if let error {
                 Section {
                     Text(error).foregroundStyle(.red)
@@ -74,13 +88,6 @@ struct NativeEventOperationsView: View {
         }
         .navigationTitle("일정·모임").nativePageStyle().tint(NativePalette.forest)
         .disabled(busy || session.loading)
-        .toolbar {
-            if !writableScopes.isEmpty {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { if let first = writableScopes.first { draft = NativeEventDraft(scopeId: first.id) } } label: { Label("일정 추가", systemImage: "plus") }
-                }
-            }
-        }
         .refreshable { await load() }.task { await load() }
         .onChange(of: actorID) { _, _ in clearPrivateState() }
         .onChange(of: session.consentRequired) { _, required in if required { clearPrivateState() } }
@@ -112,11 +119,14 @@ struct NativeEventOperationsView: View {
     @MainActor private func load() async {
         guard !busy, session.signedIn, !session.consentRequired, !actorID.isEmpty else { return }
         let actor = actorID
-        busy = true; error = nil
+        busy = true; error = nil; scopes = []
         defer { busy = false }
         do {
             guard let rows = try await session.api.rpc("get_my_event_scopes") as? [[String: Any]] else { throw NativeAPIError.invalidData }
             let freshScopes = try rows.map(NativeEventScope.init)
+            guard session.signedIn, !session.consentRequired, actor == actorID else { clearPrivateState(); return }
+            // Calendar reads must not hide independently verified creation capabilities.
+            scopes = freshScopes
             // Server time avoids a wrong device clock hiding valid forthcoming events.
             let status = try await session.api.rpc("get_sensitive_action_auth_status") as? [String: Any]
             guard let nowText = status?["server_now"] as? String, let now = NativeEventDraft.parseDate(nowText) else { throw NativeAPIError.invalidData }
@@ -125,7 +135,10 @@ struct NativeEventOperationsView: View {
             ]) as? [[String: Any]] else { throw NativeAPIError.invalidData }
             guard session.signedIn, !session.consentRequired, actor == actorID else { clearPrivateState(); return }
             scopes = freshScopes; occurrences = events
-        } catch { scopes = []; occurrences = []; self.error = error.localizedDescription }
+        } catch {
+            guard session.signedIn, !session.consentRequired, actor == actorID else { clearPrivateState(); return }
+            occurrences = []; self.error = error.localizedDescription
+        }
     }
 
     @MainActor private func edit(_ occurrence: [String: Any]) async {

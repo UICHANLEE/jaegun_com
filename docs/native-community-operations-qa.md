@@ -9,6 +9,7 @@
 - Google reauthentication checks the same Auth-owned identity on a separate candidate session. Sensitive operations require current server proof and a separate explicit confirmation; OAuth return never automatically commits a mutation.
 - Mutations are not silently replayed after HTTP 401. Uncertain approval results require reconciliation. Signup drafts freeze while checking results; new-event retries retain the original UUID and exact payload.
 - Checked event saves row-lock expected revisions. Exact create retry acknowledges success without rewriting later edits. Receipt contents have no client grants; the internal 90-day janitor remains dormant.
+- After the device reported a missing event button, creation moved from the shared navigation toolbar into an explicit first-section button. Authorized scopes are retained independently when calendar reads fail; unauthorized users see a disabled action with a reason. No account roles or database permission rules were changed to fix visibility.
 
 ## Verified
 
