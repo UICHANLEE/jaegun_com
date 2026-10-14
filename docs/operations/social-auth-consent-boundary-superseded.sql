@@ -1,4 +1,4 @@
--- Historical draft only. Superseded by 20261014052233_google_auth_consent_rollout.sql.
+-- Historical draft only. Superseded by 20261014053015_google_auth_consent_rollout.sql.
 -- Do not apply this draft to any database.
 -- Social authentication never supplies legal acceptance or organization authority.
 -- This transaction retires, publishes and activates the five documents together;

@@ -120,8 +120,8 @@ describe("event route integration", () => {
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 });
 
-describe("event editor authentication boundary", () => {
-  it("never forces new authenticator enrollment for management routes", () => {
+describe("event editor MFA boundary", () => {
+  it("does not force new authenticator enrollment for management", () => {
     expect(requiresManagementMfaEnrollment({
       mode: "supabase",
       pathname: "/manage/events/new",

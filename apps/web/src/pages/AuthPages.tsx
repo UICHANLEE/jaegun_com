@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import "./social-auth.css";
 import {
   ArrowRight,
   Buildings,

@@ -19,6 +19,7 @@ export function emailAuthError(reason: unknown) {
   if (/invalid email|email address is invalid/.test(message)) return "올바른 이메일 주소를 입력해 주세요.";
   if (/expired|invalid.*otp|token.*invalid/.test(message)) return "인증번호가 만료되었거나 올바르지 않습니다. 새 메일을 요청해 주세요.";
   if (/network|fetch/.test(message)) return "서버에 연결하지 못했습니다. 연결 상태를 확인해 주세요.";
+  if (message.includes("실서비스 로그인이 아직 연결되지")) return "로그인하지 못했습니다. 서비스 연결을 확인한 뒤 다시 시도해 주세요.";
   if (reason instanceof Error && /[가-힣]/.test(reason.message)) return reason.message;
   return "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }
@@ -49,7 +50,8 @@ export function EmailAccountForm({ acceptedConsents, ageConfirmed, onWorkingChan
         if (password !== confirmation) throw new Error("비밀번호가 서로 일치하지 않습니다.");
         const invalidPassword = validateNewPassword(password);
         if (invalidPassword) throw new Error(invalidPassword);
-        assertAcceptedConsentVersions(requiredConsentDocuments, acceptedConsents);
+        try { assertAcceptedConsentVersions(requiredConsentDocuments, acceptedConsents); }
+        catch { throw new Error("현재 필수 동의 문서를 각각 확인하고 동의해 주세요."); }
         if (!ageConfirmed) throw new Error("아래에서 필수 동의와 만 14세 이상임을 확인해 주세요.");
         await signUp({ email: email.trim(), password, displayName: name.trim(), organizationId: churchId, acceptedConsents });
         setPassword(""); setConfirmation("");

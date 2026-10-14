@@ -132,6 +132,7 @@ type DemoPersona = "owner" | "member" | "new" | "minister" | "executive";
 interface LoginInput { email: string; password: string }
 
 export interface AppDataContextValue extends AppDataState {
+  updateOwnDisplayName: (displayName: string) => Promise<void>;
   passwordRecoveryReady: boolean;
   signIn: (input: LoginInput) => Promise<void>;
   signUp: (input: SignUpInput) => Promise<void>;
@@ -149,7 +150,6 @@ export interface AppDataContextValue extends AppDataState {
   signInWithSocial: (provider: SocialAuthProvider, acceptedConsents: AcceptedConsentVersions) => Promise<void>;
   linkSocialIdentity: (provider: SocialAuthProvider) => Promise<void>;
   reauthenticateWithSocial: (provider: SocialAuthProvider, returnTo?: string) => Promise<void>;
-  updateOwnDisplayName: (displayName: string) => Promise<void>;
   signOut: () => Promise<void>;
   requestMembership: (input: MembershipRequestInput) => Promise<void>;
   createPost: (draft: PostDraft, onProgress?: (progress: number) => void) => Promise<Post>;

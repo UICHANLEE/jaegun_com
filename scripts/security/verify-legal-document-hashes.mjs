@@ -29,7 +29,7 @@ const migrationFiles = readdirSync(migrationDirectory, { withFileTypes: true })
 const canonicalRows = [
   ...CURRENT_LEGAL_DOCUMENTS.map((document) => ({
     document,
-    migration: "20261014000200_social_auth_consent_boundary.sql",
+    migration: "20261014053015_google_auth_consent_rollout.sql",
     databaseTitle: document.title,
     localeColumnPresent: true,
     documentUrl: `/legal/${document.key === "privacy_policy" ? "privacy" : document.key === "sensitive_information" ? "sensitive" : document.key === "overseas_transfer" ? "overseas" : document.key === "terms_of_service" ? "terms" : "community"}/${document.version}`,

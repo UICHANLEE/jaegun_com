@@ -2,7 +2,7 @@
 .auth-email-entry summary { cursor: pointer; min-height: 44px; padding: .75rem 0; font-weight: 700; color: var(--ink); }
 .auth-email-entry .auth-tabs { display: flex; gap: .5rem; margin-block: .5rem 1rem; }
 .auth-email-entry .auth-tabs button { flex: 1; min-height: 44px; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: .5rem; }
-.auth-email-entry .auth-tabs button[aria-selected=true] { border-color: var(--community-solid-green); color: var(--community-solid-green); font-weight: 700; }
+.auth-email-entry .auth-tabs button[aria-selected=true] { border-color: var(--forest-700); color: var(--forest-700); font-weight: 700; }
 .auth-email-entry .field > input, .auth-email-entry .field > select, .auth-page--email-recovery .field > input { width: 100%; min-height: 48px; padding: .75rem; background: var(--paper); color: var(--ink); border: 1px solid var(--line-strong); border-radius: .5rem; font-size: 16px; }
-.auth-email-entry input:focus-visible, .auth-email-entry select:focus-visible, .auth-page--email-recovery input:focus-visible { outline: 2px solid var(--community-focus); outline-offset: 2px; }
+.auth-email-entry input:focus-visible, .auth-email-entry select:focus-visible, .auth-page--email-recovery input:focus-visible { outline: 2px solid var(--forest-700); outline-offset: 2px; }
 .auth-page--email-recovery .auth-panel__inner { display: grid; gap: 1rem; }

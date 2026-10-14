@@ -1,0 +1,2 @@
+# Store Windows Gradle wrapper text canonically; restore CRLF on checkout.
+*.bat text eol=crlf

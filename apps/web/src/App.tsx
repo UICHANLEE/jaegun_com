@@ -154,6 +154,7 @@ function SignedOutRoutes() {
       <Route index element={<Navigate to="/auth" replace />} />
       <Route path="/auth" element={<LoginPage />} />
       <Route path="/auth/callback/social" element={<LoginPage />} />
+      <Route path="/auth/callback/signup" element={<LoginPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
       <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
       <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
@@ -183,6 +184,7 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route path="/onboarding" element={accountStatePage} />
       <Route path="/pending" element={accountStatePage} />
       <Route path="/auth/callback/social" element={accountStatePage} />
+      <Route path="/auth/callback/signup" element={accountStatePage} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
       <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
       <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
@@ -220,6 +222,7 @@ function ConsentRequiredRoutes() {
         <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
         <Route path="/support" element={<PublicSupportPage />} />
         <Route path="/auth/callback/social" element={<Navigate to="/app/privacy" replace />} />
+        <Route path="/auth/callback/signup" element={<Navigate to="/app/privacy" replace />} />
         <Route path="/app/privacy" element={<PrivacyConsentPage />} />
         <Route path="/app/account" element={<AccountDeletionPage />} />
         <Route path="*" element={<Navigate to="/app/privacy" replace state={{ consentRequired: true }} />} />
@@ -236,6 +239,7 @@ function AuthenticatedRoutes() {
           <Route index element={<RoleLandingRedirect />} />
           <Route path="/auth" element={<RoleLandingRedirect />} />
           <Route path="/auth/callback/social" element={<RoleLandingRedirect />} />
+          <Route path="/auth/callback/signup" element={<RoleLandingRedirect />} />
           <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
           <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
           <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
