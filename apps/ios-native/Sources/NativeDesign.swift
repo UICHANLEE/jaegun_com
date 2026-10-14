@@ -54,6 +54,19 @@ struct NativePrimaryButtonStyle: ButtonStyle {
     }
 }
 
+private struct NativeAuthFieldStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content.textFieldStyle(.plain).padding(14).frame(minHeight: 52)
+            .foregroundStyle(NativePalette.ink)
+            .background(NativePalette.canvas, in: RoundedRectangle(cornerRadius: 9))
+            .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(NativePalette.line) }
+    }
+}
+
+extension View {
+    func nativeAuthFieldStyle() -> some View { modifier(NativeAuthFieldStyle()) }
+}
+
 struct NativeConsentRow: View {
     let document: NativeLegalDocument
     let hasRead: Bool

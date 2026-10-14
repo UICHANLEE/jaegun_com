@@ -23,7 +23,6 @@ import { ApplicationStatusBadge, ErrorBanner, ROLE_LABELS } from "../components/
 import { useAppData } from "../data/AppDataProvider";
 import type { SocialAuthProvider } from "../data/socialAuth";
 import {
-  assertAcceptedConsentVersions,
   consentSetFingerprint,
   type AcceptedConsentVersions,
 } from "../data/legalConsentContract";
@@ -119,7 +118,7 @@ function ExecutiveOfficeToggles({
   );
 }
 
-export function LoginPage() {
+export function LoginPage({ signup = false }: { signup?: boolean }) {
   const { signInWithSocial, socialProviders, socialAuthWorking, enterDemo, error, refresh, mode, requiredConsentDocuments } = useAppData();
   const navigate = useNavigate();
   const [acceptedConsents, setAcceptedConsents] = useState<AcceptedConsentVersions>({});
@@ -147,21 +146,10 @@ export function LoginPage() {
       setLocalError("이 로그인 수단은 아직 준비 중입니다. 연결 설정이 완료된 후 이용할 수 있어요.");
       return;
     }
-    try {
-      if (!consentDocumentsReady) throw new Error("consent documents unavailable");
-      assertAcceptedConsentVersions(requiredConsentDocuments, acceptedConsents);
-    } catch {
-      setLocalError("현재 필수 동의 문서 다섯 가지를 각각 확인하고 동의해 주세요.");
-      return;
-    }
-    if (!ageConfirmed) {
-      setLocalError("만 14세 이상임을 확인해 주세요. 만 14세 미만은 가입할 수 없습니다.");
-      return;
-    }
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await signInWithSocial(provider, acceptedConsents);
+      await signInWithSocial(provider);
     } catch (reason) {
       setLocalError(socialLoginError(reason));
     } finally {
@@ -195,8 +183,8 @@ export function LoginPage() {
       <section className="auth-panel" aria-labelledby="auth-title">
         <div className="auth-panel__mobile-brand"><Brand /></div>
         <div className="auth-panel__inner">
-          <h1 id="auth-title">공동체와 함께 시작해요</h1>
-          <p className="auth-panel__lead">Google 계정으로 가입·로그인하거나 기존 이메일 계정을 이용하세요.</p>
+          <h1 id="auth-title">{signup ? "회원가입" : "로그인"}</h1>
+          <p className="auth-panel__lead">{signup ? "이메일로 가입하거나 Google 계정으로 시작하세요." : "Google 계정 또는 이메일로 로그인하세요."}</p>
           {error ? (
             <div className="provider-error-state">
               <ErrorBanner message={providerLoadError(error)} />
@@ -206,11 +194,17 @@ export function LoginPage() {
             </div>
           ) : null}
           {localError ? <ErrorBanner message={localError} /> : null}
-
-          <EmailAccountForm acceptedConsents={acceptedConsents} ageConfirmed={ageConfirmed} onWorkingChange={setEmailWorking} />
           <div className="auth-form" aria-busy={working}>
-            <fieldset className="auth-consent" disabled={working} aria-describedby="auth-consent-help">
-              <legend>처음 이용하기 전 필수 확인</legend>
+            {!socialProviders.google ? <p className="auth-setup-notice" role="status">Google 로그인 연결 설정이 아직 완료되지 않았습니다. 설정이 완료된 후 이용할 수 있어요.</p> : null}
+            <div className="social-auth-buttons" aria-label="소셜 로그인">
+              <button className="social-auth-button social-auth-button--google" type="button" disabled={working || !socialProviders.google} onClick={() => void startSocialLogin("google")}><span aria-hidden="true" className="social-auth-button__mark">G</span> Google로 계속하기</button>
+            </div>
+            <p className="auth-provider-help">Google 계정 인증 후 가입에 필요한 동의가 있을 때만 별도 화면으로 안내합니다.</p>
+          </div>
+          <EmailAccountForm key={signup ? "signup" : "login"} mode={signup ? "signup" : "login"} acceptedConsents={acceptedConsents} ageConfirmed={ageConfirmed} onWorkingChange={setEmailWorking} />
+          <div className="auth-form" aria-busy={working}>
+            {signup ? <fieldset className="auth-consent" disabled={working} aria-describedby="auth-consent-help">
+              <legend>이메일 회원가입 필수 확인</legend>
               {requiredConsentDocuments.map((document) => {
                 const copy = CONSENT_COPY[document.key];
                 return (
@@ -239,16 +233,13 @@ export function LoginPage() {
                   <span><strong>[필수] 만 14세 이상입니다</strong><small>만 14세 미만은 현재 가입할 수 없습니다.</small></span>
                 </label>
               </div>
-              <p id="auth-consent-help">동의한 문서의 버전을 로그인 완료 후 안전하게 기록합니다. 소속 교회와 역할은 로그인과 동의 확인 후 직접 선택하며, 별도 승인 전에는 권한이 부여되지 않습니다.</p>
-            </fieldset>
-            {!consentDocumentsReady ? <p className="auth-setup-notice" role="status">필수 동의 문서를 확인하지 못해 로그인을 시작할 수 없습니다. 데이터를 다시 불러오거나 고객지원에 문의해 주세요.</p> : null}
-            {!socialProviders.google ? <p className="auth-setup-notice" role="status">Google 로그인 연결 설정이 아직 완료되지 않았습니다. 설정이 완료된 후 이용할 수 있어요.</p> : null}
-            <div className="social-auth-buttons" aria-label="소셜 로그인">
-              <button className="social-auth-button social-auth-button--google" type="button" disabled={working || !socialProviders.google || !consentDocumentsReady} onClick={() => void startSocialLogin("google")}><span aria-hidden="true" className="social-auth-button__mark">G</span> Google로 계속하기</button>
-            </div>
+              <p id="auth-consent-help">이메일 가입 시 동의한 문서의 버전을 기록합니다. Google 가입은 계정 인증 후 필요한 동의를 별도 화면에서 확인합니다. 소속·역할 신청은 별도 승인 전까지 권한을 부여하지 않습니다.</p>
+            </fieldset> : null}
+            {signup && !consentDocumentsReady ? <p className="auth-setup-notice" role="status">필수 동의 문서를 확인하지 못했습니다. 이메일 가입 전 데이터를 다시 불러오거나 고객지원에 문의해 주세요.</p> : null}
             {working ? <p className="auth-setup-notice" role="status"><CircleNotch className="spin" /> 로그인 제공자의 확인을 기다리고 있어요.</p> : null}
             <p className="auth-provider-help">Google 계정의 비밀번호는 Google에서 복구하세요. 이메일 계정은 이메일 로그인 메뉴에서 비밀번호를 재설정할 수 있습니다.</p>
             <Link className="auth-support-link" to="/support">로그인에 도움이 필요하신가요?</Link>
+            {working ? null : <Link className="button button--secondary button--full" to={signup ? "/auth" : "/signup"}>{signup ? "이미 계정이 있나요? 로그인" : "계정이 없나요? 회원가입"}</Link>}
           </div>
 
           {import.meta.env.DEV && mode === "demo" ? <div className="demo-access">
@@ -276,6 +267,8 @@ export function LoginPage() {
     </main>
   );
 }
+
+export function SignupPage() { return <LoginPage signup />; }
 
 
 const ROLE_OPTIONS: Array<{

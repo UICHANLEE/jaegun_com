@@ -188,7 +188,7 @@ private enum NativeKeychain {
             let failure = error as NSError
             if failure.domain == ASWebAuthenticationSessionErrorDomain {
                 self.error = failure.code == 1
-                    ? "iOS에서 Google 인증 세션이 종료되었습니다. 직접 취소하지 않았다면 아래 진단 코드를 알려주세요. 선택한 동의는 유지됩니다. (AUTH-CANCEL-\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms)"
+                    ? "Google 로그인이 취소되었습니다. 가입 동의나 관리 작업은 실행되지 않았습니다. 직접 취소하지 않았다면 아래 진단 코드를 알려주세요. (AUTH-CANCEL-\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms)"
                     : "iOS에서 Google 인증 창을 열지 못했습니다. (AUTH-\(failure.code))"
             } else { self.error = error.localizedDescription }
             return false
@@ -209,8 +209,12 @@ private enum NativeKeychain {
     }
 
     /// Called only after the native UI explicitly confirms all five documents and 14+ attestation.
-    func acceptConsents() async {
+    func acceptConsents(acceptedDocumentIDs: Set<String>, ageConfirmed: Bool) async {
         guard signedIn, !loading else { return }
+        guard NativeConsentContract.confirmationMatches(documents: requiredDocuments, acceptedIDs: acceptedDocumentIDs, ageConfirmed: ageConfirmed) else {
+            error = "현재 필수 문서 다섯 가지와 만 14세 이상 여부를 직접 확인해 주세요."
+            return
+        }
         loading = true; error = nil
         defer { loading = false }
         do {
@@ -311,6 +315,12 @@ private enum NativeOAuthDiagnostics {
 }
 
 enum NativeConsentContract {
+    static func confirmationMatches(documents: [[String: Any]], acceptedIDs: Set<String>, ageConfirmed: Bool) -> Bool {
+        let parsed = documents.compactMap(NativeLegalDocument.init)
+        let expected: Set<String> = ["privacy_policy", "sensitive_information", "overseas_transfer", "terms_of_service", "community_guidelines"]
+        return ageConfirmed && parsed.count == 5 && Set(parsed.map(\.type)) == expected
+            && Set(parsed.map(\.id)).count == 5 && acceptedIDs == Set(parsed.map(\.id))
+    }
     static func validate(remote: [[String: Any]], bundled local: [[String: Any]], now: Date = Date()) throws -> [[String: Any]] {
         guard local.count == 5, remote.count == 5 else { throw NativeAPIError.security("필수 동의 문서 구성을 확인하지 못했습니다.") }
         let expectedKeys: Set<String> = ["privacy_policy", "sensitive_information", "overseas_transfer", "terms_of_service", "community_guidelines"]

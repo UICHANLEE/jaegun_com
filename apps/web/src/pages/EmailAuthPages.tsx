@@ -24,9 +24,9 @@ export function emailAuthError(reason: unknown) {
   return "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }
 
-export function EmailAccountForm({ acceptedConsents, ageConfirmed, onWorkingChange }: { acceptedConsents: AcceptedConsentVersions; ageConfirmed: boolean; onWorkingChange?: (working: boolean) => void }) {
+export function EmailAccountForm({ acceptedConsents, ageConfirmed, mode = "login", onWorkingChange }: { acceptedConsents: AcceptedConsentVersions; ageConfirmed: boolean; mode?: "login" | "signup"; onWorkingChange?: (working: boolean) => void }) {
   const { signIn, signUp, organizations, requiredConsentDocuments, socialAuthWorking } = useAppData();
-  const [view, setView] = useState<"login" | "signup">("login");
+  const view = mode;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -60,11 +60,7 @@ export function EmailAccountForm({ acceptedConsents, ageConfirmed, onWorkingChan
     } catch (reason) { setError(emailAuthError(reason)); }
     finally { busy.current = false; setWorking(false); onWorkingChange?.(false); }
   }
-  return <details className="auth-email-entry">
-    <summary>이메일로 로그인·회원가입</summary>
-    <div className="auth-tabs" role="tablist" aria-label="이메일 계정 메뉴">
-      {(["login", "signup"] as const).map((mode) => <button key={mode} role="tab" type="button" aria-selected={mode === view} disabled={working} onClick={() => { setView(mode); setError(null); setNotice(""); setPassword(""); setConfirmation(""); }}>{mode === "login" ? "로그인" : "회원가입"}</button>)}
-    </div>
+  return <section className="auth-email-entry" aria-label={view === "login" ? "이메일 로그인" : "이메일 회원가입"}>
     {error ? <ErrorBanner message={error} /> : null}
     {notice ? <p role="status">{notice}</p> : null}
     <form className="auth-form" aria-label={view === "login" ? "이메일 로그인" : "이메일 회원가입"} aria-busy={working} onSubmit={(event) => void submit(event)}>
@@ -80,7 +76,7 @@ export function EmailAccountForm({ acceptedConsents, ageConfirmed, onWorkingChan
         <button className="button button--primary button--full" type="submit">{working ? "처리 중…" : view === "signup" ? "이메일로 계정 만들기" : "이메일로 로그인"}</button>
       </fieldset>
     </form>
-  </details>;
+  </section>;
 }
 
 function RecoveryLayout({ children }: { children: React.ReactNode }) {

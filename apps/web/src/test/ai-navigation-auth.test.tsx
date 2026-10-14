@@ -63,7 +63,7 @@ describe("AI route authentication and shared navigation", () => {
   it("redirects a signed-out visitor from /app/ai to login", async () => {
     renderApp("/app/ai");
 
-    expect(await screen.findByRole("tab", { name: "로그인" }, { timeout: LAZY_ROUTE_TIMEOUT_MS })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "로그인" }, { timeout: LAZY_ROUTE_TIMEOUT_MS })).toBeInTheDocument();
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("shows the AI page and all six shared tabs to a consent-current member", async () => {

@@ -147,7 +147,7 @@ export interface AppDataContextValue extends AppDataState {
   socialAuthWorking: boolean;
   linkedSocialProviders: SocialAuthProvider[];
   enterDemo: (persona?: DemoPersona, executiveOfficeCodes?: ExecutiveOfficeCode[]) => void;
-  signInWithSocial: (provider: SocialAuthProvider, acceptedConsents: AcceptedConsentVersions) => Promise<void>;
+  signInWithSocial: (provider: SocialAuthProvider) => Promise<void>;
   linkSocialIdentity: (provider: SocialAuthProvider) => Promise<void>;
   reauthenticateWithSocial: (provider: SocialAuthProvider, returnTo?: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -2004,22 +2004,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           if (disposed || remoteSessionEpochRef.current !== callbackEpoch) {
             throw new Error("로그인 요청이 취소되었습니다.");
           }
-          if (intent.mode === "login") {
-            const documents = await fetchActiveConsentDocuments();
-            if (consentSetFingerprint(documents) !== intent.consentFingerprint) {
-              throw new Error("필수 동의 문서가 변경되었습니다. 새 내용을 확인한 뒤 다시 로그인해 주세요.");
-            }
-            assertAcceptedConsentVersions(documents, intent.acceptedConsents!);
-            const privacy = await loadSafetyPrivacyState("supabase", user.id);
-            if (disposed || remoteSessionEpochRef.current !== callbackEpoch) {
-              throw new Error("로그인 요청이 취소되었습니다.");
-            }
-            await savePrivacyAndConsents("supabase", user.id, {
-              requiredDocuments: documents,
-              acceptedConsents: intent.acceptedConsents!,
-              directoryVisibility: privacy.directoryVisibility,
-            });
-          }
+          // OAuth proves identity, never acceptance of service documents.
+          // loadRemote resolves the backend consent gate after this callback;
+          // only new or consent-outdated accounts see the separate consent page.
           if (disposed || remoteSessionEpochRef.current !== callbackEpoch) {
             throw new Error("로그인 요청이 취소되었습니다.");
           }
@@ -2551,7 +2538,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const beginSocialAuth = useCallback(async (
     provider: SocialAuthProvider,
     mode: SocialAuthMode,
-    acceptedConsents?: AcceptedConsentVersions,
     returnTo?: string,
   ) => {
     if (recoveryOperationRef.current || recoveryUserIdRef.current) {
@@ -2571,17 +2557,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       const expectedUserId = sessionData.session?.user.id;
       let intent: SocialAuthIntent;
       if (mode === "login") {
-        if (!acceptedConsents) throw new Error("필수 동의 문서를 모두 확인해 주세요.");
-        const documents = await fetchActiveConsentDocuments();
-        if (documents.length !== 5 || consentSetFingerprint(documents)
-          !== consentSetFingerprint(stateRef.current.requiredConsentDocuments)) {
-          throw new Error("필수 동의 문서가 변경되었습니다. 새 내용을 확인해 주세요.");
-        }
-        assertAcceptedConsentVersions(documents, acceptedConsents);
-        intent = createSocialAuthIntent({
-          provider, mode, acceptedConsents: { ...acceptedConsents },
-          consentFingerprint: consentSetFingerprint(documents),
-        });
+        intent = createSocialAuthIntent({ provider, mode });
         const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
         if (signOutError) throw signOutError;
         if (isNativeAppRuntime()) await clearNativePasswordRecoveryIntent();
@@ -2639,12 +2615,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     }
   }, [invalidateRemoteWork, replaceState, socialProviders.google]);
 
-  const signInWithSocial = useCallback((provider: SocialAuthProvider, acceptedConsents: AcceptedConsentVersions) =>
-    beginSocialAuth(provider, "login", acceptedConsents), [beginSocialAuth]);
+  const signInWithSocial = useCallback((provider: SocialAuthProvider) =>
+    beginSocialAuth(provider, "login"), [beginSocialAuth]);
   const linkSocialIdentity = useCallback((provider: SocialAuthProvider) =>
     beginSocialAuth(provider, "link"), [beginSocialAuth]);
   const reauthenticateWithSocial = useCallback((provider: SocialAuthProvider, returnTo?: string) =>
-    beginSocialAuth(provider, "reauthenticate", undefined, returnTo), [beginSocialAuth]);
+    beginSocialAuth(provider, "reauthenticate", returnTo), [beginSocialAuth]);
 
   const updateOwnDisplayName = useCallback(async (displayName: string) => {
     const name = displayName.trim();

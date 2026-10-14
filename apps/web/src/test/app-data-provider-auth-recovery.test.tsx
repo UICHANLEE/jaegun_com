@@ -262,7 +262,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.click(await screen.findByRole("link", { name: "계정이 없나요? 회원가입" }));
+    await screen.findByRole("heading", { name: "회원가입" });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입 상태 보존" } });
     fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
     fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
@@ -314,7 +315,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
   it("preserves signup inputs while a failed bootstrap is retried", async () => {
     remote.directoryError = new Error("directory unavailable");
     render(<MemoryRouter initialEntries={["/auth"]}><AppDataProvider><App /></AppDataProvider></MemoryRouter>);
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.click(await screen.findByRole("link", { name: "계정이 없나요? 회원가입" }));
+    await screen.findByRole("heading", { name: "회원가입" });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "재시도 사용자" } });
     fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "retry@example.com" } });
     remote.directoryError = null;
@@ -825,7 +827,6 @@ describe("AppDataProvider password recovery trust boundary", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByText("이메일로 로그인·회원가입"));
     const emailInput = await screen.findByLabelText("이메일");
     const passwordInput = screen.getByLabelText("비밀번호");
     fireEvent.change(emailInput, { target: { value: "member@example.com" } });
@@ -847,8 +848,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByText("이메일로 로그인·회원가입"));
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.click(await screen.findByRole("link", { name: "계정이 없나요? 회원가입" }));
+    await screen.findByRole("heading", { name: "회원가입" });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
     fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
     fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
@@ -896,8 +897,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByText("이메일로 로그인·회원가입"));
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.click(await screen.findByRole("link", { name: "계정이 없나요? 회원가입" }));
+    await screen.findByRole("heading", { name: "회원가입" });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
     fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
     fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });

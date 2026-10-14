@@ -11,6 +11,7 @@ import { isSupportContactConfigured } from "./data/runtimeConfig";
 import { NativeConnectivityBanner } from "./native/NativeConnectivityBanner";
 
 const LoginPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.LoginPage })));
+const SignupPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.SignupPage })));
 const ForgotPasswordPage = lazy(() => import("./pages/EmailAuthPages").then((module) => ({ default: module.ForgotPasswordPage })));
 const ResetPasswordPage = lazy(() => import("./pages/EmailAuthPages").then((module) => ({ default: module.ResetPasswordPage })));
 const OnboardingPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.OnboardingPage })));
@@ -153,6 +154,7 @@ function SignedOutRoutes() {
     <Routes>
       <Route index element={<Navigate to="/auth" replace />} />
       <Route path="/auth" element={<LoginPage />} />
+      <Route path="/signup" element={<SignupPage />} />
       <Route path="/auth/callback/social" element={<LoginPage />} />
       <Route path="/auth/callback/signup" element={<LoginPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
@@ -198,6 +200,7 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
       <Route path="/support" element={<PublicSupportPage />} />
       <Route path="/auth" element={<Navigate to="/" replace />} />
+      <Route path="/signup" element={<Navigate to="/" replace />} />
       <Route path="/app/*" element={accountStatePage} />
       <Route path="/manage/*" element={accountStatePage} />
       <Route path="*" element={<NotFoundPage homePath="/" />} />
@@ -238,6 +241,7 @@ function AuthenticatedRoutes() {
         <Routes>
           <Route index element={<RoleLandingRedirect />} />
           <Route path="/auth" element={<RoleLandingRedirect />} />
+          <Route path="/signup" element={<RoleLandingRedirect />} />
           <Route path="/auth/callback/social" element={<RoleLandingRedirect />} />
           <Route path="/auth/callback/signup" element={<RoleLandingRedirect />} />
           <Route path="/legal/privacy" element={<LegalPrivacyPage />} />

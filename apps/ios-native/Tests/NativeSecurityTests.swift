@@ -59,6 +59,26 @@ final class NativeSecurityTests: XCTestCase {
         XCTAssertEqual(NativeRootRoute.resolve(loading: false, signedIn: true, consentRequired: true, administrator: true, activeMember: false), .consent)
         XCTAssertEqual(NativeRootRoute.resolve(loading: false, signedIn: true, consentRequired: false, administrator: true, activeMember: false), .community)
     }
+    func testVerifiedExistingAccountSkipsSignupConsent() {
+        XCTAssertEqual(NativeRootRoute.resolve(loading: false, signedIn: true, consentRequired: false, administrator: false, activeMember: true), .community)
+        XCTAssertEqual(NativeRootRoute.resolve(loading: false, signedIn: true, consentRequired: true, administrator: false, activeMember: false), .consent)
+        XCTAssertEqual(NativeRootRoute.resolve(loading: false, signedIn: true, consentRequired: false, administrator: false, activeMember: false), .onboarding)
+    }
+    func testConsentConfirmationBindsExactVersionsAndAge() {
+        let ids = Set(remote.compactMap(NativeLegalDocument.init).map(\.id))
+        XCTAssertTrue(NativeConsentContract.confirmationMatches(documents: remote, acceptedIDs: ids, ageConfirmed: true))
+        XCTAssertFalse(NativeConsentContract.confirmationMatches(documents: remote, acceptedIDs: ids, ageConfirmed: false))
+        XCTAssertFalse(NativeConsentContract.confirmationMatches(documents: remote, acceptedIDs: Set(ids.dropFirst()), ageConfirmed: true))
+        let outdated = Set(ids.map { $0.replacingOccurrences(of: "2026-10-14", with: "2026-08-27") })
+        XCTAssertFalse(NativeConsentContract.confirmationMatches(documents: remote, acceptedIDs: outdated, ageConfirmed: true))
+    }
+    func testDuplicateOrUnknownConsentDoesNotBecomeSignupAcceptance() {
+        let ids = Set(remote.compactMap(NativeLegalDocument.init).map(\.id))
+        var duplicate = remote; duplicate[0] = duplicate[1]
+        XCTAssertFalse(NativeConsentContract.confirmationMatches(documents: duplicate, acceptedIDs: ids, ageConfirmed: true))
+        var unknown = remote; unknown[0]["document_key"] = "unapproved-document"
+        XCTAssertFalse(NativeConsentContract.confirmationMatches(documents: unknown, acceptedIDs: ids, ageConfirmed: true))
+    }
     private let routes = ["privacy_policy": "privacy", "sensitive_information": "sensitive", "overseas_transfer": "overseas", "terms_of_service": "terms", "community_guidelines": "community"]
     private var local: [[String: Any]] {
         routes.keys.sorted().map { ["key": $0, "version": "2026-10-14", "title": $0, "sha256": String(repeating: "a", count: 64)] }

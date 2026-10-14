@@ -43,40 +43,29 @@ describe("social login consent boundary", () => {
     return { ...view, data, signInWithSocial };
   }
 
-  it("requires five independently versioned consents and age before starting OAuth", async () => {
-    const { signInWithSocial, data } = renderLogin();
+  it("starts identity-only OAuth without pre-login service consent", async () => {
+    const { signInWithSocial } = renderLogin();
     const continueButton = screen.getByRole("button", { name: "Google로 계속하기" });
-    const checkboxes = screen.getAllByRole("checkbox");
-    expect(checkboxes).toHaveLength(6);
-    for (const checkbox of checkboxes) {
-      expect(checkbox).not.toBeChecked();
-      expect(checkbox).toBeRequired();
-    }
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     fireEvent.click(continueButton);
-    expect(signInWithSocial).not.toHaveBeenCalled();
-    for (const checkbox of checkboxes.slice(0, 5)) fireEvent.click(checkbox);
-    fireEvent.click(continueButton);
-    expect(signInWithSocial).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("checkbox", { name: /만 14세 이상입니다/ }));
-    fireEvent.click(continueButton);
-    await waitFor(() => expect(signInWithSocial).toHaveBeenCalledWith("google", Object.fromEntries(data.requiredConsentDocuments.map((document) => [document.key, document.version]))));
+    await waitFor(() => expect(signInWithSocial).toHaveBeenCalledWith("google"));
     expect(screen.queryByLabelText("소속 노회")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("이메일")).not.toBeVisible();
-    expect(screen.getByLabelText("비밀번호")).not.toBeVisible();
+    expect(screen.getByLabelText("이메일")).toBeVisible();
+    expect(screen.getByLabelText("비밀번호")).toBeVisible();
   });
 
   it("does not reuse checked consent when the document set changes", () => {
     const { data, rerender } = renderLogin();
+    rerender(<MemoryRouter><LoginPage signup /></MemoryRouter>);
     for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
     data.requiredConsentDocuments = data.requiredConsentDocuments.map((document) => ({ ...document, documentUrl: `${document.documentUrl}?revision=updated` }));
-    rerender(<MemoryRouter><LoginPage /></MemoryRouter>);
+    rerender(<MemoryRouter><LoginPage signup /></MemoryRouter>);
     for (const checkbox of screen.getAllByRole("checkbox")) expect(checkbox).not.toBeChecked();
   });
 
   it("leaves cancellation recoverable without showing a successful sign-in", async () => {
     const signInWithSocial = vi.fn().mockRejectedValueOnce(new Error("access_denied")).mockResolvedValueOnce(undefined);
     renderLogin({ signInWithSocial });
-    for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
     fireEvent.click(screen.getByRole("button", { name: "Google로 계속하기" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("로그인이 취소되었습니다");
     expect(screen.getByRole("button", { name: "Google로 계속하기" })).toBeEnabled();
@@ -88,7 +77,6 @@ describe("social login consent boundary", () => {
     const { signInWithSocial } = renderLogin({ socialProviders: { google: false } });
     const unavailable = screen.getByRole("button", { name: "Google로 계속하기" });
     expect(unavailable).toBeDisabled();
-    for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
     fireEvent.click(unavailable);
     expect(signInWithSocial).not.toHaveBeenCalled();
   });
@@ -98,7 +86,7 @@ describe("primary service journeys", () => {
   it("redirects signed-out protected routes to the explicit authentication page", async () => {
     renderApp(["/app/posts"]);
 
-    expect(await screen.findByRole("heading", { name: "공동체와 함께 시작해요" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "로그인" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "비밀번호를 잊으셨나요?" })).toHaveAttribute("href", "/forgot-password");
   });
 
@@ -114,7 +102,8 @@ describe("primary service journeys", () => {
 
   it("blocks account creation when the password confirmation does not match", async () => {
     renderApp(["/auth"]);
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.click(await screen.findByRole("link", { name: "계정이 없나요? 회원가입" }));
+    await screen.findByRole("heading", { name: "회원가입" });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
     fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
@@ -128,7 +117,8 @@ describe("primary service journeys", () => {
 
   it("requires every active independent consent before signup", async () => {
     renderApp(["/auth"]);
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.click(await screen.findByRole("link", { name: "계정이 없나요? 회원가입" }));
+    await screen.findByRole("heading", { name: "회원가입" });
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
     fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
     fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
@@ -153,7 +143,8 @@ describe("primary service journeys", () => {
 
   it("filters signup churches by presbytery and clears an invalid church selection", async () => {
     renderApp(["/auth"]);
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
+    fireEvent.click(await screen.findByRole("link", { name: "계정이 없나요? 회원가입" }));
+    await screen.findByRole("heading", { name: "회원가입" });
 
     const presbyterySelect = screen.getByLabelText("소속 노회");
     const churchSelect = screen.getByLabelText("소속 교회");

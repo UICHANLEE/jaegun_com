@@ -12,6 +12,13 @@ const acceptedConsents = {
 };
 afterEach(() => vi.unstubAllGlobals());
 describe("Google authentication intent", () => {
+  it("starts identity-only login without claiming any service consent", () => {
+    const intent = createSocialAuthIntent({ provider: "google", mode: "login" });
+    expect(parseSocialAuthIntent(JSON.stringify(intent))).toEqual(intent);
+    expect(intent.acceptedConsents).toBeUndefined();
+    expect(intent.consentFingerprint).toBeUndefined();
+    expect(parseSocialAuthIntent(JSON.stringify({ ...intent, expectedUserId: "someone" }))).toBeNull();
+  });
   it("keeps browser callbacks on the initiating local origin", () => {
     const intent = createSocialAuthIntent({ provider: "google", mode: "login", acceptedConsents, consentFingerprint: "five-documents" });
     const redirect = socialAuthRedirectUrl(intent);

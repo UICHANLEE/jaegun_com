@@ -76,68 +76,46 @@ private struct NativeMembershipStatusView: View {
     }
 }
 
-private struct NativeLoginView: View {
+struct NativeLoginView: View {
     @EnvironmentObject private var session: NativeSession
     @State private var email = ""
     @State private var password = ""
     @State private var submitting = false
-    @State private var ageConfirmed = false
-    @State private var acceptedDocuments: Set<String> = []
-    @State private var readDocuments: Set<String> = []
-    @State private var selectedDocument: NativeLegalDocument?
-    @State private var showEmail = false
-    private var documents: [NativeLegalDocument] { session.requiredDocuments.compactMap(NativeLegalDocument.init).sorted { $0.displayOrder < $1.displayOrder } }
-    private var canUseGoogle: Bool {
-        ageConfirmed && documents.count == 5 && documents.allSatisfy { acceptedDocuments.contains($0.id) }
-    }
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     NativeBrandHeader()
                     VStack(alignment: .leading, spacing: 9) {
-                        Text("공동체와 함께 시작해요").font(.largeTitle.weight(.bold)).tracking(-1)
+                        Text("로그인").font(.largeTitle.weight(.bold)).tracking(-1)
                             .foregroundStyle(NativePalette.ink)
-                        Text("Google 계정으로 가입·로그인하거나 기존 이메일 계정을 이용하세요.")
+                        Text("가입한 계정으로 공동체 소식을 확인하세요.")
                             .font(.subheadline).foregroundStyle(NativePalette.muted).lineSpacing(4)
                     }
-                    DisclosureGroup("이메일로 로그인", isExpanded: $showEmail) {
-                            VStack(alignment: .leading, spacing: 14) {
-                                Text("이메일").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                TextField("이메일 주소", text: $email).textContentType(.username).keyboardType(.emailAddress)
-                                    .textInputAutocapitalization(.never).autocorrectionDisabled().textFieldStyle(.roundedBorder).frame(minHeight: 44)
-                                Text("비밀번호").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                SecureField("비밀번호", text: $password).textContentType(.password).textFieldStyle(.roundedBorder).frame(minHeight: 44)
+                    Button { run { await session.googleSignIn() } } label: {
+                        Label("Google로 계속하기", systemImage: "person.crop.circle")
+                    }.buttonStyle(NativeGoogleButtonStyle()).disabled(submitting)
+                    Text("처음 이용하는 Google 계정은 인증 후 회원가입 동의 화면으로 이어집니다.")
+                        .font(.caption).foregroundStyle(NativePalette.muted)
+                    HStack { Rectangle().frame(height: 1); Text("또는 이메일로 로그인").font(.caption).fixedSize(); Rectangle().frame(height: 1) }
+                        .foregroundStyle(NativePalette.muted)
+                    VStack(alignment: .leading, spacing: 14) {
+                                Text("이메일").font(.caption.weight(.semibold)).foregroundStyle(NativePalette.muted)
+                                TextField("이메일 주소", text: $email, prompt: Text("이메일 주소").foregroundColor(NativePalette.muted))
+                                    .textContentType(.username).keyboardType(.emailAddress)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled().nativeAuthFieldStyle()
+                                Text("비밀번호").font(.caption.weight(.semibold)).foregroundStyle(NativePalette.muted)
+                                SecureField("비밀번호", text: $password, prompt: Text("비밀번호").foregroundColor(NativePalette.muted))
+                                    .textContentType(.password).nativeAuthFieldStyle()
                                 Button("로그인") {
                                     run { await session.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password) }
                                 }.buttonStyle(NativePrimaryButtonStyle())
                                     .disabled(submitting || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
-                            }.padding(.top, 18)
-                    }.font(.subheadline.weight(.semibold)).tint(NativePalette.ink)
-                    NativeCard {
-                        Text("처음 이용하기 전 필수 확인").font(.subheadline.weight(.bold))
-                        ForEach(documents) { document in
-                            NativeConsentRow(document: document, hasRead: readDocuments.contains(document.id), accepted: Binding(
-                                get: { acceptedDocuments.contains(document.id) },
-                                set: { if $0 { acceptedDocuments.insert(document.id) } else { acceptedDocuments.remove(document.id) } }
-                            )) { selectedDocument = document }
-                        }
-                        HStack(alignment: .top, spacing: 9) {
-                            NativeCheckbox(selected: ageConfirmed, label: "만 14세 이상입니다") { ageConfirmed.toggle() }
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("[필수] 만 14세 이상입니다").font(.subheadline.weight(.semibold))
-                                Text("만 14세 미만은 현재 가입할 수 없습니다.").font(.caption).foregroundStyle(NativePalette.muted)
-                            }.padding(.top, 9)
-                        }
-                        Text("소속 교회와 역할은 로그인과 동의 확인 후 직접 선택하며, 별도 승인 전에는 권한이 부여되지 않습니다.")
-                            .font(.caption).foregroundStyle(NativePalette.muted).lineSpacing(4)
                     }
-                    Button { run { await session.googleSignIn() } } label: {
-                        Label("Google로 계속하기", systemImage: "person.crop.circle")
-                    }.buttonStyle(NativeGoogleButtonStyle()).disabled(submitting || !canUseGoogle)
-                    if !canUseGoogle {
-                        Text("필수 문서 다섯 가지와 만 14세 이상 여부를 확인해 주세요.").font(.caption).foregroundStyle(NativePalette.muted)
-                    }
+                    NavigationLink { NativeSignupEntryView() } label: {
+                        HStack { Text("아직 계정이 없으신가요?").foregroundStyle(NativePalette.muted); Text("회원가입").fontWeight(.semibold) }
+                            .font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
+                    }.disabled(submitting)
                     if submitting { ProgressView("로그인 중") }
                     if let error = session.error, !error.isEmpty {
                         Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red)
@@ -156,14 +134,40 @@ private struct NativeLoginView: View {
                 )) {
                     Button("확인") { session.error = nil }
                 } message: { Text(session.error ?? "") }
-                .sheet(item: $selectedDocument) { document in
-                    NativeLegalView(document: document) { readDocuments.insert(document.id); selectedDocument = nil }
-                }
         }
     }
     private func run(_ operation: @escaping @MainActor () async -> Void) {
+        guard !submitting else { return }
         submitting = true
         Task { await operation(); password = ""; submitting = false }
+    }
+}
+
+/// Auth establishes identity only. The root's server consent gate owns service signup.
+private struct NativeSignupEntryView: View {
+    @EnvironmentObject private var session: NativeSession
+    @State private var submitting = false
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                NativeBrandHeader()
+                Text("회원가입").font(.largeTitle.bold()).foregroundStyle(NativePalette.ink)
+                Text("Google 계정으로 본인을 확인한 뒤 가입을 진행합니다.").font(.subheadline).foregroundStyle(NativePalette.muted)
+                Button {
+                    guard !submitting else { return }
+                    submitting = true
+                    Task { await session.googleSignIn(); submitting = false }
+                } label: { Label("Google 계정으로 가입 시작", systemImage: "person.crop.circle") }
+                    .buttonStyle(NativeGoogleButtonStyle()).disabled(submitting)
+                Text("신규 계정은 인증 후 필수 동의와 만 14세 이상 여부를 확인하고, 소속 노회·교회와 역할을 선택합니다. 승인 전에는 공동체 정보에 접근할 수 없습니다.")
+                    .font(.footnote).foregroundStyle(NativePalette.muted).lineSpacing(4)
+                Text("이미 가입한 Google 계정이면 기존 계정으로 로그인합니다.").font(.caption).foregroundStyle(NativePalette.muted)
+                if submitting { ProgressView("Google 계정을 확인하고 있습니다") }
+                if let error = session.error { Label(error, systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.red) }
+            }.frame(maxWidth: 470).padding(20).frame(maxWidth: .infinity)
+        }.navigationTitle("회원가입").navigationBarTitleDisplayMode(.inline).nativePageStyle()
+            .toolbar(.visible, for: .navigationBar)
+            .interactiveDismissDisabled(submitting)
     }
 }
 
@@ -183,8 +187,8 @@ private struct NativeConsentView: View {
             Form {
                 Section {
                     NativeBrandHeader().padding(.vertical, 8)
-                    Text("처음 이용하기 전 필수 확인").font(.title2.bold())
-                    Text("각 문서를 읽은 뒤 본인이 동의 여부를 선택해 주세요. 동의 전에는 공동체 정보에 접근하지 않습니다.")
+                    Text("가입·이용을 위한 필수 동의").font(.title2.bold())
+                    Text("새로 이용하는 계정은 가입 동의가 필요합니다. 기존 회원은 필수 문서가 갱신된 경우에만 다시 확인합니다. 동의 전에는 공동체 정보에 접근하지 않습니다.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(documents) { document in
@@ -201,9 +205,9 @@ private struct NativeConsentView: View {
                     Toggle("만 14세 이상입니다", isOn: $ageConfirmed).disabled(submitting)
                     Button("동의 저장하고 계속하기") {
                         submitting = true
-                        Task { await session.acceptConsents(); submitting = false }
+                        Task { await session.acceptConsents(acceptedDocumentIDs: accepted, ageConfirmed: ageConfirmed); submitting = false }
                     }.buttonStyle(NativePrimaryButtonStyle())
-                        .disabled(!validContract || accepted.count != documents.count || !ageConfirmed || submitting)
+                        .disabled(!validContract || accepted != Set(documents.map(\.id)) || !ageConfirmed || submitting)
                     if submitting { ProgressView("동의를 저장하고 있습니다") }
                     if let error = session.error { Text(error).foregroundStyle(.red) }
                     if !validContract { Text("필수 문서 구성이 올바르지 않습니다. 다시 불러와 주세요.").foregroundStyle(.red) }
@@ -211,6 +215,9 @@ private struct NativeConsentView: View {
                     Button("로그아웃", role: .destructive) { Task { await session.signOut() } }.disabled(submitting)
                 }
             }.navigationTitle("필수 동의").nativePageStyle()
+                .onChange(of: documents.map(\.id).sorted()) { _, _ in
+                    accepted = []; read = []; ageConfirmed = false; selected = nil
+                }
                 .sheet(item: $selected) { document in
                     NativeLegalView(document: document) { read.insert(document.id); selected = nil }
                 }

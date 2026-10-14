@@ -48,12 +48,16 @@ export function parseSocialAuthIntent(raw: string | null, now = Date.now()): Soc
       || typeof value.expiresAt !== "number" || !Number.isFinite(value.expiresAt)
       || value.expiresAt <= now || value.expiresAt > now + INTENT_TTL_MS) return null;
     if (value.mode === "login") {
-      if (value.expectedUserId !== undefined || typeof value.consentFingerprint !== "string"
+      if (value.expectedUserId !== undefined) return null;
+      // Older in-flight requests may carry a complete consent snapshot. It is
+      // never treated as acceptance after OAuth; the current server gate owns it.
+      if ((value.consentFingerprint !== undefined || value.acceptedConsents !== undefined)
+        && (typeof value.consentFingerprint !== "string"
         || value.consentFingerprint.length > 8_192 || !value.acceptedConsents
         || typeof value.acceptedConsents !== "object" || Array.isArray(value.acceptedConsents)
         || Object.keys(value.acceptedConsents).length !== CONSENT_KEYS.length
         || !CONSENT_KEYS.every((key) => typeof value.acceptedConsents?.[key] === "string"
-          && /^\d{4}-\d{2}-\d{2}$/.test(value.acceptedConsents[key]!))) return null;
+          && /^\d{4}-\d{2}-\d{2}$/.test(value.acceptedConsents[key]!)))) return null;
     } else if (typeof value.expectedUserId !== "string" || !value.expectedUserId
       || value.expectedUserId.length > 128 || value.acceptedConsents !== undefined
       || value.consentFingerprint !== undefined) return null;

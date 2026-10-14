@@ -198,7 +198,7 @@ describe("signed-in required-consent gate", () => {
     expect(remote.channelNames).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "로그아웃" }));
-    expect(await screen.findByRole("heading", { name: "공동체와 함께 시작해요" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "로그인" })).toBeInTheDocument();
     await waitFor(() => expect(remote.signOut).toHaveBeenCalledTimes(1));
   });
 });
