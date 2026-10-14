@@ -1,0 +1,61 @@
+name: JaegunNative
+options:
+  bundleIdPrefix: com.uichanlee
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: B9KPYFH6QC
+    CODE_SIGN_STYLE: Automatic
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "2"
+    SUPABASE_URL: "https://opwzujhfsxqaivtbjewg.supabase.co"
+targets:
+  JaegunNative:
+    type: application
+    platform: iOS
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: 재건 공동체
+        SUPABASE_URL: "$(SUPABASE_URL)"
+        SUPABASE_PUBLIC_KEY: "$(SUPABASE_PUBLIC_KEY)"
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    sources:
+      - Sources
+      - path: Resources
+        buildPhase: resources
+    configFiles:
+      Debug: NativePublicConfig.xcconfig
+      Release: NativePublicConfig.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.uichanlee.jaegun
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_KEY_CFBundleDisplayName: 재건 공동체
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_SUPABASE_URL: "$(SUPABASE_URL)"
+        INFOPLIST_KEY_SUPABASE_PUBLIC_KEY: "$(SUPABASE_PUBLIC_KEY)"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        CODE_SIGN_ENTITLEMENTS: Native.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  JaegunNativeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: JaegunNative
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  JaegunNative:
+    build:
+      targets:
+        JaegunNative: all
+    test:
+      targets: [JaegunNativeTests]

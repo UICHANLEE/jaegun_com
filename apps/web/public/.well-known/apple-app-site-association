@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["B9KPYFH6QC.com.uichanlee.jaegun"],
+        "components": [{"/": "/auth/callback/social", "comment": "Only the PKCE social authentication callback may open the signed Jaegun app."}]
+      }
+    ]
+  }
+}

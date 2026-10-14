@@ -1,0 +1,6 @@
+NativePublicConfig.xcconfig
+.build/
+.build-simulator/
+*.xcodeproj/xcuserdata/
+*.xcarchive/
+*.ipa

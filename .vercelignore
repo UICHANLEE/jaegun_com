@@ -8,6 +8,7 @@ dist/
 **/.DS_Store
 apps/web/ios/
 apps/web/android/
+apps/ios-native/
 design/
 .git/
 .vercel/

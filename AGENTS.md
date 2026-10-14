@@ -35,6 +35,8 @@
 
 ## Production Service
 
+- On 2026-10-14 the user explicitly selected pure SwiftUI for the iPhone application. Develop it independently under `apps/ios-native/` with native views, URLSession, device-only Keychain, and system OAuth authentication. Do not present a Capacitor/WebView app or a Vercel browser page as the requested native product. Preserve the existing web service and backend authorization boundaries. Native development builds are not App Store-ready until feature parity and actual release gates are verified.
+
 - On 2026-10-14 the user rejected mandatory authenticator-app enrollment for management. Management entry and read-only pages must not force TOTP enrollment. Sensitive management screens use a server-verified Google OAuth proof valid for at most five minutes, bound to the current actor and live Auth session; token refresh and editable metadata never renew this proof. Existing enrolled MFA factors remain intact and their login challenge/recovery stays available. Role, scope, current consent, and audit boundaries are unchanged. OAuth reauthentication returns only to allowlisted internal management/security/account paths and never automatically retries a mutation.
 
 - Channels are member-created collaboration spaces, not administrator-provisioned rooms. Any active, consent-current church member may create public (within that church) or invitation-only private channels. Channel ownership/management must never grant church, executive, department, or governance authority. Preserve direct messages; introduce channels first, then threads/mentions and shared tasks/calendar in later stages. Invitations require acceptance; revocation of church membership must revoke private-channel participation permanently until explicitly invited again.
