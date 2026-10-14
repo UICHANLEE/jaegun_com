@@ -2,17 +2,27 @@ import { App, type AppPlugin, type URLOpenListenerEvent } from "@capacitor/app";
 import { Browser, type BrowserPlugin } from "@capacitor/browser";
 import { Capacitor, registerPlugin } from "@capacitor/core";
 import type { SecureAuthStorageAdapter } from "../data/supabase";
+import type { SocialAuthProvider } from "../data/socialAuth";
 
 export const PUBLIC_APP_ORIGIN = "https://jaegun-com.vercel.app";
+export const SOCIAL_AUTH_CALLBACK_URL = `${PUBLIC_APP_ORIGIN}/auth/callback/social`;
 export const SIGNUP_AUTH_CALLBACK_URL = `${PUBLIC_APP_ORIGIN}/auth/callback/signup`;
 export const RECOVERY_AUTH_CALLBACK_URL = `${PUBLIC_APP_ORIGIN}/auth/callback/recovery`;
+
+export function emailAuthRedirectUrl(kind: "signup" | "recovery", native: boolean): string {
+  return `${native ? PUBLIC_APP_ORIGIN : window.location.origin}/auth/callback/${kind}`;
+}
 
 const PUBLIC_APP_HOST = "jaegun-com.vercel.app";
 const MAX_BUFFERED_APP_URLS = 16;
 const MAX_CLAIMED_AUTH_CALLBACKS = 32;
 const MAX_APP_URL_LENGTH = 4_096;
 const MAX_STORAGE_VALUE_LENGTH = 1_048_576;
+const MAX_SOCIAL_INTENT_VALUE_BYTES = 16_384;
 const PKCE_FLOW_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+const SOCIAL_INTENT_ID_PATTERN = /^[A-Za-z0-9_-]{16,64}$/;
+export const SOCIAL_AUTH_INTENT_STORAGE_KEY = "com.uichanlee.jaegun.social-auth-intent.v1";
+const SUPABASE_AUTH_ORIGIN = "https://opwzujhfsxqaivtbjewg.supabase.co";
 const AUTH_CODE_PATTERN = /^[A-Za-z0-9_-]{8,2048}$/;
 const SUPABASE_AUTH_STORAGE_BASE_KEY = "sb-opwzujhfsxqaivtbjewg-auth-token";
 export const NATIVE_PASSWORD_RECOVERY_INTENT_KEY = "com.uichanlee.jaegun.password-recovery-intent.v1";
@@ -50,14 +60,19 @@ export interface NativePasswordRecoveryStorageDependencies {
   now: () => number;
 }
 
+export type NativeSocialAuthStorageDependencies = Pick<
+  NativePasswordRecoveryStorageDependencies, "isNativePlatform" | "secureStorage"
+>;
+
 type NativeRuntimeGlobal = typeof globalThis & {
   __JAEGUN_SECURE_AUTH_STORAGE__?: SecureAuthStorageAdapter;
 };
 
 export interface NativeAuthCallback {
-  kind: "signup" | "recovery";
+  kind: "social" | "signup" | "recovery";
   code: string;
   flowId?: string;
+  intentId?: string;
 }
 
 export type NativePasswordRecoveryIntent =
@@ -85,6 +100,7 @@ const claimedAuthCallbackOrder: string[] = [];
 let appUrlSubscriber: ((url: string) => void) | null = null;
 let nativePreparePromise: Promise<void> | null = null;
 let nativeExternalLinkGuardInstalled = false;
+let nativeSocialAuthBrowserOpen = false;
 
 export function isAllowedSecureAuthStorageKey(key: unknown): key is string {
   if (typeof key !== "string") return false;
@@ -93,6 +109,38 @@ export function isAllowedSecureAuthStorageKey(key: unknown): key is string {
   const flowSuffix = "-code-verifier";
   if (!key.startsWith(flowPrefix) || !key.endsWith(flowSuffix)) return false;
   return PKCE_FLOW_ID_PATTERN.test(key.slice(flowPrefix.length, -flowSuffix.length));
+}
+
+export async function readNativeSocialAuthIntentValue(
+  dependencies: NativeSocialAuthStorageDependencies = defaultNativePasswordRecoveryDependencies,
+): Promise<string | null> {
+  if (!dependencies.isNativePlatform()) throw new Error("네이티브 소셜 인증 저장소가 필요합니다.");
+  const result = await dependencies.secureStorage.get({ key: SOCIAL_AUTH_INTENT_STORAGE_KEY });
+  if (!result || (result.value !== null && (
+    typeof result.value !== "string"
+    || result.value.length > MAX_SOCIAL_INTENT_VALUE_BYTES
+    || new TextEncoder().encode(result.value).byteLength > MAX_SOCIAL_INTENT_VALUE_BYTES
+  ))) throw new Error("소셜 인증 저장소 응답을 확인하지 못했습니다.");
+  return result.value;
+}
+
+export async function writeNativeSocialAuthIntentValue(
+  value: string,
+  dependencies: NativeSocialAuthStorageDependencies = defaultNativePasswordRecoveryDependencies,
+): Promise<void> {
+  if (!dependencies.isNativePlatform()) throw new Error("네이티브 소셜 인증 저장소가 필요합니다.");
+  if (typeof value !== "string" || value.length > MAX_SOCIAL_INTENT_VALUE_BYTES
+    || new TextEncoder().encode(value).byteLength > MAX_SOCIAL_INTENT_VALUE_BYTES) {
+    throw new Error("소셜 인증 저장소 값을 확인하지 못했습니다.");
+  }
+  await dependencies.secureStorage.set({ key: SOCIAL_AUTH_INTENT_STORAGE_KEY, value });
+}
+
+export async function clearNativeSocialAuthIntent(
+  dependencies: NativeSocialAuthStorageDependencies = defaultNativePasswordRecoveryDependencies,
+): Promise<void> {
+  if (!dependencies.isNativePlatform()) throw new Error("네이티브 소셜 인증 저장소가 필요합니다.");
+  await dependencies.secureStorage.remove({ key: SOCIAL_AUTH_INTENT_STORAGE_KEY });
 }
 
 const defaultNativePasswordRecoveryDependencies: NativePasswordRecoveryStorageDependencies = {
@@ -196,7 +244,6 @@ export async function verifyNativePasswordRecoveryIntent(
   });
   return expiresAt;
 }
-
 export async function clearNativePasswordRecoveryIntent(
   dependencies = defaultNativePasswordRecoveryDependencies,
 ) {
@@ -238,6 +285,11 @@ function createSecureAuthStorageAdapter(
 
 function bufferNativeAppUrl(url: unknown) {
   if (typeof url !== "string" || url.length < 1 || url.length > MAX_APP_URL_LENGTH) return;
+  // Android custom tabs can report dismissal while the app is handling its
+  // return URL. A trusted return belongs to callback handling, not cancellation.
+  if (parseNativeAuthCallbackUrl(url) || parseNativeSocialAuthErrorUrl(url)) {
+    nativeSocialAuthBrowserOpen = false;
+  }
   if (appUrlSubscriber) {
     appUrlSubscriber(url);
     return;
@@ -261,7 +313,8 @@ export function subscribeToNativeAppUrls(subscriber: (url: string) => void) {
 }
 
 export function getPublicAuthCallbackPathKind(value: string): PublicAuthCallbackKind | null {
-  if (typeof value !== "string" || value.length < 1 || value.length > MAX_APP_URL_LENGTH) return null;
+  if (typeof value !== "string" || value.length < 1 || value.length > MAX_APP_URL_LENGTH
+    || /[\u0000-\u0020\u007f\\]/.test(value)) return null;
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -269,36 +322,70 @@ export function getPublicAuthCallbackPathKind(value: string): PublicAuthCallback
     return null;
   }
 
-  if (parsed.protocol !== "https:"
-    || parsed.host !== PUBLIC_APP_HOST
+  const localOrigin = !Capacitor.isNativePlatform() && typeof window !== "undefined" && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
+    && parsed.origin === window.location.origin && ["http:", "https:"].includes(parsed.protocol);
+  if ((!localOrigin && (parsed.protocol !== "https:" || parsed.host !== PUBLIC_APP_HOST))
     || parsed.username
     || parsed.password) return null;
 
-  return parsed.pathname === "/auth/callback/signup"
-    ? "signup"
-    : parsed.pathname === "/auth/callback/recovery"
-      ? "recovery"
-      : null;
+  const emailKind = parsed.pathname === "/auth/callback/recovery" ? "recovery"
+    : parsed.pathname === "/auth/callback/signup" ? "signup" : null;
+  if (emailKind && (value === `${parsed.origin}${parsed.pathname}`
+    || value.startsWith(`${parsed.origin}${parsed.pathname}?`))) return emailKind;
+  return parsed.pathname === "/auth/callback/social"
+    && (value === `${parsed.origin}/auth/callback/social`
+      || value.startsWith(`${parsed.origin}/auth/callback/social?`)
+      || value.startsWith(`${parsed.origin}/auth/callback/social#`))
+    ? "social"
+    : null;
 }
 
 export function parseNativeAuthCallbackUrl(value: string): NativeAuthCallback | null {
   const kind = getPublicAuthCallbackPathKind(value);
   if (!kind) return null;
   const parsed = new URL(value);
-  if (parsed.hash) return null;
+  if (parsed.hash || value.includes("#")) return null;
+  if (kind === "social" && !value.startsWith(`${parsed.origin}/auth/callback/social?`)) return null;
 
   const keys = Array.from(parsed.searchParams.keys());
-  if (keys.some((key) => key !== "code" && key !== "sb_flow_id")) return null;
+  if (keys.some((key) => key !== "code" && key !== "sb_flow_id" && !(kind === "social" && key === "social_intent"))) return null;
   const codes = parsed.searchParams.getAll("code");
   const flowIds = parsed.searchParams.getAll("sb_flow_id");
+  const intentIds = parsed.searchParams.getAll("social_intent");
   if (codes.length !== 1 || flowIds.length > 1 || !AUTH_CODE_PATTERN.test(codes[0])) return null;
   if (flowIds.length === 1 && !PKCE_FLOW_ID_PATTERN.test(flowIds[0])) return null;
+  if (kind === "social" && (intentIds.length !== 1 || !SOCIAL_INTENT_ID_PATTERN.test(intentIds[0]))) return null;
 
   return {
     kind,
     code: codes[0],
     ...(flowIds.length === 1 ? { flowId: flowIds[0] } : {}),
+    ...(kind === "social" ? { intentId: intentIds[0] } : {}),
   };
+}
+
+/** Provider denial is intent-bound cleanup only, never an authentication result. */
+export function parseNativeSocialAuthErrorUrl(
+  value: string,
+): { intentId: string; flowId?: string; error: string } | null {
+  if (getPublicAuthCallbackPathKind(value) !== "social" || value.includes("#")) return null;
+  const parsed = new URL(value);
+  if (!value.startsWith(`${parsed.origin}/auth/callback/social?`)) return null;
+  const allowedKeys = ["social_intent", "sb_flow_id", "error", "error_code", "error_description"];
+  for (const key of parsed.searchParams.keys()) {
+    if (!allowedKeys.includes(key) || parsed.searchParams.getAll(key).length !== 1) return null;
+  }
+  const intentId = parsed.searchParams.get("social_intent");
+  const flowId = parsed.searchParams.get("sb_flow_id");
+  const error = parsed.searchParams.get("error");
+  const errorCode = parsed.searchParams.get("error_code");
+  const description = parsed.searchParams.get("error_description");
+  if (!intentId || !SOCIAL_INTENT_ID_PATTERN.test(intentId)
+    || (flowId !== null && !PKCE_FLOW_ID_PATTERN.test(flowId))
+    || !error || !/^[A-Za-z0-9_-]{1,128}$/.test(error)
+    || (errorCode !== null && !/^[A-Za-z0-9_-]{1,128}$/.test(errorCode))
+    || (description !== null && (description.length > 1_024 || /[\u0000-\u001f\u007f]/.test(description)))) return null;
+  return { intentId, ...(flowId !== null ? { flowId } : {}), error };
 }
 
 /** Claim before exchange so repeated OS delivery or double taps use a code once. */
@@ -335,6 +422,75 @@ export function normalizeAllowedNativeLegalUrl(value: string) {
   return parsed.href;
 }
 
+/** Provider origins are accepted only for an authenticated linkIdentity response. */
+export function normalizeAllowedNativeSocialAuthUrl(
+  value: string,
+  provider?: SocialAuthProvider,
+): string | null {
+  if (typeof value !== "string" || value.length > MAX_APP_URL_LENGTH
+    || value.includes("#") || /[\s\\]/.test(value)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (parsed.username || parsed.password) return null;
+  for (const key of parsed.searchParams.keys()) {
+    if (parsed.searchParams.getAll(key).length !== 1) return null;
+    if (["access_token", "refresh_token", "provider_token", "provider_refresh_token",
+      "id_token", "token", "client_secret", "code"].includes(key)) return null;
+  }
+  if (value.startsWith(`${SUPABASE_AUTH_ORIGIN}/auth/v1/authorize?`)
+    && parsed.origin === SUPABASE_AUTH_ORIGIN && parsed.pathname === "/auth/v1/authorize") {
+    const selectedProvider = parsed.searchParams.get("provider");
+    if (selectedProvider !== "google") return null;
+    return parsed.href;
+  }
+  const endpoint = provider === "google" ? "https://accounts.google.com/o/oauth2/v2/auth" : null;
+  if (!endpoint || !value.startsWith(`${endpoint}?`)
+    || `${parsed.origin}${parsed.pathname}` !== endpoint
+    || parsed.searchParams.get("redirect_uri") !== `${SUPABASE_AUTH_ORIGIN}/auth/v1/callback`
+    || parsed.searchParams.get("response_type") !== "code") return null;
+  return parsed.href;
+}
+
+export async function openNativeSocialAuthUrl(value: string, provider?: SocialAuthProvider): Promise<void> {
+  const url = normalizeAllowedNativeSocialAuthUrl(value, provider);
+  if (!url || !Capacitor.isNativePlatform()) {
+    throw new Error("네이티브 소셜 인증 주소를 확인하지 못했습니다.");
+  }
+  nativeSocialAuthBrowserOpen = true;
+  try {
+    await Browser.open({ url, presentationStyle: "fullscreen", toolbarColor: "#1f4d3b" });
+  } catch (error) {
+    nativeSocialAuthBrowserOpen = false;
+    throw error;
+  }
+}
+
+export async function closeNativeSocialAuthBrowser(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  nativeSocialAuthBrowserOpen = false;
+  await Browser.close();
+}
+
+export async function subscribeToNativeSocialAuthCancellation(
+  handler: () => void,
+): Promise<() => void> {
+  if (!Capacitor.isNativePlatform()) throw new Error("네이티브 소셜 인증 브라우저가 필요합니다.");
+  let disposed = false;
+  const listener = await Browser.addListener("browserFinished", () => {
+    if (disposed || !nativeSocialAuthBrowserOpen) return;
+    nativeSocialAuthBrowserOpen = false;
+    handler();
+  });
+  return () => {
+    disposed = true;
+    void listener.remove().catch(() => undefined);
+  };
+}
+
 function installNativeExternalLinkGuard(
   documentObject: Document,
   browser: Pick<BrowserPlugin, "open">,
@@ -368,6 +524,7 @@ const defaultDependencies: NativeBootstrapDependencies = {
 
 async function prepareWithDependencies(dependencies: NativeBootstrapDependencies) {
   if (!dependencies.isNativePlatform()) return;
+  dependencies.document.documentElement.dataset.nativePlatform = Capacitor.getPlatform();
 
   // Register the hot-link listener first so no callback is lost while the
   // Keychain plugin verifies its native availability.

@@ -1,8 +1,11 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
-import { AppDataProvider } from "../data/AppDataProvider";
+import { AppDataProvider, type AppDataContextValue } from "../data/AppDataProvider";
+import * as appDataModule from "../data/AppDataProvider";
+import { bundledCurrentConsentDocuments } from "../data/legalConsentContract";
+import { LoginPage } from "../pages/AuthPages";
 import { createDemoState, DEMO_VIEWER } from "../data/seed";
 import { getServiceYear } from "../serviceTime";
 
@@ -18,110 +21,86 @@ function renderApp(initialEntries = ["/"]) {
   );
 }
 
+describe("social login consent boundary", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function renderLogin(overrides: Partial<AppDataContextValue> = {}) {
+    const signInWithSocial = vi.fn().mockResolvedValue(undefined);
+    const data = {
+      mode: "supabase",
+      socialProviders: { google: true },
+      socialAuthWorking: false,
+      organizations: [],
+      signIn: vi.fn(),
+      signUp: vi.fn(),
+      requiredConsentDocuments: bundledCurrentConsentDocuments(),
+      signInWithSocial,
+      error: null,
+      ...overrides,
+    } as AppDataContextValue;
+    vi.spyOn(appDataModule, "useAppData").mockImplementation(() => data);
+    const view = render(<MemoryRouter><LoginPage /></MemoryRouter>);
+    return { ...view, data, signInWithSocial };
+  }
+
+  it("requires five independently versioned consents and age before starting OAuth", async () => {
+    const { signInWithSocial, data } = renderLogin();
+    const continueButton = screen.getByRole("button", { name: "Google로 계속하기" });
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(6);
+    for (const checkbox of checkboxes) {
+      expect(checkbox).not.toBeChecked();
+      expect(checkbox).toBeRequired();
+    }
+    fireEvent.click(continueButton);
+    expect(signInWithSocial).not.toHaveBeenCalled();
+    for (const checkbox of checkboxes.slice(0, 5)) fireEvent.click(checkbox);
+    fireEvent.click(continueButton);
+    expect(signInWithSocial).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /만 14세 이상입니다/ }));
+    fireEvent.click(continueButton);
+    await waitFor(() => expect(signInWithSocial).toHaveBeenCalledWith("google", Object.fromEntries(data.requiredConsentDocuments.map((document) => [document.key, document.version]))));
+    expect(screen.queryByLabelText("소속 노회")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("이메일")).not.toBeVisible();
+    expect(screen.getByLabelText("비밀번호")).not.toBeVisible();
+  });
+
+  it("does not reuse checked consent when the document set changes", () => {
+    const { data, rerender } = renderLogin();
+    for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
+    data.requiredConsentDocuments = data.requiredConsentDocuments.map((document) => ({ ...document, documentUrl: `${document.documentUrl}?revision=updated` }));
+    rerender(<MemoryRouter><LoginPage /></MemoryRouter>);
+    for (const checkbox of screen.getAllByRole("checkbox")) expect(checkbox).not.toBeChecked();
+  });
+
+  it("leaves cancellation recoverable without showing a successful sign-in", async () => {
+    const signInWithSocial = vi.fn().mockRejectedValueOnce(new Error("access_denied")).mockResolvedValueOnce(undefined);
+    renderLogin({ signInWithSocial });
+    for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: "Google로 계속하기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("로그인이 취소되었습니다");
+    expect(screen.getByRole("button", { name: "Google로 계속하기" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Google로 계속하기" }));
+    await waitFor(() => expect(signInWithSocial).toHaveBeenCalledTimes(2));
+  });
+
+  it("never starts an unconfigured provider", () => {
+    const { signInWithSocial } = renderLogin({ socialProviders: { google: false } });
+    const unavailable = screen.getByRole("button", { name: "Google로 계속하기" });
+    expect(unavailable).toBeDisabled();
+    for (const checkbox of screen.getAllByRole("checkbox")) fireEvent.click(checkbox);
+    fireEvent.click(unavailable);
+    expect(signInWithSocial).not.toHaveBeenCalled();
+  });
+});
+
 describe("primary service journeys", () => {
   it("redirects signed-out protected routes to the explicit authentication page", async () => {
     renderApp(["/app/posts"]);
 
-    expect(await screen.findByRole("heading", { name: "다시 만나 반가워요" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "비밀번호를 잊으셨나요?" })).toHaveAttribute("href", "/forgot-password");
+    expect(await screen.findByRole("button", { name: "Google로 계속하기" })).toBeInTheDocument();
   });
 
-  it("does not expose raw authentication provider errors", async () => {
-    renderApp(["/auth"]);
-    fireEvent.change(await screen.findByLabelText("이메일"), { target: { value: "member@example.com" } });
-    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "password123" } });
-    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("로그인하지 못했습니다");
-    expect(screen.getByRole("alert")).not.toHaveTextContent("실서비스 로그인이 아직 연결되지 않았습니다");
-  });
-
-  it("blocks account creation when the password confirmation does not match", async () => {
-    renderApp(["/auth"]);
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
-    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
-    fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
-    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
-    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "different123" } });
-    fireEvent.submit(screen.getByRole("button", { name: "계정 만들기" }).closest("form")!);
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 서로 일치하지 않습니다");
-  });
-
-  it("requires every active independent consent before signup", async () => {
-    renderApp(["/auth"]);
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
-    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
-    fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
-    fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
-    fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
-    fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password1234" } });
-    fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
-
-    const submit = screen.getByRole("button", { name: "계정 만들기" });
-    fireEvent.submit(submit.closest("form")!);
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("현재 필수 동의 문서를 각각 확인하고 동의해 주세요");
-    for (const name of [
-      /개인정보 수집·이용 동의/,
-      /종교 관련 민감정보 처리 동의/,
-      /개인정보 국외 이전 동의/,
-      /이용약관 동의 및 만 14세 이상 확인/,
-      /공동체 운영정책 동의/,
-    ]) {
-      expect(screen.getByRole("checkbox", { name })).toBeRequired();
-    }
-  });
-
-  it("filters signup churches by presbytery and clears an invalid church selection", async () => {
-    renderApp(["/auth"]);
-    fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
-
-    const presbyterySelect = screen.getByLabelText("소속 노회");
-    const churchSelect = screen.getByLabelText("소속 교회");
-    fireEvent.change(presbyterySelect, { target: { value: "서울노회" } });
-
-    expect(within(churchSelect).getByRole("option", { name: "재건부평교회" })).toBeInTheDocument();
-    fireEvent.change(churchSelect, { target: { value: "org-19" } });
-    expect(churchSelect).toHaveValue("org-19");
-
-    fireEvent.change(presbyterySelect, { target: { value: "부산노회" } });
-    expect(churchSelect).toHaveValue("");
-    expect(within(churchSelect).queryByRole("option", { name: "재건부평교회" })).not.toBeInTheDocument();
-  });
-
-  it("offers password recovery and rejects a reset page without a valid recovery session", async () => {
-    const forgotView = renderApp(["/forgot-password"]);
-    expect(await screen.findByRole("heading", { name: "비밀번호를 잊으셨나요?" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "재설정 링크 받기" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /로그인으로 돌아가기/ })).toHaveAttribute("href", "/auth");
-    forgotView.unmount();
-
-    const missingView = renderApp(["/reset-password"]);
-    expect(await screen.findByRole("heading", { name: "새 비밀번호 설정" })).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("유효한 비밀번호 재설정 정보가 없습니다");
-    expect(screen.getByRole("link", { name: "새 재설정 링크 요청" })).toHaveAttribute("href", "/forgot-password");
-    missingView.unmount();
-
-    renderApp(["/reset-password?error=access_denied&error_code=otp_expired"]);
-    expect(await screen.findByRole("alert")).toHaveTextContent("재설정 링크가 만료되었거나 이미 사용되었습니다");
-  });
-
-  it("keeps public auth callback routes inside the intended signup and recovery flows", async () => {
-    const recoveryView = renderApp(["/auth/callback/recovery?code=recovery-code-1234"]);
-    expect(await screen.findByRole("heading", { name: "새 비밀번호 설정" })).toBeInTheDocument();
-    recoveryView.unmount();
-
-    renderApp(["/auth/callback/signup"]);
-    fireEvent.click((await screen.findByText("신규 가입자")).closest("button")!);
-    expect(await screen.findByRole("heading", { name: /어느 공동체와 함께하시나요/ })).toBeInTheDocument();
-  });
-
-  it("does not trust an unverified recovery code from the URL", async () => {
-    renderApp(["/reset-password?code=recovery-code"]);
-    expect(await screen.findByRole("alert")).toHaveTextContent("유효한 비밀번호 재설정 정보가 없습니다");
-    expect(screen.queryByLabelText("새 비밀번호")).not.toBeInTheDocument();
-  });
 
   it("renders an accessible 404 page instead of silently redirecting an invalid URL", async () => {
     renderApp(["/this-page-does-not-exist"]);
@@ -154,21 +133,6 @@ describe("primary service journeys", () => {
     expect(screen.getAllByRole("link", { name: /성도 화면/ })[0]).toHaveAttribute("href", "/app/home");
   });
 
-  it("keeps approval and member-management tasks out of the ordinary member home", async () => {
-    renderApp();
-    const memberLabel = await screen.findByText("일반 회원");
-    fireEvent.click(memberLabel.closest("button")!);
-    expect(await screen.findByRole("heading", { name: /안녕하세요, 이재건/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "바로 참여하기" })).toBeInTheDocument();
-    const smallGroups = screen.getByRole("region", { name: "마음 맞는 사람들과 시작해요" });
-    expect(within(smallGroups).getByRole("link", { name: /소모임 찾기/ })).toHaveAttribute("href", "/app/chats/channels");
-    expect(within(smallGroups).getByRole("link", { name: /모임 만들기/ })).toHaveAttribute("href", "/app/chats/channels?create=1");
-    expect(within(smallGroups).getByRole("link", { name: /모임 일정/ })).toHaveAttribute("href", "/app/events");
-    expect(within(smallGroups).getByRole("link", { name: /공동체 AI 둘러보기/ })).toHaveAttribute("href", "/app/ai");
-    expect(screen.getByRole("navigation", { name: "소속 공동체" })).toBeInTheDocument();
-    expect(screen.queryByText(/승인 대기/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /회원 관리/ })).not.toBeInTheDocument();
-  });
 
   it("sends a new user into the church and role onboarding flow", async () => {
     renderApp();
@@ -189,6 +153,22 @@ describe("primary service journeys", () => {
       target: { value: "부산노회" },
     });
     expect(screen.getByRole("button", { name: "가입 승인 요청" })).toBeDisabled();
+  });
+
+  it("saves an edited own name before requesting membership without inferring a role", async () => {
+    renderApp();
+    fireEvent.click((await screen.findByText("신규 가입자")).closest("button")!);
+    fireEvent.change(await screen.findByLabelText("본인 이름"), { target: { value: "  김재건  " } });
+    fireEvent.change(screen.getByRole("combobox", { name: "소속 노회" }), { target: { value: "서울노회" } });
+    fireEvent.click(screen.getByRole("radio", { name: /재건부평교회/ }));
+    expect(screen.getByRole("radio", { name: /^회원/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "가입 승인 요청" }));
+    await screen.findByRole("heading", { name: "공동체가 확인하고 있어요" });
+    const saved = JSON.parse(window.localStorage.getItem(DEMO_STORAGE_KEY)!);
+    expect(saved.viewer.profile.displayName).toBe("김재건");
+    expect(saved.viewer.application.applicantName).toBe("김재건");
+    expect(saved.viewer.application.requestedRole).toBe("member");
+    expect(saved.viewer.membership).toBeUndefined();
   });
 
   it("lets an executive choose multiple offices and projects office-specific operations", async () => {

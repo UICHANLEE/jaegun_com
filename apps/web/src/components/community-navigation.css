@@ -5,7 +5,30 @@
 .community-shortcuts a:hover, .community-shortcuts a.active, .manager-community-tools a:hover { background: var(--forest-50); }
 .community-shortcuts svg, .manager-community-tools svg { flex: 0 0 auto; width: 21px; height: 21px; }
 .manager-community-tools { display: flex; flex-wrap: wrap; gap: 6px; max-width: var(--content-max); margin: 0 auto; padding: 8px 16px 0; }
-.manager-community-tools a { background: #fff; border: 1px solid var(--line); }
-.community-skip-link { position: fixed; top: 10px; left: 12px; z-index: 1000; padding: 12px 16px; color: #fff; background: var(--forest-800); border-radius: 8px; transform: translateY(-180%); }
+.manager-community-tools a { background: var(--paper); border: 1px solid var(--line); }
+.community-skip-link { position: fixed; top: 10px; left: 12px; z-index: 1000; padding: 12px 16px; color: var(--community-on-solid); background: var(--community-solid-green); border-radius: 8px; transform: translateY(-180%); }
 .community-skip-link:focus { transform: none; }
-.community-shortcuts a:focus-visible, .manager-community-tools a:focus-visible, .community-bottom-nav a:focus-visible { outline: 3px solid #23664d; outline-offset: 2px; }
+.community-shortcuts a:focus-visible, .manager-community-tools a:focus-visible, .community-bottom-nav a:focus-visible { outline: 3px solid var(--community-focus); outline-offset: 2px; }
+
+.app-shell--community { background:var(--community-bg); color:var(--community-ink); }
+.app-shell--community .app-main { background:var(--community-surface); }
+.app-shell--community .mobile-global-header { background:var(--community-surface); border-bottom:1px solid var(--community-line); }
+.app-shell--community .mobile-global-header--simple { grid-template-columns:minmax(0,1fr) 44px; }
+.app-shell--community .notification-button { color:var(--community-ink); }
+.app-shell--community .notification-button>span { background:var(--community-orange); border-color:var(--community-surface); }
+.app-shell--community .bottom-nav { background:var(--community-surface); border-color:var(--community-line); box-shadow:none; }
+.app-shell--community .bottom-nav a { color:var(--community-muted); border-radius:7px; }
+.app-shell--community .bottom-nav a.active { color:var(--community-blue-ink); }
+.app-shell--community .desktop-sidebar { background:var(--community-surface); border-color:var(--community-line); }
+.app-shell--community .desktop-nav a { color:var(--community-muted); border-radius:8px; }
+.app-shell--community .desktop-nav a.active { color:var(--community-blue-ink); background:var(--community-blue-soft); }
+.app-shell--community .community-shortcuts { border-color:var(--community-line); }
+.app-shell--community .community-shortcuts a { color:var(--community-muted); border-radius:8px; font-weight:550; }
+.app-shell--community .community-shortcuts a:hover,.app-shell--community .community-shortcuts a.active { color:var(--community-blue-ink); background:var(--community-blue-soft); }
+.app-shell--community .desktop-sidebar__account { border-color:var(--community-line); }
+.app-shell--community .church-switcher { color:var(--community-ink); border-color:var(--community-line); background:var(--community-surface); }
+.app-shell--community .brand__name { color:var(--community-ink); }
+.app-shell--community .branch-switcher { color:var(--community-blue-ink); border-color:var(--community-line); background:var(--community-blue-soft); }
+.app-shell--community .community-skip-link { color:var(--community-on-blue); background:var(--community-blue-ink); }
+.app-shell--community a:focus-visible { outline-color:var(--community-blue); }
+.app-shell--community .demo-ribbon { color:var(--community-orange-ink); border-color:var(--community-line); background:var(--community-orange-soft); font-size:.72rem; font-weight:550; }

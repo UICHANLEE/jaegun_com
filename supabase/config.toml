@@ -21,7 +21,15 @@ additional_redirect_urls = [
   "https://jaegun-com.vercel.app/auth/callback/signup",
   "https://jaegun-com.vercel.app/auth/callback/signup?sb_flow_id=*",
   "https://jaegun-com.vercel.app/auth/callback/recovery",
-  "https://jaegun-com.vercel.app/auth/callback/recovery?sb_flow_id=*"
+  "https://jaegun-com.vercel.app/auth/callback/recovery?sb_flow_id=*",
+  "https://jaegun-com.vercel.app/auth/callback/social?social_intent=*",
+  "https://jaegun-com.vercel.app/auth/callback/social?social_intent=*&sb_flow_id=*",
+  "http://127.0.0.1:5176/auth/callback/signup",
+  "http://127.0.0.1:5176/auth/callback/signup?sb_flow_id=*",
+  "http://127.0.0.1:5176/auth/callback/recovery",
+  "http://127.0.0.1:5176/auth/callback/recovery?sb_flow_id=*",
+  "http://127.0.0.1:5176/auth/callback/social?social_intent=*",
+  "http://127.0.0.1:5176/auth/callback/social?social_intent=*&sb_flow_id=*"
 ]
 jwt_expiry = 3600
 enable_signup = true
@@ -42,6 +50,10 @@ secure_password_change = true
 max_frequency = "1m"
 otp_length = 6
 otp_expiry = 900
+
+[auth.email.template.recovery]
+subject = "재건 공동체 비밀번호 재설정"
+content_path = "./templates/recovery.html"
 
 [auth.mfa]
 max_enrolled_factors = 5

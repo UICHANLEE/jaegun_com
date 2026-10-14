@@ -1,3 +1,6 @@
+import "../styles.css";
+import "../theme.css";
+import "../components/mobile-layout.css";
 import { prepareNativeRuntime } from "./runtime";
 
 function showStartupFailure() {
@@ -21,7 +24,6 @@ async function start() {
     await prepareNativeRuntime();
     await import("../main");
   } catch {
-    await import("../styles.css");
     showStartupFailure();
   }
 }

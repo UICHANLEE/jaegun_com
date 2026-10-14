@@ -15,6 +15,8 @@ const [
   privacyManifest,
   appIconContents,
   appIcon,
+  scene,
+  secureStorage,
 ] = await Promise.all([
   readAppFile("capacitor.config.ts"),
   readAppFile("ios/App/App/capacitor.config.json"),
@@ -26,6 +28,8 @@ const [
   readAppFile("ios/App/App/PrivacyInfo.xcprivacy"),
   readAppFile("ios/App/App/Assets.xcassets/AppIcon.appiconset/Contents.json"),
   readAppBuffer("ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png"),
+  readAppFile("ios/App/App/SceneDelegate.swift"),
+  readAppFile("ios/App/App/JaegunSecureStoragePlugin.swift"),
 ]);
 
 const failures = [];
@@ -73,6 +77,14 @@ expect(
     && bundleIdentifiers.every((identifier) => identifier === generated.appId),
   "Capacitor and Xcode Debug/Release bundle identifiers must stay identical",
 );
+const developmentTeams = Array.from(
+  project.matchAll(/DEVELOPMENT_TEAM\s*=\s*([^;]+);/gu),
+  (match) => match[1].trim().replaceAll('"', ""),
+);
+expect(
+  developmentTeams.length === 2 && developmentTeams.every((team) => team === "B9KPYFH6QC"),
+  "Xcode Debug/Release must use the configured signing team so simulator Keychain access has an application identifier",
+);
 const marketingVersions = Array.from(
   project.matchAll(/MARKETING_VERSION\s*=\s*([^;]+);/gu),
   (match) => match[1].trim().replaceAll('"', ""),
@@ -119,6 +131,26 @@ expect(
   JSON.stringify(entitlementKeys) === JSON.stringify(["com.apple.developer.associated-domains"])
     && entitlements.includes("<string>applinks:jaegun-com.vercel.app</string>"),
   "iOS 1.0 entitlements must contain only the exact production associated domain",
+);
+
+expect(
+  scene.includes('components.percentEncodedPath == "/auth/callback/social"')
+    && scene.includes('components.host == "jaegun-com.vercel.app"')
+    && scene.includes("components.port == nil")
+    && scene.includes("components.fragment == nil")
+    && scene.includes("isAllowedSocialCallback(url)")
+    && scene.includes("isAllowedSocialCallback($0.url)")
+    && scene.includes("self.scene(scene, openURLContexts: connectionOptions.urlContexts)")
+    && !scene.includes("/auth/callback/signup")
+    && !scene.includes("/auth/callback/recovery"),
+  "iOS cold and hot app links must pass the exact social callback origin/path boundary",
+);
+expect(
+  secureStorage.includes('socialAuthIntentKey = "com.uichanlee.jaegun.social-auth-intent.v1"')
+    && secureStorage.includes("passwordRecoveryIntentKey,\n        socialAuthIntentKey")
+    && secureStorage.includes("kSecAttrAccessibleWhenUnlockedThisDeviceOnly")
+    && secureStorage.includes("maximumValueByteCount = 1_048_576"),
+  "iOS auth storage must retain device-only Keychain protection and exact social/legacy recovery keys",
 );
 
 const expectedPrivacyDataTypes = [

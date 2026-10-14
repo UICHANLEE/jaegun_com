@@ -218,8 +218,11 @@ export function MeetingMinutesPage() {
   );
 
   const confirmHistoryNavigation = useUnsavedChangesWarning(isFormDirty);
+  const previousServiceYear = useRef(currentYear);
 
   useEffect(() => {
+    if (previousServiceYear.current === currentYear) return;
+    previousServiceYear.current = currentYear;
     setSelectedYear((previous) => previous === currentYear - 1 ? currentYear : previous);
     setFormOpen(false);
     setEditingId(null);
@@ -587,8 +590,11 @@ export function AccountingLedgerPage() {
   );
 
   const confirmHistoryNavigation = useUnsavedChangesWarning(isFormDirty);
+  const previousServiceYear = useRef(currentYear);
 
   useEffect(() => {
+    if (previousServiceYear.current === currentYear) return;
+    previousServiceYear.current = currentYear;
     setSelectedYear((previous) => previous === currentYear - 1 ? currentYear : previous);
     setFormOpen(false);
     setEditingId(null);

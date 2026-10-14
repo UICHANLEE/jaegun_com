@@ -22,6 +22,7 @@ export interface EventOccurrence {
   scopeType: GovernanceScopeCode;
   scopeName: string;
   title: string;
+  hostName: string | null;
   description: string | null;
   location: string | null;
   startsAt: string;
@@ -43,6 +44,7 @@ export interface EventOccurrence {
   waitlistCount: number;
   waitlistPosition: number | null;
   canManage: boolean;
+  canManageLogistics: boolean;
 }
 
 export interface EventDraft {
@@ -50,6 +52,7 @@ export interface EventDraft {
   create: boolean;
   scopeId: string;
   title: string;
+  hostName: string;
   description?: string;
   location?: string;
   startsAt: string;
@@ -88,6 +91,50 @@ export interface DemoEventContext {
   scopeName: string;
   organizationId?: string | null;
   canManage?: boolean;
+  canManageLogistics?: boolean;
+  actorName?: string;
+}
+
+export interface EventLogisticsGroup {
+  id: string;
+  name: string;
+}
+
+export interface EventLogisticsVehicle {
+  id: string;
+  label: string;
+  seatCount: number;
+  driverUserId: string | null;
+}
+
+export interface EventLogisticsParticipant {
+  userId: string;
+  displayName: string;
+  response: EventResponse;
+  respondedAt: string;
+  groupId: string | null;
+  vehicleId: string | null;
+}
+
+export interface EventLogisticsAssignment {
+  userId: string;
+  groupId: string | null;
+  vehicleId: string | null;
+}
+
+export interface EventLogistics {
+  occurrenceId: string;
+  revision: number;
+  participants: EventLogisticsParticipant[];
+  groups: EventLogisticsGroup[];
+  vehicles: EventLogisticsVehicle[];
+}
+
+export interface EventLogisticsDraft {
+  revision: number;
+  groups: EventLogisticsGroup[];
+  vehicles: EventLogisticsVehicle[];
+  assignments: EventLogisticsAssignment[];
 }
 
 const SCOPE_TYPES = new Set<GovernanceScopeCode>(["general_assembly", "presbytery", "church"]);
@@ -191,6 +238,7 @@ export function normalizeEventOccurrence(value: unknown): EventOccurrence | null
     scopeType: scopeType(row.scope_type),
     scopeName: stringValue(row.scope_name, "공동체"),
     title: stringValue(row.title, "일정"),
+    hostName: nullableString(row.host_name),
     description: nullableString(row.description),
     location: nullableString(row.location_text),
     startsAt,
@@ -218,6 +266,7 @@ export function normalizeEventOccurrence(value: unknown): EventOccurrence | null
       ? null
       : finiteNumber(row.waitlist_position),
     canManage: row.can_manage === true,
+    canManageLogistics: row.can_manage_logistics === true,
   };
 }
 
@@ -243,6 +292,7 @@ export function validateEventDraft(draft: EventDraft, serverNow?: Date): string 
   const title = draft.title.trim();
   if (!draft.id || !draft.scopeId) return "일정 식별자와 공개 범위를 확인해 주세요.";
   if (!title || title.length > 200) return "일정 제목은 1자 이상 200자 이하로 입력해 주세요.";
+  if (!draft.hostName?.trim() || draft.hostName.trim().length > 100) return "개최자는 1자 이상 100자 이하로 입력해 주세요.";
   if ((draft.description?.trim().length ?? 0) > 10000) return "일정 설명은 10,000자 이하로 입력해 주세요.";
   if ((draft.location?.trim().length ?? 0) > 500) return "장소는 500자 이하로 입력해 주세요.";
   const startsAt = validDate(draft.startsAt);
@@ -315,8 +365,9 @@ interface DemoDefinition {
 }
 
 const demoDefinitions = new Map<string, DemoDefinition>();
-const demoRsvps = new Map<string, Map<string, { response: EventResponse; respondedAt: number }>>();
+const demoRsvps = new Map<string, Map<string, { response: EventResponse; respondedAt: number; displayName: string }>>();
 const demoOperations = new Map<string, EventRsvpResult>();
+const demoLogistics = new Map<string, EventLogisticsDraft>();
 
 function demoScope(context?: DemoEventContext): EventScope {
   return {
@@ -330,11 +381,12 @@ function demoScope(context?: DemoEventContext): EventScope {
 }
 
 function ensureDemoDefinition(context?: DemoEventContext) {
-  if (demoDefinitions.size) return;
+  const scope = demoScope(context);
+  if (Array.from(demoDefinitions.values()).some((definition) => definition.draft.scopeId === scope.id)) return;
   const start = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
   start.setMinutes(0, 0, 0);
   const end = new Date(start.getTime() + 90 * 60 * 1000);
-  const id = "demo-event-worship";
+  const id = demoDefinitions.has("demo-event-worship") ? `demo-event-worship-${scope.id}` : "demo-event-worship";
   demoDefinitions.set(id, {
     revision: 1,
     status: "scheduled",
@@ -344,6 +396,7 @@ function ensureDemoDefinition(context?: DemoEventContext) {
       create: true,
       scopeId: demoScope(context).id,
       title: "공동체 연합 기도회",
+      hostName: "공동체",
       description: "말씀과 기도로 함께하는 공동체 일정입니다.",
       location: "본당",
       startsAt: start.toISOString(),
@@ -390,12 +443,12 @@ function generateDemoStarts(draft: EventDraft) {
 function demoOccurrences(userId: string, context?: DemoEventContext): EventOccurrence[] {
   ensureDemoDefinition(context);
   const scope = demoScope(context);
-  return Array.from(demoDefinitions.values()).flatMap((definition) => {
+  return Array.from(demoDefinitions.values()).filter((definition) => definition.draft.scopeId === scope.id).flatMap((definition) => {
     const duration = new Date(definition.draft.endsAt).getTime() - new Date(definition.draft.startsAt).getTime();
     return generateDemoStarts(definition.draft).map((start, index) => {
       const occurrenceId = demoOccurrenceId(definition.draft.id, index);
       const rsvps = demoRsvps.get(occurrenceId)
-        ?? new Map<string, { response: EventResponse; respondedAt: number }>();
+        ?? new Map<string, { response: EventResponse; respondedAt: number; displayName: string }>();
       const own = rsvps.get(userId)?.response ?? null;
       const values = Array.from(rsvps.values());
       const waiting = values.filter((item) => item.response === "waitlist")
@@ -408,6 +461,7 @@ function demoOccurrences(userId: string, context?: DemoEventContext): EventOccur
         scopeType: scope.type,
         scopeName: scope.name,
         title: definition.draft.title,
+        hostName: definition.draft.hostName.trim() || null,
         description: definition.draft.description?.trim() || null,
         location: definition.draft.location?.trim() || null,
         startsAt: start.toISOString(),
@@ -429,6 +483,7 @@ function demoOccurrences(userId: string, context?: DemoEventContext): EventOccur
         waitlistCount: waiting.length,
         waitlistPosition: ownWaiting ? waiting.findIndex((item) => item === ownWaiting) + 1 : null,
         canManage: scope.canManage,
+        canManageLogistics: scope.canManage || (scope.type === "church" && context?.canManageLogistics === true),
       } satisfies EventOccurrence;
     });
   });
@@ -502,6 +557,171 @@ export async function getEventOccurrence(
   return normalized;
 }
 
+function normalizeEventLogistics(value: unknown): EventLogistics {
+  const row = record(value);
+  const occurrenceId = stringValue(row?.occurrence_id);
+  const revision = finiteNumber(row?.revision, -1);
+  if (!row || !occurrenceId || !Number.isInteger(revision) || revision < 0) {
+    throw new Error("참석자 관리 응답 형식을 확인하지 못했습니다.");
+  }
+  return {
+    occurrenceId,
+    revision,
+    groups: records(row.groups).map((group) => ({ id: stringValue(group.id), name: stringValue(group.name) })),
+    vehicles: records(row.vehicles).map((vehicle) => ({
+      id: stringValue(vehicle.id),
+      label: stringValue(vehicle.label),
+      seatCount: finiteNumber(vehicle.seat_count),
+      driverUserId: nullableString(vehicle.driver_user_id),
+    })),
+    participants: records(row.participants).flatMap((participant) => {
+      const userId = stringValue(participant.user_id);
+      const attendance = response(participant.response);
+      if (!userId || !attendance) return [];
+      return [{
+        userId,
+        displayName: stringValue(participant.display_name, userId),
+        response: attendance,
+        respondedAt: stringValue(participant.responded_at),
+        groupId: attendance === "yes" ? nullableString(participant.group_id) : null,
+        vehicleId: attendance === "yes" ? nullableString(participant.vehicle_id) : null,
+      }];
+    }),
+  };
+}
+
+function sanitizeDemoLogistics(occurrenceId: string, plan: EventLogisticsDraft) {
+  const rsvps = demoRsvps.get(occurrenceId);
+  plan.assignments = plan.assignments.filter((assignment) => rsvps?.get(assignment.userId)?.response === "yes");
+  for (const vehicle of plan.vehicles) {
+    if (vehicle.driverUserId && !plan.assignments.some((assignment) => assignment.userId === vehicle.driverUserId && assignment.vehicleId === vehicle.id)) {
+      vehicle.driverUserId = null;
+    }
+  }
+}
+
+function demoEventLogistics(occurrenceId: string, plan: EventLogisticsDraft): EventLogistics {
+  sanitizeDemoLogistics(occurrenceId, plan);
+  const assignments = new Map(plan.assignments.map((assignment) => [assignment.userId, assignment]));
+  return {
+    occurrenceId,
+    revision: plan.revision,
+    groups: plan.groups.map((group) => ({ ...group })),
+    vehicles: plan.vehicles.map((vehicle) => ({ ...vehicle })),
+    participants: Array.from(demoRsvps.get(occurrenceId)?.entries() ?? []).map(([userId, attendance]) => ({
+      userId,
+      displayName: attendance.displayName,
+      response: attendance.response,
+      respondedAt: new Date(attendance.respondedAt).toISOString(),
+      groupId: assignments.get(userId)?.groupId ?? null,
+      vehicleId: assignments.get(userId)?.vehicleId ?? null,
+    })),
+  };
+}
+
+function requireDemoLogistics(userId: string, occurrenceId: string, context?: DemoEventContext) {
+  if (!userId) throw new Error("참석자 관리 권한이 없습니다.");
+  const occurrence = demoOccurrences(userId, context).find((item) => item.occurrenceId === occurrenceId);
+  if (!occurrence || !occurrence.canManageLogistics) throw new Error("참석자 관리 권한이 없습니다.");
+  return occurrence;
+}
+
+export async function getEventLogistics(
+  mode: AppMode,
+  userId: string,
+  occurrenceId: string,
+  context?: DemoEventContext,
+  signal?: AbortSignal,
+): Promise<EventLogistics> {
+  if (import.meta.env.DEV && mode === "demo") {
+    requireDemoLogistics(userId, occurrenceId, context);
+    const plan = demoLogistics.get(occurrenceId) ?? { revision: 0, groups: [], vehicles: [], assignments: [] };
+    demoLogistics.set(occurrenceId, plan);
+    return demoEventLogistics(occurrenceId, plan);
+  }
+  const request = requireClient().rpc("get_event_logistics", { p_occurrence_id: occurrenceId });
+  const { data, error } = await (signal ? request.abortSignal(signal) : request);
+  if (error) throw error;
+  return normalizeEventLogistics(data);
+}
+
+function validateLogisticsDraft(draft: EventLogisticsDraft) {
+  if (!Number.isInteger(draft.revision) || draft.revision < 0) throw new Error("참석자 관리 버전을 확인해 주세요.");
+  if (draft.groups.length > 50 || draft.vehicles.length > 50) throw new Error("조와 차량은 각각 최대 50개까지 만들 수 있습니다.");
+  const groupIds = new Set<string>();
+  for (const group of draft.groups) {
+    if (!group.id || groupIds.has(group.id) || !group.name.trim() || group.name.trim().length > 100) throw new Error("조 식별자와 이름을 확인해 주세요.");
+    groupIds.add(group.id);
+  }
+  const vehicleIds = new Set<string>();
+  const drivers = new Set<string>();
+  for (const vehicle of draft.vehicles) {
+    if (!vehicle.id || vehicleIds.has(vehicle.id) || !vehicle.label.trim() || vehicle.label.trim().length > 100
+      || !Number.isInteger(vehicle.seatCount) || vehicle.seatCount < 1 || vehicle.seatCount > 100) throw new Error("차량 이름과 좌석 수를 확인해 주세요.");
+    if (vehicle.driverUserId && drivers.has(vehicle.driverUserId)) throw new Error("한 사람을 여러 차량의 운전자로 지정할 수 없습니다.");
+    vehicleIds.add(vehicle.id);
+    if (vehicle.driverUserId) drivers.add(vehicle.driverUserId);
+  }
+  const users = new Set<string>();
+  for (const assignment of draft.assignments) {
+    if (!assignment.userId || users.has(assignment.userId)
+      || (assignment.groupId !== null && !groupIds.has(assignment.groupId))
+      || (assignment.vehicleId !== null && !vehicleIds.has(assignment.vehicleId))) throw new Error("참석자의 조와 차량 배정을 확인해 주세요.");
+    users.add(assignment.userId);
+  }
+  for (const vehicle of draft.vehicles) {
+    if (vehicle.driverUserId && !draft.assignments.some((assignment) => assignment.userId === vehicle.driverUserId && assignment.vehicleId === vehicle.id)) {
+      throw new Error("운전자를 해당 차량에 배정해 주세요.");
+    }
+    if (draft.assignments.filter((assignment) => assignment.vehicleId === vehicle.id).length > vehicle.seatCount) throw new Error("차량 좌석 수를 초과하여 배정할 수 없습니다.");
+  }
+}
+
+export async function saveEventLogistics(
+  mode: AppMode,
+  userId: string,
+  occurrenceId: string,
+  draft: EventLogisticsDraft,
+  context?: DemoEventContext,
+): Promise<EventLogistics> {
+  validateLogisticsDraft(draft);
+  if (import.meta.env.DEV && mode === "demo") {
+    const occurrence = requireDemoLogistics(userId, occurrenceId, context);
+    if (occurrence.eventStatus !== "scheduled") throw new Error("취소된 일정의 배정은 수정할 수 없습니다.");
+    const previous = demoLogistics.get(occurrenceId);
+    if (draft.revision !== (previous?.revision ?? 0)) throw new Error("event_logistics_revision_conflict");
+    for (const assignment of draft.assignments) {
+      if (demoRsvps.get(occurrenceId)?.get(assignment.userId)?.response !== "yes") throw new Error("참석으로 응답한 회원만 배정할 수 있습니다.");
+    }
+    for (const [otherOccurrenceId, plan] of demoLogistics) {
+      if (otherOccurrenceId === occurrenceId) continue;
+      if (draft.groups.some((group) => plan.groups.some((existing) => existing.id === group.id))
+        || draft.vehicles.some((vehicle) => plan.vehicles.some((existing) => existing.id === vehicle.id))) throw new Error("다른 일정의 조와 차량은 사용할 수 없습니다.");
+    }
+    const next: EventLogisticsDraft = {
+      revision: draft.revision + 1,
+      groups: draft.groups.map((group) => ({ ...group, name: group.name.trim() })),
+      vehicles: draft.vehicles.map((vehicle) => ({ ...vehicle, label: vehicle.label.trim() })),
+      assignments: draft.assignments.map((assignment) => ({ ...assignment })),
+    };
+    demoLogistics.set(occurrenceId, next);
+    return demoEventLogistics(occurrenceId, next);
+  }
+  const { data, error } = await requireClient().rpc("save_event_logistics", {
+    p_occurrence_id: occurrenceId,
+    p_revision: draft.revision,
+    p_groups: draft.groups.map((group) => ({ id: group.id, name: group.name.trim() })),
+    p_vehicles: draft.vehicles.map((vehicle) => ({
+      id: vehicle.id, label: vehicle.label.trim(), seat_count: vehicle.seatCount, driver_user_id: vehicle.driverUserId,
+    })),
+    p_assignments: draft.assignments.map((assignment) => ({
+      user_id: assignment.userId, group_id: assignment.groupId, vehicle_id: assignment.vehicleId,
+    })),
+  });
+  if (error) throw error;
+  return normalizeEventLogistics(data);
+}
+
 export async function saveEvent(mode: AppMode, draft: EventDraft, serverNow?: Date) {
   // Temporal checks use the AppDataProvider server clock when supplied. The
   // database remains authoritative so a wrong device clock cannot grant or
@@ -512,7 +732,7 @@ export async function saveEvent(mode: AppMode, draft: EventDraft, serverNow?: Da
     const previous = demoDefinitions.get(draft.id);
     if (previous?.status === "cancelled") throw new Error("취소된 일정은 수정할 수 없습니다.");
     demoDefinitions.set(draft.id, {
-      draft: { ...draft, recurrenceWeekdays: [...draft.recurrenceWeekdays], reminderOffsetsMinutes: [...draft.reminderOffsetsMinutes] },
+      draft: { ...draft, hostName: draft.hostName.trim(), recurrenceWeekdays: [...draft.recurrenceWeekdays], reminderOffsetsMinutes: [...draft.reminderOffsetsMinutes] },
       revision: (previous?.revision ?? 0) + 1,
       status: "scheduled",
       cancellationReason: null,
@@ -524,6 +744,7 @@ export async function saveEvent(mode: AppMode, draft: EventDraft, serverNow?: Da
     p_create: draft.create,
     p_scope_id: draft.scopeId,
     p_title: draft.title,
+    p_host_name: draft.hostName.trim(),
     p_description: draft.description?.trim() || null,
     p_location_text: draft.location?.trim() || null,
     p_starts_at: draft.startsAt,
@@ -576,21 +797,26 @@ export async function respondToEvent(
   }
   const operationKey = `${userId}:${operationId}`;
   if (import.meta.env.DEV && mode === "demo") {
+    const occurrence = demoOccurrences(userId, context).find((item) => item.occurrenceId === occurrenceId);
+    if (!occurrence) throw new Error("일정을 찾을 수 없습니다.");
     const replay = demoOperations.get(operationKey);
     if (replay) {
       if (replay.occurrenceId !== occurrenceId || replay.requestedResponse !== requestedResponse) throw new Error("이미 사용한 요청 식별자입니다.");
       return replay;
     }
-    const occurrence = demoOccurrences(userId, context).find((item) => item.occurrenceId === occurrenceId);
-    if (!occurrence) throw new Error("일정을 찾을 수 없습니다.");
+    if (occurrence.eventStatus !== "scheduled") throw new Error("참석 응답이 마감된 일정입니다.");
     const rsvps = demoRsvps.get(occurrenceId)
-      ?? new Map<string, { response: EventResponse; respondedAt: number }>();
+      ?? new Map<string, { response: EventResponse; respondedAt: number; displayName: string }>();
     const yesCountWithoutUser = Array.from(rsvps.entries()).filter(([id, item]) => id !== userId && item.response === "yes").length;
     const effective: EventResponse = requestedResponse === "yes" && occurrence.capacity != null && yesCountWithoutUser >= occurrence.capacity
       ? "waitlist"
       : requestedResponse;
     const previous = rsvps.get(userId);
-    rsvps.set(userId, { response: effective, respondedAt: previous?.response === effective ? previous.respondedAt : Date.now() });
+    rsvps.set(userId, {
+      response: effective,
+      respondedAt: previous?.response === effective ? previous.respondedAt : Date.now(),
+      displayName: context?.actorName?.trim() || previous?.displayName || userId,
+    });
     if (previous?.response === "yes" && effective !== "yes") {
       const next = Array.from(rsvps.entries())
         .filter(([, item]) => item.response === "waitlist")
@@ -598,6 +824,11 @@ export async function respondToEvent(
       if (next) rsvps.set(next[0], { ...next[1], response: "yes" });
     }
     demoRsvps.set(occurrenceId, rsvps);
+    const plan = demoLogistics.get(occurrenceId);
+    if (plan && previous?.response !== effective) {
+      sanitizeDemoLogistics(occurrenceId, plan);
+      plan.revision += 1;
+    }
     const waiting = Array.from(rsvps.entries()).filter(([, item]) => item.response === "waitlist")
       .sort((left, right) => left[1].respondedAt - right[1].respondedAt);
     const result: EventRsvpResult = {
@@ -667,4 +898,5 @@ export function __resetDemoEventsForTests() {
   demoDefinitions.clear();
   demoRsvps.clear();
   demoOperations.clear();
+  demoLogistics.clear();
 }

@@ -51,9 +51,9 @@ describe("BrowserRouter unsaved traversal integration", () => {
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     )).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("link", { name: "회의록" })[0]);
-    expect(await screen.findByRole("heading", { name: "임원 회의 기록" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "임원 회의 기록" }, { timeout: LAZY_ROUTE_TIMEOUT_MS })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "회의록 작성" }));
-    const title = await screen.findByLabelText(/회의 제목/);
+    const title = await screen.findByLabelText(/회의 제목/, {}, { timeout: LAZY_ROUTE_TIMEOUT_MS });
     fireEvent.change(title, { target: { value: "브라우저 뒤로 가기에도 남아야 할 초안" } });
     const historyLength = window.history.length;
 

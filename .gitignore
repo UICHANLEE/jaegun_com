@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .native-build/
+.native-device-build/
 *.xcarchive/
 *.ipa
 *.mobileprovision

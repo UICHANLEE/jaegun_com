@@ -18,6 +18,8 @@ import { canManageChurch } from "./access";
 import { Brand } from "./Brand";
 import { ServiceErrorNotice } from "./ServiceErrorNotice";
 import "./community-navigation.css";
+import "./mobile-layout.css";
+import { useMobileViewport } from "./useMobileViewport";
 
 const NAV_ITEMS = [
   { to: "/app/home", label: "홈", icon: House },
@@ -29,6 +31,7 @@ const NAV_ITEMS = [
 ];
 
 export function AppShell() {
+  useMobileViewport();
   const { viewer, notifications, organizations, mode } = useAppData();
   const location = useLocation();
   const unreadCount = notifications.filter((item) => !item.readAt).length;
@@ -39,9 +42,10 @@ export function AppShell() {
     location.pathname === "/app/notifications" ||
     location.pathname.startsWith("/manage/");
   const church = organizations.find((item) => item.id === viewer?.membership?.organizationId);
+  const isMemberHome = location.pathname === "/app/home";
 
   return (
-    <div className="app-shell">
+    <div className="app-shell app-shell--community">
       <a className="community-skip-link" href="#community-main">본문으로 건너뛰기</a>
       <aside className="desktop-sidebar" aria-label="주요 메뉴">
         <Brand />
@@ -80,12 +84,12 @@ export function AppShell() {
 
       <div className="app-shell__stage">
         {!isFocusedRoute ? (
-          <header className="mobile-global-header">
+          <header className={`mobile-global-header${!canManage && (isMemberHome || !church) ? " mobile-global-header--simple" : ""}`}>
             <Brand compact />
             {canManage ? (
               <NavLink className="branch-switcher" to="/manage/home"><GearSix weight="bold" /> 관리 화면</NavLink>
-            ) : church ? (
-              <NavLink className="church-switcher" to={`/app/churches/${church.id}`}>{church.name}<CaretDown weight="bold" /></NavLink>
+            ) : church && !isMemberHome ? (
+              <NavLink className="church-switcher" to={`/app/churches/${church.id}`}><span>{church.name}</span><CaretDown weight="bold" /></NavLink>
             ) : null}
             <NavLink className="icon-button icon-button--quiet notification-button" to="/app/notifications" aria-label="알림">
               <Bell weight="regular" />

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">재건 공동체</string>
+    <string name="title_activity_main">재건 공동체</string>
+    <string name="package_name">com.uichanlee.jaegun</string>
+    <string name="custom_url_scheme">com.uichanlee.jaegun</string>
+</resources>

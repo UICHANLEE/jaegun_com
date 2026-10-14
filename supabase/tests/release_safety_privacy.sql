@@ -62,16 +62,16 @@ select is(
     from public.consent_documents as document
     join (
       values
-        ('privacy_policy'::text, '/legal/privacy/2026-08-30'::text, '5a701de8e5f10cf94d8b6309f3c1333282b53c8823d449d0bc0ff9dffa76508d'::text),
-        ('sensitive_information'::text, '/legal/sensitive/2026-08-30'::text, 'a721d371977ecc486e04ddf98fa3287ff434d74a3b2d1045d6c6aa1b3c52fe9b'::text),
-        ('overseas_transfer'::text, '/legal/overseas/2026-08-30'::text, '8a8196a9d5493860a776d07443923410b0e9802de46e9878a08d23fbfaf9e684'::text),
-        ('terms_of_service'::text, '/legal/terms/2026-08-30'::text, 'ce6dedf9374ebad0cdd781598209ea773348c585aa34204808d073fc131f2aa9'::text),
-        ('community_guidelines'::text, '/legal/community/2026-08-30'::text, 'e0b737c75f94bf3dbb2a7d5a139541f1b95c882c94f620730202aeecdb07c56d'::text)
+        ('privacy_policy'::text, '/legal/privacy/2026-10-14'::text, '67efb4d62726b98fc25ee47d35846cc22275089e3934e1a6928c1489ba4f28fb'::text),
+        ('sensitive_information'::text, '/legal/sensitive/2026-10-14'::text, '4435c25cb223996ce37f9b756a0477d445d157cebbb3d11e8afff945d2726664'::text),
+        ('overseas_transfer'::text, '/legal/overseas/2026-10-14'::text, '0e562b7b0c18ed61684aabebb6307152f5508ca4647d01dbd27cb3d444a47d62'::text),
+        ('terms_of_service'::text, '/legal/terms/2026-10-14'::text, '5e40c29280f72f98d497220030fba13333808cf90e1350411d0c905871cc7908'::text),
+        ('community_guidelines'::text, '/legal/community/2026-10-14'::text, '42399002842b5d3fb7d19c15ae4721deab99401d42790722f4825d9092bcd8a6'::text)
     ) as expected(document_key, document_url, content_sha256)
       on expected.document_key = document.document_key
      and expected.document_url = document.document_url
      and expected.content_sha256 = document.content_sha256
-    where document.version = '2026-08-30'
+    where document.version = '2026-10-14'
       and document.retired_at is null
       and document.required
       and document.locale = 'ko-KR'
@@ -429,8 +429,8 @@ select is(
       and accepted
       and source = 'signup_metadata'
   ),
-  5::bigint,
-  'signup metadata records all five exact active document versions'
+  0::bigint,
+  'signup metadata does not record legal consent even with all five decisions'
 );
 select is(
   (
@@ -441,12 +441,8 @@ select is(
   'wrong versions or false booleans leave the signup consent gate closed'
 );
 select ok(
-  (
-    select min(recorded_at) > '2026-01-01'::timestamptz
-    from public.user_consents
-    where user_id = 'b1200000-0000-4000-8000-000000000001'
-  ),
-  'client-supplied consent timestamps are ignored in favor of server time'
+  not private.has_current_required_consents('b1200000-0000-4000-8000-000000000001'),
+  'editable metadata and client timestamps never open the community gate'
 );
 
 insert into public.user_consents (
@@ -461,7 +457,8 @@ where profile.id in (
     'c1100000-0000-4000-8000-000000000001',
     'd1100000-0000-4000-8000-000000000001',
     'e1100000-0000-4000-8000-000000000001',
-    'a1200000-0000-4000-8000-000000000001'
+    'a1200000-0000-4000-8000-000000000001',
+    'b1200000-0000-4000-8000-000000000001'
   )
   and document.required
   and document.retired_at is null
@@ -1613,7 +1610,7 @@ insert into public.user_consents (
 values (
   'b1100000-0000-4000-8000-000000000001',
   'privacy_policy',
-  '2026-08-30',
+  '2026-10-14',
   false,
   'app',
   pg_catalog.clock_timestamp()
@@ -1925,11 +1922,11 @@ select is(
   (
     public.save_my_privacy_preferences_v2(
       '{
-        "privacy_policy":"2026-08-30",
-        "sensitive_information":"2026-08-30",
-        "overseas_transfer":"2026-08-30",
-        "terms_of_service":"2026-08-30",
-        "community_guidelines":"2026-08-30"
+        "privacy_policy":"2026-10-14",
+        "sensitive_information":"2026-10-14",
+        "overseas_transfer":"2026-10-14",
+        "terms_of_service":"2026-10-14",
+        "community_guidelines":"2026-10-14"
       }'::jsonb,
       true,
       true,
@@ -4717,7 +4714,7 @@ insert into public.user_consents (
 values (
   'c1100000-0000-4000-8000-000000000001',
   'privacy_policy',
-  '2026-08-30',
+  '2026-10-14',
   false,
   'app',
   pg_catalog.clock_timestamp()
@@ -5058,7 +5055,7 @@ insert into public.user_consents (
 values (
   'e1100000-0000-4000-8000-000000000001',
   'privacy_policy',
-  '2026-08-30',
+  '2026-10-14',
   false,
   'app',
   pg_catalog.clock_timestamp()
@@ -5186,7 +5183,7 @@ insert into public.user_consents (
 values (
   'e1100000-0000-4000-8000-000000000001',
   'privacy_policy',
-  '2026-08-30',
+  '2026-10-14',
   true,
   'app'
 );
@@ -5806,7 +5803,7 @@ insert into public.user_consents (
 values (
   'd1100000-0000-4000-8000-000000000001',
   'privacy_policy',
-  '2026-08-30',
+  '2026-10-14',
   false,
   'app',
   pg_catalog.clock_timestamp()

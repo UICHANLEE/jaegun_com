@@ -15,13 +15,22 @@
     "native:sync:ios": "npm run build && cap sync ios && npm run native:verify:ios",
     "native:verify:ios": "node scripts/verify-ios-release-config.mjs && node scripts/verify-production-bundle.mjs ios/App/App/public",
     "native:verify:built:ios": "node scripts/verify-ios-built-app.mjs && node scripts/verify-production-bundle.mjs .native-build/Build/Products/Release-iphoneos/App.app/public",
-    "native:build:ios": "npm run native:sync:ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath .native-build CODE_SIGNING_ALLOWED=NO build",
-    "native:preflight:ios": "npm run native:sync:ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -derivedDataPath .native-build CODE_SIGNING_ALLOWED=NO build && npm run native:verify:built:ios"
+    "native:verify:simulator:ios": "node scripts/verify-ios-built-app.mjs --simulator && node scripts/verify-production-bundle.mjs .native-build/Build/Products/Debug-iphonesimulator/App.app/public",
+    "native:build:ios": "npm run native:sync:ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath .native-build CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES build && npm run native:verify:simulator:ios",
+    "native:preflight:ios": "npm run native:sync:ios && xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -derivedDataPath .native-build CODE_SIGNING_ALLOWED=NO build && npm run native:verify:built:ios",
+    "native:add:android": "npm run build && cap add android",
+    "native:sync:android": "npm run build && cap sync android && npm run native:verify:android",
+    "native:verify:android": "node scripts/verify-android-release-config.mjs && node scripts/verify-production-bundle.mjs android/app/src/main/assets/public",
+    "native:build:android": "npm run native:sync:android && node scripts/build-android.mjs debug",
+    "native:preflight:android": "npm run native:sync:android && node scripts/build-android.mjs release && node scripts/verify-android-built-app.mjs android/app/build/outputs/apk/release/app-release-unsigned.apk",
+    "native:verify:built:android": "node scripts/verify-android-built-app.mjs android/app/build/outputs/apk/debug/app-debug.apk --debug",
+    "native:verify:release:android": "node scripts/verify-android-built-app.mjs --store",
+    "native:test:android": "node scripts/build-android.mjs instrumented"
   },
   "dependencies": {
     "@capacitor/app": "8.1.1",
     "@capacitor/browser": "8.0.4",
-    "@capacitor/core": "8.5.0",
+    "@capacitor/core": "8.5.3",
     "@capacitor/keyboard": "8.0.5",
     "@capacitor/network": "8.0.1",
     "@capacitor/splash-screen": "8.0.2",
@@ -38,8 +47,9 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.5.0",
-    "@capacitor/ios": "8.5.0",
+    "@capacitor/android": "8.5.3",
+    "@capacitor/cli": "8.5.3",
+    "@capacitor/ios": "8.5.3",
     "@emnapi/core": "1.11.3",
     "@emnapi/runtime": "1.11.3",
     "@testing-library/jest-dom": "6.9.1",
@@ -50,7 +60,7 @@
     "jsdom": "29.0.0",
     "typescript": "7.0.2",
     "vite": "8.1.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   },
   "overrides": {
     "xcode": {

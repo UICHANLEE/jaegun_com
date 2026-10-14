@@ -34,6 +34,7 @@ import type {
   EventScope,
 } from "../data/events";
 import { useUnsavedChangesWarning } from "../unsavedChanges";
+import { EventLogisticsPanel } from "./EventLogisticsPanel";
 import "./event-pages.css";
 
 const KOREAN_DATE = new Intl.DateTimeFormat("ko-KR", {
@@ -93,15 +94,22 @@ function fromSeoulInput(value: string) {
   return value ? new Date(`${value}:00+09:00`).toISOString() : "";
 }
 
-function demoContext(viewer: ReturnType<typeof useAppData>["viewer"], organizationName: string): DemoEventContext {
+function useDemoEventContext(viewer: ReturnType<typeof useAppData>["viewer"], organizationName: string): DemoEventContext {
   const organizationId = viewer?.membership?.organizationId ?? "demo-organization";
-  return {
+  const isPlatformAdmin = viewer?.profile.globalRole === "platform_admin";
+  const isChurchExecutive = viewer?.membership?.status === "active"
+    && viewer.membership.role === "executive"
+    && viewer.membership.userId === viewer.profile.id;
+  const actorName = viewer?.profile.displayName ?? "";
+  return useMemo<DemoEventContext>(() => ({
     scopeId: `demo-church-${organizationId}`,
     scopeType: "church",
     scopeName: organizationName,
     organizationId,
-    canManage: viewer?.profile.globalRole === "platform_admin",
-  };
+    canManage: isPlatformAdmin,
+    canManageLogistics: isPlatformAdmin || isChurchExecutive,
+    actorName,
+  }), [actorName, isChurchExecutive, isPlatformAdmin, organizationId, organizationName]);
 }
 
 function EventCard({ occurrence }: { occurrence: EventOccurrence }) {
@@ -126,10 +134,7 @@ function EventCard({ occurrence }: { occurrence: EventOccurrence }) {
 export function EventCalendarPage() {
   const { mode, viewer, organizations, getServerNow } = useAppData();
   const organization = organizations.find((item) => item.id === viewer?.membership?.organizationId);
-  const context = useMemo(
-    () => demoContext(viewer, organization?.name ?? "재건OO교회"),
-    [organization?.name, viewer],
-  );
+  const context = useDemoEventContext(viewer, organization?.name ?? "재건OO교회");
   const [scopes, setScopes] = useState<EventScope[]>([]);
   const [selectedScope, setSelectedScope] = useState<string | null>(null);
   const [occurrences, setOccurrences] = useState<EventOccurrence[]>([]);
@@ -194,7 +199,8 @@ export function EventDetailPage() {
   const navigate = useNavigate();
   const { mode, viewer, organizations } = useAppData();
   const organization = organizations.find((item) => item.id === viewer?.membership?.organizationId);
-  const context = useMemo(() => demoContext(viewer, organization?.name ?? "재건OO교회"), [organization?.name, viewer]);
+  const context = useDemoEventContext(viewer, organization?.name ?? "재건OO교회");
+  const userId = viewer?.profile.id;
   const [occurrence, setOccurrence] = useState<EventOccurrence | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -204,60 +210,82 @@ export function EventDetailPage() {
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [logisticsDirty, setLogisticsDirty] = useState(false);
+  const confirmHistoryNavigation = useUnsavedChangesWarning(logisticsDirty);
+  const actorKey = `${mode}:${userId ?? ""}:${occurrenceId}:${context.scopeId}:${context.canManage}:${context.canManageLogistics}`;
+  const [loadedActorKey, setLoadedActorKey] = useState("");
+  const currentActorKey = useRef(actorKey);
+  currentActorKey.current = actorKey;
 
   useEffect(() => {
-    if (!viewer || !occurrenceId) return;
+    if (!userId || !occurrenceId) return;
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    getEventOccurrence(mode, viewer.profile.id, occurrenceId, context, controller.signal)
-      .then(setOccurrence)
+    setOccurrence(null);
+    setLogisticsDirty(false);
+    setSavingResponse(null);
+    setFeedback(null);
+    setCancelOpen(false);
+    setCancelReason("");
+    setCancelling(false);
+    getEventOccurrence(mode, userId, occurrenceId, context, controller.signal)
+      .then((next) => {
+        if (!controller.signal.aborted && currentActorKey.current === actorKey) {
+          setOccurrence(next);
+          setLoadedActorKey(actorKey);
+        }
+      })
       .catch((caught) => { if (!controller.signal.aborted) setError(errorMessage(caught)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [context, mode, occurrenceId, reloadKey, viewer]);
+  }, [actorKey, context, mode, occurrenceId, reloadKey, userId]);
 
   const handleResponse = useCallback(async (nextResponse: EventResponseInput) => {
     if (!viewer || !occurrence) return;
+    const requestActorKey = actorKey;
     setSavingResponse(nextResponse);
     setError(null);
     setFeedback(null);
     try {
       const result = await respondToEvent(mode, viewer.profile.id, occurrence.occurrenceId, nextResponse, crypto.randomUUID(), context);
       const refreshed = await getEventOccurrence(mode, viewer.profile.id, occurrence.occurrenceId, context);
+      if (currentActorKey.current !== requestActorKey) return;
       setOccurrence(refreshed);
       setFeedback(result.response === "waitlist" ? `정원이 가득 차 대기 ${result.waitlistPosition ?? ""}번으로 등록됐어요.` : `${RESPONSE_LABELS[nextResponse]}으로 저장했어요.`);
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (currentActorKey.current === requestActorKey) setError(errorMessage(caught));
     } finally {
-      setSavingResponse(null);
+      if (currentActorKey.current === requestActorKey) setSavingResponse(null);
     }
-  }, [context, mode, occurrence, viewer]);
+  }, [actorKey, context, mode, occurrence, viewer]);
 
   async function handleCancel() {
     if (!occurrence || cancelReason.trim().length < 2) return;
+    const requestActorKey = actorKey;
     setCancelling(true);
     setError(null);
     try {
       await cancelEvent(mode, occurrence.eventId, crypto.randomUUID(), cancelReason);
+      if (currentActorKey.current !== requestActorKey) return;
       setCancelOpen(false);
       setReloadKey((value) => value + 1);
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (currentActorKey.current === requestActorKey) setError(errorMessage(caught));
     } finally {
-      setCancelling(false);
+      if (currentActorKey.current === requestActorKey) setCancelling(false);
     }
   }
 
   const cancelled = occurrence?.eventStatus === "cancelled" || occurrence?.occurrenceStatus === "cancelled";
   return (
     <div className="focused-page event-detail-page">
-      <header className="page-toolbar"><button className="icon-button icon-button--quiet" type="button" onClick={() => navigate(-1)} aria-label="뒤로"><ArrowLeft /></button><h1>일정 상세</h1><span /></header>
+      <header className="page-toolbar"><button className="icon-button icon-button--quiet" type="button" onClick={() => { if (confirmHistoryNavigation()) navigate(-1); }} aria-label="뒤로"><ArrowLeft /></button><h1>일정 상세</h1><span /></header>
       <div className="event-detail-page__content">
         {error ? <><ErrorBanner message={error} />{!occurrence ? <button className="button button--secondary" type="button" onClick={() => setReloadKey((value) => value + 1)}>다시 시도</button> : null}</> : null}
         {loading ? <div className="event-loading" role="status"><CircleNotch className="event-spinner" /><span>일정을 확인하고 있어요.</span></div> : null}
         {!loading && !occurrence && !error ? <EmptyState icon={<CalendarBlank />} title="일정을 찾을 수 없어요" description="일정 목록에서 다시 선택해 주세요." action={<Link className="button button--secondary" to="/app/events">일정 목록</Link>} /> : null}
-        {occurrence ? (
+        {occurrence && loadedActorKey === actorKey ? (
           <>
             <section className={`event-detail-hero${cancelled ? " event-detail-hero--cancelled" : ""}`}>
               <span>{occurrence.scopeName}</span>
@@ -267,6 +295,7 @@ export function EventDetailPage() {
             <section className="event-detail-facts">
               <div><Clock weight="fill" /><p><span>일시</span><strong>{formatEventDate(occurrence)}</strong></p></div>
               {occurrence.location ? <div><MapPin weight="fill" /><p><span>장소</span><strong>{occurrence.location}</strong></p></div> : null}
+              <div><UsersThree weight="fill" /><p><span>개최자</span><strong>{occurrence.hostName?.trim() || "미등록"}</strong></p></div>
               <div><UsersThree weight="fill" /><p><span>참석</span><strong>{occurrence.yesCount}명{occurrence.capacity ? ` / ${occurrence.capacity}명` : ""}</strong>{occurrence.waitlistCount ? <small>대기 {occurrence.waitlistCount}명</small> : null}</p></div>
               {occurrence.recurrenceFrequency !== "none" ? <div><Repeat weight="fill" /><p><span>반복</span><strong>{occurrence.recurrenceFrequency === "daily" ? "매일" : occurrence.recurrenceFrequency === "weekly" ? "매주" : "매월"} · {occurrence.recurrenceInterval} 간격</strong></p></div> : null}
             </section>
@@ -279,6 +308,17 @@ export function EventDetailPage() {
                 {occurrence.ownResponse === "waitlist" ? <p className="event-rsvp__waitlist" role="status">현재 대기 {occurrence.waitlistPosition}번입니다. 자리가 나면 자동으로 참석 처리돼요.</p> : null}
                 {feedback ? <p className="event-rsvp__success" role="status">{feedback}</p> : null}
               </section>
+            ) : null}
+            {occurrence.canManageLogistics && viewer ? (
+              <EventLogisticsPanel
+                key={actorKey}
+                mode={mode}
+                userId={viewer.profile.id}
+                occurrenceId={occurrence.occurrenceId}
+                context={context}
+                rosterVersion={`${occurrence.yesCount}:${occurrence.maybeCount}:${occurrence.waitlistCount}:${occurrence.ownResponse}`}
+                onDirtyChange={setLogisticsDirty}
+              />
             ) : null}
             {occurrence.canManage ? (
               <section className="event-manager-actions">
@@ -310,6 +350,7 @@ function initialDraft(scopeId: string, serverNow: number): EventDraft {
     create: true,
     scopeId,
     title: "",
+    hostName: "",
     description: "",
     location: "",
     startsAt: start.toISOString(),
@@ -331,6 +372,7 @@ function occurrenceToDraft(occurrence: EventOccurrence): EventDraft {
     create: false,
     scopeId: occurrence.scopeId,
     title: occurrence.title,
+    hostName: occurrence.hostName ?? "",
     description: occurrence.description ?? "",
     location: occurrence.location ?? "",
     startsAt: occurrence.startsAt,
@@ -351,7 +393,8 @@ export function EventEditorPage() {
   const navigate = useNavigate();
   const { mode, viewer, organizations, getServerNow } = useAppData();
   const organization = organizations.find((item) => item.id === viewer?.membership?.organizationId);
-  const context = useMemo(() => demoContext(viewer, organization?.name ?? "재건OO교회"), [organization?.name, viewer]);
+  const context = useDemoEventContext(viewer, organization?.name ?? "재건OO교회");
+  const userId = viewer?.profile.id;
   const [scopes, setScopes] = useState<EventScope[]>([]);
   const [draft, setDraft] = useState<EventDraft | null>(null);
   const [baseline, setBaseline] = useState("");
@@ -359,29 +402,39 @@ export function EventEditorPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
-  const isDirty = draft !== null && baseline !== "" && JSON.stringify(draft) !== baseline;
+  const actorKey = `${mode}:${userId ?? ""}:${occurrenceId ?? "new"}:${context.scopeId}:${context.canManage}`;
+  const currentActorKey = useRef(actorKey);
+  currentActorKey.current = actorKey;
+  const [loadedActorKey, setLoadedActorKey] = useState("");
+  const isDirty = loadedActorKey === actorKey && draft !== null && baseline !== "" && JSON.stringify(draft) !== baseline;
   const confirmHistoryNavigation = useUnsavedChangesWarning(isDirty);
 
   useEffect(() => {
-    if (!viewer) return;
+    if (!userId) return;
     const controller = new AbortController();
     setLoading(true);
+    setDraft(null);
+    setBaseline("");
+    setSaving(false);
+    setError(null);
     const scopesPromise = listEventScopes(mode, context, controller.signal);
     const eventPromise = occurrenceId
-      ? getEventOccurrence(mode, viewer.profile.id, occurrenceId, context, controller.signal)
+      ? getEventOccurrence(mode, userId, occurrenceId, context, controller.signal)
       : Promise.resolve(null);
     Promise.all([scopesPromise, eventPromise]).then(([nextScopes, occurrence]) => {
+      if (controller.signal.aborted) return;
       const writableScopes = nextScopes.filter((scope) => scope.canManage);
       setScopes(writableScopes);
       if (!writableScopes.length) throw new Error("일정을 만들거나 수정할 권한이 없습니다.");
       const nextDraft = occurrence ? occurrenceToDraft(occurrence) : initialDraft(writableScopes[0].id, getServerNow());
       setDraft(nextDraft);
       setBaseline(JSON.stringify(nextDraft));
+      setLoadedActorKey(actorKey);
       window.setTimeout(() => titleRef.current?.focus(), 0);
     }).catch((caught) => { if (!controller.signal.aborted) setError(errorMessage(caught)); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [context, getServerNow, mode, occurrenceId, viewer]);
+  }, [actorKey, context, getServerNow, mode, occurrenceId, userId]);
 
   function patchDraft(patch: Partial<EventDraft>) {
     setDraft((previous) => previous ? { ...previous, ...patch } : previous);
@@ -397,7 +450,8 @@ export function EventEditorPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!draft) return;
+    if (!draft || saving || loadedActorKey !== actorKey) return;
+    const requestActorKey = actorKey;
     const validation = validateEventDraft(draft, new Date(getServerNow()));
     if (validation) {
       setError(validation);
@@ -407,24 +461,26 @@ export function EventEditorPage() {
     setError(null);
     try {
       await saveEvent(mode, draft, new Date(getServerNow()));
+      if (currentActorKey.current !== requestActorKey) return;
       setBaseline(JSON.stringify(draft));
       navigate("/app/events", { replace: true });
     } catch (caught) {
-      setError(errorMessage(caught));
+      if (currentActorKey.current === requestActorKey) setError(errorMessage(caught));
     } finally {
-      setSaving(false);
+      if (currentActorKey.current === requestActorKey) setSaving(false);
     }
   }
 
   return (
     <div className="focused-page event-editor-page">
-      <header className="page-toolbar"><button className="icon-button icon-button--quiet" type="button" onClick={() => { if (confirmHistoryNavigation()) navigate(-1); }} aria-label="뒤로"><ArrowLeft /></button><h1>{occurrenceId ? "일정 수정" : "일정 만들기"}</h1><button className="toolbar-submit" type="submit" form="event-editor-form" disabled={saving || !draft}>{saving ? "저장 중" : "저장"}</button></header>
+      <header className="page-toolbar"><button className="icon-button icon-button--quiet" type="button" onClick={() => { if (confirmHistoryNavigation()) navigate(-1); }} aria-label="뒤로"><ArrowLeft /></button><h1>{occurrenceId ? "일정 수정" : "일정 만들기"}</h1><button className="toolbar-submit" type="submit" form="event-editor-form" disabled={saving || !draft || loadedActorKey !== actorKey}>{saving ? "저장 중" : "저장"}</button></header>
       {loading ? <div className="event-loading" role="status"><CircleNotch className="event-spinner" /><span>일정 작성 화면을 준비하고 있어요.</span></div> : null}
       {error ? <div className="event-editor-error"><ErrorBanner message={error} /></div> : null}
-      {draft ? (
+      {draft && loadedActorKey === actorKey ? (
         <form id="event-editor-form" className="event-editor-form" onSubmit={(event) => void handleSubmit(event)}>
           <label className="field"><span>공개 범위</span><select value={draft.scopeId} disabled={!draft.create} onChange={(event) => patchDraft({ scopeId: event.target.value })}>{scopes.map((scope) => <option value={scope.id} key={scope.id}>{scope.name}</option>)}</select><small className="field-hint">권한은 선택한 조직 범위에만 적용되며 상·하위 조직으로 이어지지 않습니다.</small></label>
           <label className="field"><span>제목</span><span className="field__control"><input ref={titleRef} value={draft.title} maxLength={200} required onChange={(event) => patchDraft({ title: event.target.value })} /></span></label>
+          <label className="field"><span>개최자</span><span className="field__control"><input name="hostName" value={draft.hostName} maxLength={100} required onChange={(event) => patchDraft({ hostName: event.target.value })} /></span><small className="field-hint">일정을 개최하는 사람 또는 조직의 이름을 입력해 주세요.</small></label>
           <label className="field"><span>설명 <small>선택</small></span><textarea value={draft.description} maxLength={10000} onChange={(event) => patchDraft({ description: event.target.value })} /></label>
           <label className="field"><span>장소 <small>선택</small></span><span className="field__control"><MapPin /><input value={draft.location} maxLength={500} onChange={(event) => patchDraft({ location: event.target.value })} /></span></label>
           <div className="event-editor-form__dates">

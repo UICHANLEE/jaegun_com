@@ -2,6 +2,7 @@ import {
   CONSENT_DOCUMENT_KEYS,
   CURRENT_LEGAL_DOCUMENTS,
   LEGACY_LEGAL_DOCUMENT_VERSION,
+  HISTORICAL_LEGAL_DOCUMENTS,
   LEGAL_DOCUMENT_DATABASE_TITLE_BY_KEY_VERSION,
   LEGAL_DOCUMENT_SHA256_BY_KEY_VERSION,
   findLegalDocument,
@@ -105,10 +106,13 @@ export function classifyRequiredConsentDocuments(
     && documents.every((document) => document.version === LEGACY_LEGAL_DOCUMENT_VERSION)) {
     return "legacy-v1";
   }
+  const independentVersions = [CURRENT_LEGAL_DOCUMENTS, HISTORICAL_LEGAL_DOCUMENTS.filter(
+    (document) => document.version === "2026-08-30",
+  )];
   if (sameKeys(keys, CURRENT_REQUIRED_CONSENT_KEYS)
-    && documents.every((document) => (
-      CURRENT_LEGAL_DOCUMENTS.find((current) => current.key === document.key)?.version === document.version
-    ))) {
+    && independentVersions.some((recognized) => documents.every((document) => (
+      recognized.find((candidate) => candidate.key === document.key)?.version === document.version
+    )))) {
     return "independent-v2";
   }
   throw new Error("서버의 필수 동의 문서 구성이 안전한 출시 계약과 일치하지 않습니다.");
@@ -146,29 +150,20 @@ export function assertAcceptedConsentVersions(
   }
 }
 
-export function buildSignupConsentMetadata(
-  documents: readonly RequiredConsentDocument[],
-  accepted: AcceptedConsentVersions,
-) {
+export function buildSignupConsentMetadata(documents: readonly RequiredConsentDocument[], accepted: AcceptedConsentVersions) {
   const contract = classifyRequiredConsentDocuments(documents);
   assertAcceptedConsentVersions(documents, accepted);
-  const acceptedRequiredConsents = Object.fromEntries(documents.map((document) => [
-    document.key,
-    { accepted: true, version: document.version },
-  ]));
   const generic = {
     consent_contract: contract === "independent-v2" ? "required-consents-v2" : "required-consents-v1",
-    accepted_required_consents: acceptedRequiredConsents,
+    accepted_required_consents: Object.fromEntries(documents.map((document) => [document.key, { accepted: true, version: document.version }])),
   };
   if (contract === "independent-v2") return generic;
-  const privacy = documents.find((document) => document.key === "privacy_policy")!;
-  const community = documents.find((document) => document.key === "community_guidelines")!;
   return {
     ...generic,
     accepted_privacy: true,
-    accepted_privacy_version: privacy.version,
+    accepted_privacy_version: documents.find((document) => document.key === "privacy_policy")!.version,
     accepted_community: true,
-    accepted_community_version: community.version,
+    accepted_community_version: documents.find((document) => document.key === "community_guidelines")!.version,
   };
 }
 

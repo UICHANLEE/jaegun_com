@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetDemoEventsForTests,
   getEventOccurrence,
+  getEventLogistics,
   normalizeEventOccurrence,
   respondToEvent,
   saveEvent,
+  saveEventLogistics,
   validateEventDraft,
 } from "../data/events";
 import type { EventDraft } from "../data/events";
@@ -27,12 +29,20 @@ vi.mock("../data/AppDataProvider", () => ({
 
 import { EventCalendarPage, EventDetailPage, EventEditorPage } from "../pages/EventPages";
 
+const demoContext = {
+  scopeId: "demo-church-org-19",
+  scopeName: "재건테스트교회",
+  canManageLogistics: true,
+  actorName: "참석 회원",
+};
+
 function singleDraft(overrides: Partial<EventDraft> = {}): EventDraft {
   return {
     id: "event-capacity-test",
     create: true,
     scopeId: "demo-church-org-19",
     title: "정원 테스트",
+    hostName: "일정 개최자",
     description: "",
     location: "교육관",
     startsAt: "2099-09-04T01:00:00.000Z",
@@ -62,6 +72,7 @@ describe("events adapter", () => {
       scope_type: "presbytery",
       scope_name: "서울노회",
       title: "노회 일정",
+      host_name: "노회 개최자",
       starts_at: "2099-09-04T01:00:00.000Z",
       ends_at: "2099-09-04T02:00:00.000Z",
       recurrence_frequency: "weekly",
@@ -73,8 +84,11 @@ describe("events adapter", () => {
       waitlist_count: 4,
       waitlist_position: 2,
       can_manage: false,
+      can_manage_logistics: true,
     })).toEqual(expect.objectContaining({
       scopeType: "presbytery",
+      hostName: "노회 개최자",
+      canManageLogistics: true,
       ownResponse: "waitlist",
       yesCount: 300,
       waitlistPosition: 2,
@@ -107,14 +121,55 @@ describe("events adapter", () => {
     const draft = singleDraft();
     await saveEvent("demo", draft, new Date("2099-01-01T00:00:00.000Z"));
     const occurrenceId = `${draft.id}-occurrence-0`;
-    expect((await respondToEvent("demo", "member-a", occurrenceId, "yes", "operation-a")).response).toBe("yes");
-    const firstWaiting = await respondToEvent("demo", "member-b", occurrenceId, "yes", "operation-b");
+    expect((await respondToEvent("demo", "member-a", occurrenceId, "yes", "operation-a", demoContext)).response).toBe("yes");
+    const firstWaiting = await respondToEvent("demo", "member-b", occurrenceId, "yes", "operation-b", demoContext);
     expect(firstWaiting).toEqual(expect.objectContaining({ response: "waitlist", waitlistPosition: 1 }));
-    expect(await respondToEvent("demo", "member-b", occurrenceId, "yes", "operation-b")).toEqual(firstWaiting);
-    expect((await respondToEvent("demo", "member-c", occurrenceId, "yes", "operation-c")).waitlistPosition).toBe(2);
-    await respondToEvent("demo", "member-a", occurrenceId, "no", "operation-a-no");
-    expect((await getEventOccurrence("demo", "member-b", occurrenceId)).ownResponse).toBe("yes");
-    expect((await getEventOccurrence("demo", "member-c", occurrenceId)).waitlistPosition).toBe(1);
+    expect(await respondToEvent("demo", "member-b", occurrenceId, "yes", "operation-b", demoContext)).toEqual(firstWaiting);
+    expect((await respondToEvent("demo", "member-c", occurrenceId, "yes", "operation-c", demoContext)).waitlistPosition).toBe(2);
+    await respondToEvent("demo", "member-a", occurrenceId, "no", "operation-a-no", demoContext);
+    expect((await getEventOccurrence("demo", "member-b", occurrenceId, demoContext)).ownResponse).toBe("yes");
+    expect((await getEventOccurrence("demo", "member-c", occurrenceId, demoContext)).waitlistPosition).toBe(1);
+  });
+
+  it("requires an explicit host and persists its trimmed label", async () => {
+    expect(validateEventDraft(singleDraft({ hostName: " " }))).toContain("개최자");
+    await saveEvent("demo", singleDraft({ hostName: "  명시한 개최자  " }));
+    expect((await getEventOccurrence("demo", "member-a", "event-capacity-test-occurrence-0", demoContext)).hostName).toBe("명시한 개최자");
+  });
+
+  it("keeps demo rosters minimal, scope-bound, and free of invented attendees", async () => {
+    await saveEvent("demo", singleDraft());
+    const occurrenceId = "event-capacity-test-occurrence-0";
+    expect((await getEventLogistics("demo", "manager", occurrenceId, demoContext)).participants).toEqual([]);
+    await respondToEvent("demo", "member-a", occurrenceId, "yes", "roster-yes", { ...demoContext, actorName: "실제 응답 이름" });
+    expect((await getEventLogistics("demo", "manager", occurrenceId, demoContext)).participants).toEqual([
+      expect.objectContaining({ userId: "member-a", displayName: "실제 응답 이름", response: "yes", groupId: null, vehicleId: null }),
+    ]);
+    await expect(getEventLogistics("demo", "member-a", occurrenceId, { ...demoContext, canManageLogistics: false })).rejects.toThrow("권한");
+    await expect(getEventLogistics("demo", "manager", occurrenceId, { ...demoContext, scopeId: "other-church" })).rejects.toThrow("권한");
+  });
+
+  it("enforces seats, revision conflicts, and RSVP allocation cleanup in demo plans", async () => {
+    await saveEvent("demo", singleDraft({ capacity: 2 }));
+    const occurrenceId = "event-capacity-test-occurrence-0";
+    await respondToEvent("demo", "member-a", occurrenceId, "yes", "plan-a", demoContext);
+    await respondToEvent("demo", "member-b", occurrenceId, "yes", "plan-b", demoContext);
+    const current = await getEventLogistics("demo", "manager", occurrenceId, demoContext);
+    const draft = {
+      revision: current.revision,
+      groups: [{ id: "group-a", name: "1조" }],
+      vehicles: [{ id: "vehicle-a", label: "1호차", seatCount: 2, driverUserId: "member-a" }],
+      assignments: ["member-a", "member-b"].map((userId) => ({ userId, groupId: "group-a", vehicleId: "vehicle-a" })),
+    };
+    await expect(saveEventLogistics("demo", "manager", occurrenceId, { ...draft, vehicles: [{ ...draft.vehicles[0], seatCount: 1 }] }, demoContext)).rejects.toThrow("좌석");
+    const saved = await saveEventLogistics("demo", "manager", occurrenceId, draft, demoContext);
+    expect(saved.revision).toBe(1);
+    await expect(saveEventLogistics("demo", "manager", occurrenceId, draft, demoContext)).rejects.toThrow("revision_conflict");
+    await respondToEvent("demo", "member-a", occurrenceId, "no", "plan-a-no", demoContext);
+    const cleaned = await getEventLogistics("demo", "manager", occurrenceId, demoContext);
+    expect(cleaned.participants.find((participant) => participant.userId === "member-a")).toEqual(expect.objectContaining({ groupId: null, vehicleId: null }));
+    expect(cleaned.vehicles[0].driverUserId).toBeNull();
+    expect(cleaned.revision).toBeGreaterThan(saved.revision);
   });
 });
 

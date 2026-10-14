@@ -9,6 +9,21 @@ const config: CapacitorConfig = {
   loggingBehavior: "none",
   backgroundColor: "#f7f4ee",
   zoomEnabled: false,
+  android: {
+    path: "android",
+    allowMixedContent: false,
+    webContentsDebuggingEnabled: false,
+    loggingBehavior: "none",
+    useLegacyBridge: false,
+    includePlugins: [
+      "@capacitor/app",
+      "@capacitor/browser",
+      "@capacitor/keyboard",
+      "@capacitor/network",
+      "@capacitor/splash-screen",
+      "@capacitor/status-bar",
+    ],
+  },
   ios: {
     path: "ios",
     scheme: "App",
@@ -30,6 +45,7 @@ const config: CapacitorConfig = {
   server: {
     hostname: "localhost",
     iosScheme: "capacitor",
+    androidScheme: "https",
     cleartext: false,
     allowNavigation: [],
   },
@@ -40,6 +56,11 @@ const config: CapacitorConfig = {
     accessOrigins: ["https://opwzujhfsxqaivtbjewg.supabase.co"],
   },
   plugins: {
+    SystemBars: {
+      style: "DEFAULT",
+      insetsHandling: "css",
+      initialViewportFitValueHint: "cover",
+    },
     SplashScreen: {
       launchAutoHide: true,
       launchShowDuration: 800,
@@ -48,13 +69,11 @@ const config: CapacitorConfig = {
     },
     StatusBar: {
       overlaysWebView: false,
-      style: "DARK",
-      backgroundColor: "#f7f4ee",
+      style: "DEFAULT",
+      backgroundColor: "#00000000",
     },
     Keyboard: {
       resize: "native",
-      style: "LIGHT",
-      resizeOnFullScreen: true,
     },
   },
 };

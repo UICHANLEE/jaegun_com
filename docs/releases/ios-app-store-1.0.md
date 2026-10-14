@@ -9,6 +9,8 @@
 
 최신 실행 증거와 수정 내역은 [2026-09-05 점검](release-audit-2026-09-05.md)을 참고한다. 읽기 전용 사전 점검은 `npm --prefix apps/web run native:check:store`로 실행한다. 자동 통과도 실기기·운영·심사 승인을 대신하지 않는다.
 
+2026-10-14 개발 앱 검증: 로컬 Apple Development 팀을 Debug·Release에 명시해 시뮬레이터 Keychain 준비 실패를 수정했고, 서명된 시뮬레이터의 application identifier를 빌드 후 자동 검사합니다. iOS 정상 로그인 화면과 Keychain 준비 성공, Android 정상 로그인 화면과 앱 보안 저장소 기기 테스트 3개 통과를 확인했습니다. 연결된 iPhone 16용 개발 서명 빌드·설치·실행과 실행 중 프로세스도 확인했습니다. 이는 스토어 제출 승인이나 최종 법인 Team ID 확인이 아닙니다. 현재 read-only store 점검은 운영 Universal Link 응답이 JSON이 아니어서 실패합니다.
+
 | 게이트 | 상태 | 완료 근거 또는 남은 작업 |
 | --- | --- | --- |
 | Xcode 26 / iOS 26 SDK | 무서명 검증 완료 | Xcode 26.6·iOS 26.5 SDK의 Release 기기용 무서명 빌드와 번들 메타데이터 검증 통과. Store validation과 조직 서명 Archive는 별도 BLOCK |

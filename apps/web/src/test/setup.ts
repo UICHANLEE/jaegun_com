@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
+
+// Code-split integration routes share Vitest's five-second async deadline.
+configure({ asyncUtilTimeout: 5_000 });
 
 const localStorageValues = new Map<string, string>();
 

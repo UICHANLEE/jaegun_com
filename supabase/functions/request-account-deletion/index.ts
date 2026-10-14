@@ -9,6 +9,7 @@ import {
   RequestValidationError,
   verifyPasswordUserWithCleanup,
   verifiedTokenHasAal2,
+  verifiedTokenHasFreshSocialAuthentication,
 } from "./security.ts";
 
 type RuntimeConfig = {
@@ -108,7 +109,7 @@ Deno.serve(async (request: Request): Promise<Response> => {
     return publicErrorResponse(400, "invalid_request", headers);
   }
 
-  let currentUser: { id: string; email?: string } | null = null;
+  let currentUser: { id: string; email?: string; providers: string[] } | null = null;
   try {
     const currentUserClient = createClient(
       config.supabaseUrl,
@@ -117,7 +118,11 @@ Deno.serve(async (request: Request): Promise<Response> => {
     );
     const { data, error } = await currentUserClient.auth.getUser(token);
     if (!error && data.user) {
-      currentUser = { id: data.user.id, email: data.user.email };
+      currentUser = {
+        id: data.user.id,
+        email: data.user.email,
+        providers: data.user.identities?.map((identity) => identity.provider) ?? [],
+      };
     }
   } catch {
     // Keep Auth transport and parsing failures indistinguishable from an
@@ -128,7 +133,10 @@ Deno.serve(async (request: Request): Promise<Response> => {
   }
 
   const hasAal2 = verifiedTokenHasAal2(token, currentUser.id);
-  if (!hasAal2) {
+  const hasFreshSocialAuthentication = verifiedTokenHasFreshSocialAuthentication(
+    token, currentUser.id, currentUser.providers,
+  );
+  if (!hasAal2 && !hasFreshSocialAuthentication) {
     if (!payload.password || !currentUser.email) {
       return publicErrorResponse(401, "invalid_credentials", headers);
     }

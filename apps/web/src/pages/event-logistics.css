@@ -1,0 +1,54 @@
+.event-logistics { min-width: 0; display: grid; gap: 16px; margin-top: 18px; border: 1px solid var(--line); border-radius: var(--radius-md); padding: 18px; color: var(--ink); background: var(--paper); }
+.event-logistics__header, .event-logistics__section-heading { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.event-logistics__header > div { min-width: 0; flex: 1 1 180px; }
+.event-logistics h2 { display: flex; align-items: center; gap: 8px; font-size: 1rem; }
+.event-logistics h2 svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--community-green-ink); }
+.event-logistics__header p, .event-logistics__summary, .event-logistics__empty, .event-logistics__nonattendee { color: var(--muted); font-size: .8rem; line-height: 1.6; }
+.event-logistics__header p { margin-top: 6px; }
+.event-logistics h3 { overflow-wrap: anywhere; font-size: .9rem; }
+.event-logistics h3 small { margin-left: 6px; color: var(--muted); font-size: .75rem; }
+.event-logistics .button { min-height: 44px; min-width: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.event-logistics :is(input, select) { min-width: 0; width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--ink); background: var(--paper); font: inherit; }
+.event-logistics :is(button, input, select):focus-visible { outline: 3px solid var(--community-focus); outline-offset: 2px; }
+.event-logistics :is(button, input, select):disabled { cursor: not-allowed; }
+.event-logistics .field { min-width: 0; }
+.event-logistics .field > span { overflow-wrap: anywhere; font-size: .76rem; }
+.event-logistics .field-hint { line-height: 1.5; }
+.event-logistics__counts { min-width: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; }
+.event-logistics__counts > div { min-width: 0; border-radius: 10px; padding: 10px 5px; text-align: center; background: var(--community-elevated); }
+.event-logistics__counts dt { color: var(--muted); font-size: .72rem; }
+.event-logistics__counts dd { margin: 4px 0 0; font-size: .95rem; font-weight: 800; overflow-wrap: anywhere; }
+.event-logistics__warning { border: 1px solid var(--line); border-radius: 10px; padding: 12px; color: var(--community-orange-ink); background: var(--community-orange-soft); font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.event-logistics__invalid { color: var(--danger); font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.event-logistics__status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .8rem; line-height: 1.6; overflow-wrap: anywhere; }
+.event-logistics__status svg { flex-shrink: 0; }
+.event-logistics__editor { min-width: 0; display: grid; gap: 14px; margin: 0; border: 0; padding: 0; }
+.event-logistics__editor > legend { margin-bottom: 14px; color: var(--muted); font-size: .78rem; }
+.event-logistics__editor > .button { justify-self: start; }
+.event-logistics__items { min-width: 0; display: grid; gap: 10px; }
+.event-logistics__group { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.event-logistics__group > .field { grid-column: 1 / -1; }
+.event-logistics__group > span { align-self: center; color: var(--muted); font-size: .8rem; }
+.event-logistics__vehicle { min-width: 0; display: grid; gap: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.event-logistics__vehicle-footer { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: .8rem; }
+.event-logistics__vehicle-footer > span { min-width: 0; overflow-wrap: anywhere; }
+.event-logistics__filters { min-width: 0; display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 18px; }
+.event-logistics__roster { min-width: 0; display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.event-logistics__roster > li { min-width: 0; display: grid; gap: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.event-logistics__participant { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; }
+.event-logistics__participant strong { font-size: .86rem; overflow-wrap: anywhere; }
+.event-logistics__participant span { color: var(--community-green-ink); font-size: .75rem; font-weight: 700; }
+.event-logistics__participant time { grid-column: 1 / -1; color: var(--muted); font-size: .72rem; }
+.event-logistics__assignment { min-width: 0; display: grid; gap: 12px; }
+.event-logistics__footer { min-width: 0; display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+.event-logistics__footer > p { color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.event-logistics__footer small { display: block; margin-top: 4px; font-size: .72rem; }
+.event-logistics__footer > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 720px) {
+  .event-logistics__group { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .event-logistics__group > .field { grid-column: auto; }
+  .event-logistics__vehicle { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .event-logistics__vehicle > .field:first-child, .event-logistics__vehicle-footer { grid-column: 1 / -1; }
+  .event-logistics__assignment { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .event-logistics__filters { grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)); }
+}

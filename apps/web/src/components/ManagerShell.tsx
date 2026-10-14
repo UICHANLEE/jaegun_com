@@ -24,6 +24,8 @@ import { useAppData } from "../data/AppDataProvider";
 import { canManageDepartmentOfficers } from "../data/departmentGovernance";
 import { ServiceErrorNotice } from "./ServiceErrorNotice";
 import "./community-navigation.css";
+import "./mobile-layout.css";
+import { useMobileViewport } from "./useMobileViewport";
 
 interface ManagerNavItem {
   to: string;
@@ -115,6 +117,7 @@ function ManagerNavigation({ className, label, branch, hasGovernanceAccess, hasD
 }
 
 export function ManagerShell() {
+  useMobileViewport();
   const { viewer, notifications, organizations, mode } = useAppData();
   const branch = resolveAppBranch(viewer);
   const membership = viewer?.membership;

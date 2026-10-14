@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { canModerateCommunity } from "../components/access";
 import {
@@ -8,7 +8,10 @@ import {
   ConversationMuteControl,
   ReportActionLink,
 } from "../components/SafetyControls";
-import { AppDataProvider } from "../data/AppDataProvider";
+import { AppDataProvider, type AppDataContextValue } from "../data/AppDataProvider";
+import * as appDataModule from "../data/AppDataProvider";
+import * as safetyPrivacyModule from "../data/safetyPrivacy";
+import { AccountDeletionPage, SafetyPrivacyGate, SecurityCenterPage } from "../pages/SafetyPrivacyPages";
 import {
   __resetSafetyPrivacyDemoForTests,
   __normalizeSafetyPrivacyStateForTests,
@@ -20,6 +23,7 @@ import {
   validateContentReport,
 } from "../data/safetyPrivacy";
 import { createDemoState, DEMO_VIEWER } from "../data/seed";
+import { LEGAL_DOCUMENT_VERSION } from "../data/legalDocuments";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
 
@@ -52,6 +56,78 @@ function setDemoMember() {
 
 beforeEach(() => {
   __resetSafetyPrivacyDemoForTests();
+});
+
+describe("signed-in social account controls", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function socialAccountData() {
+    const data = {
+      mode: "supabase",
+      viewer: { profile: { id: "actor-a", displayName: "본인", email: "", globalRole: "user" } },
+      socialProviders: { google: true },
+      linkedSocialProviders: ["google"],
+      socialAuthWorking: false,
+      linkSocialIdentity: vi.fn().mockResolvedValue(undefined),
+      reauthenticateWithSocial: vi.fn().mockResolvedValue(undefined),
+    } as unknown as AppDataContextValue;
+    vi.spyOn(appDataModule, "useAppData").mockImplementation(() => data);
+    vi.spyOn(safetyPrivacyModule, "loadMfaStatus").mockResolvedValue({ currentLevel: "aal1", nextLevel: "aal1", factors: [] });
+    vi.spyOn(safetyPrivacyModule, "loadSessionSummary").mockResolvedValue({ signedInAt: null, expiresAt: null, email: null });
+    vi.spyOn(safetyPrivacyModule, "loadSecurityActivity").mockResolvedValue([]);
+    return data;
+  }
+
+  it("links only the unlinked available choice and keeps the actor on cancellation", async () => {
+    const data = socialAccountData();
+    data.linkedSocialProviders = [];
+    vi.mocked(data.linkSocialIdentity).mockRejectedValueOnce(new Error("access_denied"));
+    render(<MemoryRouter><SecurityCenterPage /></MemoryRouter>);
+    const google = screen.getByText("Google").closest(".social-link-list__item")!;
+    fireEvent.click(within(google as HTMLElement).getByRole("button", { name: "계정 연결" }));
+    expect(data.linkSocialIdentity).toHaveBeenCalledWith("google");
+    expect(await screen.findByRole("alert")).toHaveTextContent("현재 계정은 그대로 유지됩니다");
+    expect(data.viewer?.profile.id).toBe("actor-a");
+    expect(within(google as HTMLElement).getByRole("button", { name: "계정 연결" })).toBeEnabled();
+    expect(data.linkedSocialProviders).toEqual([]);
+  });
+
+  it("does not relink an already connected Google account", () => {
+    const data = socialAccountData();
+    render(<MemoryRouter><SecurityCenterPage /></MemoryRouter>);
+    const linked = screen.getByRole("button", { name: "연결됨" });
+    expect(linked).toBeDisabled();
+    fireEvent.click(linked);
+    expect(data.linkSocialIdentity).not.toHaveBeenCalled();
+  });
+
+  it("does not launch linking for a provider without configured availability", () => {
+    const data = socialAccountData();
+    data.linkedSocialProviders = [];
+    data.socialProviders.google = false;
+    render(<MemoryRouter><SecurityCenterPage /></MemoryRouter>);
+    const google = screen.getByText("Google").closest(".social-link-list__item")!;
+    const button = within(google as HTMLElement).getByRole("button", { name: "계정 연결" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(data.linkSocialIdentity).not.toHaveBeenCalled();
+  });
+
+  it("offers OAuth reauthentication to ordinary members without password or mandatory TOTP and never auto-deletes", async () => {
+    const data = socialAccountData();
+    vi.spyOn(safetyPrivacyModule, "loadSafetyPrivacyState").mockResolvedValue(safetyPrivacyModule.getDemoSafetyPrivacyState("actor-a"));
+    const deleteRequest = vi.spyOn(safetyPrivacyModule, "requestAccountDeletion");
+    render(<MemoryRouter initialEntries={["/app/account"]}><SafetyPrivacyGate><AccountDeletionPage /></SafetyPrivacyGate></MemoryRouter>);
+    const reauthenticate = await screen.findByRole("button", { name: "Google로 다시 인증" });
+    expect(screen.queryByLabelText("현재 비밀번호")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/확인 문구/), { target: { value: ACCOUNT_DELETION_CONFIRMATION } });
+    expect(screen.getByRole("button", { name: "계정 삭제 요청" })).toBeEnabled();
+    fireEvent.click(reauthenticate);
+    await waitFor(() => expect(data.reauthenticateWithSocial).toHaveBeenCalledWith("google"));
+    expect(deleteRequest).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/확인 문구/)).toHaveValue("");
+    expect(screen.getByRole("button", { name: "계정 삭제 요청" })).toBeDisabled();
+  });
 });
 
 describe("safety and privacy adapter", () => {
@@ -233,7 +309,7 @@ describe("safety and privacy routes", () => {
   it("does not silently substitute the current copy for an unknown legal version", async () => {
     renderApp("/legal/community/2025-01-01");
     expect(await screen.findByRole("heading", { name: "요청한 운영정책 버전을 찾을 수 없습니다" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "현재 버전 열기" })).toHaveAttribute("href", "/legal/community/2026-08-30");
+    expect(screen.getByRole("link", { name: "현재 버전 열기" })).toHaveAttribute("href", `/legal/community/${LEGAL_DOCUMENT_VERSION}`);
   });
 
   it("provides a public store-facing account deletion path before sign-in", async () => {

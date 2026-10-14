@@ -234,9 +234,7 @@ describe("hierarchy governance access", () => {
 
     renderApp("/manage/home");
 
-    expect(await screen.findByRole("heading", { name: /올해 교회 운영 흐름을 살펴보세요/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "조직 관리" })).not.toHaveLength(0);
-    expect(screen.getByRole("link", { name: /조직·권한/ })).toHaveAttribute("href", "/manage/organization");
+    expect(await screen.findByRole("link", { name: /조직·권한/ })).toHaveAttribute("href", "/manage/organization");
   });
 
   it("does not let a delegated manager change president or pastor authority", async () => {

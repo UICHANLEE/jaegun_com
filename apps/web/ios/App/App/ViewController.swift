@@ -2,6 +2,12 @@ import Capacitor
 import UIKit
 
 final class ViewController: CAPBridgeViewController {
+    // Match --community-surface in theme.css without depending on the JS bridge.
+    private let communitySurface = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 27 / 255, green: 32 / 255, blue: 38 / 255, alpha: 1)
+            : .white
+    }
     private let privacyShield = UIView()
     private var lifecycleObservers: [NSObjectProtocol] = []
 
@@ -12,6 +18,7 @@ final class ViewController: CAPBridgeViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        view.backgroundColor = communitySurface
         configurePrivacyShield()
 
         lifecycleObservers.append(
@@ -47,6 +54,7 @@ final class ViewController: CAPBridgeViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        view.window?.backgroundColor = communitySurface
         if UIApplication.shared.applicationState == .active {
             hidePrivacyShield()
         } else {

@@ -32,8 +32,8 @@ try {
   const jsonType = (response.headers.get("content-type") ?? "").includes("application/json");
   const aasa = response.ok && jsonType ? await response.json() : null;
   const matching = aasa?.applinks?.details?.find((entry) => entry.appIDs?.includes(`${team}.${bundle}`) || entry.appID === `${team}.${bundle}`);
-  const paths = ["/auth/callback/signup", "/auth/callback/recovery"];
-  record("universal_links", Boolean(team && matching && paths.every((path) => matching.paths?.includes(path) || matching.components?.some((entry) => entry["/"] === path && entry.exclude !== true))), `HTTP ${response.status}; JSON=${jsonType}; exact signup/recovery paths required`);
+  const paths = ["/auth/callback/social"];
+  record("universal_links", Boolean(team && matching && paths.every((path) => matching.paths?.includes(path) || matching.components?.some((entry) => entry["/"] === path && entry.exclude !== true))), `HTTP ${response.status}; JSON=${jsonType}; exact social callback path required`);
 } catch {
   record("universal_links", false, "AASA unavailable or invalid");
 }

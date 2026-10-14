@@ -93,9 +93,9 @@ export function FeedPage() {
   return (
     <div className="page feed-page">
       <PageIntro
-        eyebrow="COMMUNITY BOARD"
+        eyebrow="게시글"
         title="게시판"
-        description="우리 공동체의 소식과 삶을 따뜻하게 나눠요."
+        description="소속 교회의 게시글을 확인하고 작성합니다."
         action={viewer?.membership ? <Link className="button button--primary" to="/app/posts/new"><Plus weight="bold" /> 글쓰기</Link> : undefined}
       />
       <div className="feed-tools">
@@ -517,7 +517,7 @@ export function PostDetailPage() {
               </article>
             ))}
           </div>
-        ) : <p className="comments__empty">첫 댓글로 따뜻한 마음을 나눠보세요.</p>}
+        ) : <p className="comments__empty">댓글이 없습니다.</p>}
         {localError ? <ErrorBanner message={localError} /> : null}
         <form className="comment-composer" onSubmit={handleComment}>
           <label>
@@ -530,7 +530,7 @@ export function PostDetailPage() {
                 setComment(event.target.value);
                 if (localError === "댓글은 5,000자 이하로 입력해 주세요.") setLocalError(null);
               }}
-              placeholder="따뜻한 댓글을 남겨주세요"
+              placeholder="댓글을 입력하세요"
               aria-describedby="comment-character-count"
               aria-invalid={comment.trim().length > 5000}
             />

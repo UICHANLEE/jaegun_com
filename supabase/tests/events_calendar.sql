@@ -95,7 +95,7 @@ set local role authenticated;
 
 select lives_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, %L, %L, %L, %L, 1, %L, 1, array[%s]::smallint[], null, null, 4, array[1440,60]::integer[])',
+    'select public.save_event(%L, true, %L, %L, %L, %L, %L, %L, 1, %L, 1, array[%s]::smallint[], null, null, 4, array[1440,60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000001',
     current_setting('test.church_scope'),
     '4주 기도회',
@@ -139,7 +139,7 @@ select is(
 set local role authenticated;
 select lives_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, %L, %L, %L, %L, 1, %L, 1, array[%s]::smallint[], null, null, 4, array[1440,60]::integer[])',
+    'select public.save_event(%L, true, %L, %L, %L, %L, %L, %L, 1, %L, 1, array[%s]::smallint[], null, null, 4, array[1440,60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000001',
     current_setting('test.church_scope'),
     '4주 기도회',
@@ -161,7 +161,7 @@ select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-0000000
 set local role authenticated;
 select throws_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, null, null, %L, %L, null, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, true, %L, %L, null, null, %L, %L, null, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000002',
     current_setting('test.church_scope'),
     '하위 범위 침범',
@@ -180,7 +180,7 @@ select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-0000000
 set local role authenticated;
 select throws_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, null, null, %L, %L, null, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, true, %L, %L, null, null, %L, %L, null, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000003',
     current_setting('test.church_scope'),
     '일반 회원 작성 시도',
@@ -222,7 +222,7 @@ select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-0000000
 set local role authenticated;
 select lives_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, null, %L, %L, %L, 1, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, true, %L, %L, null, %L, %L, %L, 1, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000004',
     current_setting('test.church_scope'),
     '정원 한 명 모임',
@@ -333,7 +333,7 @@ select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-0000000
 set local role authenticated;
 select throws_ok(
   format(
-    'select public.save_event(%L, false, %L, %L, null, %L, %L, %L, 2, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, false, %L, %L, null, %L, %L, %L, 2, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000004',
     current_setting('test.church_scope'),
     '정원 변경 시도',
@@ -387,7 +387,7 @@ select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-0000000
 set local role authenticated;
 select lives_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, null, null, statement_timestamp() + interval ''60 minutes'', statement_timestamp() + interval ''90 minutes'', null, %L, 1, array[]::smallint[], null, null, 2, array[60,30]::integer[])',
+    'select public.save_event(%L, true, %L, %L, null, null, statement_timestamp() + interval ''60 minutes'', statement_timestamp() + interval ''90 minutes'', null, %L, 1, array[]::smallint[], null, null, 2, array[60,30]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000005',
     current_setting('test.church_scope'),
     '반복 일정 알림 시험',
@@ -536,7 +536,7 @@ select set_config('test.reminder_event_end', (
 set local role authenticated;
 select throws_ok(
   format(
-    'select public.save_event(%L, false, %L, %L, null, null, %L, %L, null, %L, 1, array[]::smallint[], null, null, 2, array[60,30,10]::integer[])',
+    'select public.save_event(%L, false, %L, %L, null, null, %L, %L, null, %L, 1, array[]::smallint[], null, null, 2, array[60,30,10]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000005',
     current_setting('test.church_scope'),
     '반복 일정 알림 시험',
@@ -550,7 +550,7 @@ select throws_ok(
 );
 select lives_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, null, null, statement_timestamp() + interval ''60 minutes'', statement_timestamp() + interval ''90 minutes'', null, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, true, %L, %L, null, null, statement_timestamp() + interval ''60 minutes'', statement_timestamp() + interval ''90 minutes'', null, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000006',
     current_setting('test.church_scope'),
     '취소 일정 알림 시험',
@@ -645,7 +645,7 @@ select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-0000000
 set local role authenticated;
 select lives_ok(
   format(
-    'select public.save_event(%L, true, %L, %L, null, %L, %L, %L, 1, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, true, %L, %L, null, %L, %L, %L, 1, %L, 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000009',
     current_setting('test.church_scope'),
     '동의 경계 정원 테스트',
@@ -685,7 +685,7 @@ values
   (
     '11000000-0000-4000-8000-000000000005',
     'privacy_policy',
-    '2026-08-30',
+    '2026-10-14',
     false,
     'app',
     pg_catalog.clock_timestamp()
@@ -693,7 +693,7 @@ values
   (
     '11000000-0000-4000-8000-000000000006',
     'privacy_policy',
-    '2026-08-30',
+    '2026-10-14',
     false,
     'app',
     pg_catalog.clock_timestamp()
@@ -890,7 +890,7 @@ select throws_ok(
 );
 select throws_ok(
   format(
-    'select public.save_event(%L, false, %L, %L, null, null, statement_timestamp() + interval ''1 day'', statement_timestamp() + interval ''1 day 1 hour'', null, ''none'', 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, false, %L, %L, null, null, statement_timestamp() + interval ''1 day'', statement_timestamp() + interval ''1 day 1 hour'', null, ''none'', 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000004',
     current_setting('test.church_scope'),
     'known forbidden event probe'
@@ -901,7 +901,7 @@ select throws_ok(
 );
 select throws_ok(
   format(
-    'select public.save_event(%L, false, %L, %L, null, null, statement_timestamp() + interval ''1 day'', statement_timestamp() + interval ''1 day 1 hour'', null, ''none'', 1, array[]::smallint[], null, null, null, array[60]::integer[])',
+    'select public.save_event(%L, false, %L, %L, null, null, statement_timestamp() + interval ''1 day'', statement_timestamp() + interval ''1 day 1 hour'', null, ''none'', 1, array[]::smallint[], null, null, null, array[60]::integer[], ''일정 개최자'')',
     '12000000-0000-4000-8000-000000000099',
     current_setting('test.church_scope'),
     'unknown event probe'
@@ -912,7 +912,7 @@ select throws_ok(
 );
 select throws_ok(
   format(
-    'select public.save_event(%L, false, %L, null, null, null, null, null, null, ''invalid'', 0, array[0]::smallint[], 0, null, 0, array[-1]::integer[])',
+    'select public.save_event(%L, false, %L, null, null, null, null, null, null, ''invalid'', 0, array[0]::smallint[], 0, null, 0, array[-1]::integer[], null)',
     '12000000-0000-4000-8000-000000000004',
     current_setting('test.church_scope')
   ),

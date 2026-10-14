@@ -1,6 +1,6 @@
 import type {
-  AcceptedConsentVersions,
   ActiveConsentDocument,
+  AcceptedConsentVersions,
 } from "../data/legalConsentContract";
 
 export type AppMode = "demo" | "supabase";
@@ -305,6 +305,7 @@ export interface PostDraft {
   body: string;
   files: File[];
 }
+
 
 export interface SignUpInput {
   displayName: string;

@@ -1,245 +1,93 @@
-import {
-  ArrowRight,
-  Article,
-  CalendarBlank,
-  CaretRight,
-  ChatCircle,
-  HandsPraying,
-  ImageSquare,
-  NotePencil,
-  Plus,
-  Sparkle,
-  UsersThree,
-} from "@phosphor-icons/react";
+import { useState } from "react";
+import { ArrowCounterClockwise, CaretRight, Church, SlidersHorizontal } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import "./member-community-home.css";
-import { ProtectedImage } from "../components/ProtectedImage";
-import { Avatar, EmptyState, formatDateTime, formatRelativeKorean } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
-import { getChurchTitleLabel, type Membership, type MembershipRole } from "../types/domain";
+import { HomeWidgetEditor } from "../components/home/HomeWidgetEditor";
+import { HomeFeedWidget, HomeGroupsWidget, HomeNoticeWidget, HomeScheduleWidget } from "../components/home/HomeWidgets";
+import { HOME_WIDGET_IDS, type HomeWidgetId } from "../components/home/homeWidgetTypes";
+import { useHomeWidgetLayout } from "../components/home/useHomeWidgetLayout";
+import "./member-community-home.css";
 
-const ROLE_TITLE_FALLBACK: Record<MembershipRole, string> = {
-  member: "성도",
-  executive: "임원",
-  minister: "사역자",
+const HOME_WIDGET_COMPONENTS = {
+  notice: HomeNoticeWidget,
+  feed: HomeFeedWidget,
+  groups: HomeGroupsWidget,
+  schedule: HomeScheduleWidget,
 };
 
-const MEMBER_QUICK_ACTIONS = [
-  {
-    to: "/app/posts/new",
-    label: "글쓰기",
-    description: "일상과 은혜 나눔",
-    tone: "sharing",
-    icon: NotePencil,
-  },
-  {
-    to: "/app/posts/new?category=prayer",
-    label: "기도 나눔",
-    description: "함께 기도해요",
-    tone: "prayer",
-    icon: HandsPraying,
-  },
-  {
-    to: "/app/posts/new?category=photo_video",
-    label: "사진·영상",
-    description: "순간을 기록해요",
-    tone: "media",
-    icon: ImageSquare,
-  },
-] as const;
+export function MemberHomePage() {
+  const { viewer, mode } = useAppData();
+  const scope = viewer?.membership
+    ? `${mode}:${viewer.profile.id}:${viewer.membership.organizationId}`
+    : null;
 
-function resolveOfficeTitle(membership?: Membership) {
-  if (!membership) return "성도";
-  return membership.churchTitleCode
-    ? getChurchTitleLabel(membership.churchTitleCode)
-    : ROLE_TITLE_FALLBACK[membership.role];
+  // Remount drafts as well as preferences when the actor or church changes.
+  return <MemberHomeLayout key={scope ?? "signed-out"} scope={scope} />;
 }
 
-export function MemberHomePage() {
-  const { viewer, organizations, posts, refreshProtectedMediaUrl } = useAppData();
-  const membership = viewer?.membership;
-  const church = organizations.find((item) => item.id === membership?.organizationId);
-  const officialPost = posts.find(
-    (item) => item.isOfficial && (!item.organizationId || item.organizationId === membership?.organizationId),
-  ) ?? posts.find((item) => item.isOfficial);
-  const recentPosts = posts.filter((item) => item.id !== officialPost?.id).slice(0, 3);
-  const firstName = viewer?.profile.displayName ?? "성도";
-  const officeTitle = resolveOfficeTitle(membership);
-  const weeklySchedule = church?.worshipSchedule?.slice(0, 2) ?? [];
-  const scheduleItems = weeklySchedule.length
-    ? weeklySchedule.map((schedule, index) => ({
-      label: index === 0 ? "주일예배" : "주중 모임",
-      value: schedule,
-    }))
-    : [
-      { label: "주일예배", value: "교회 정보에서 확인해 주세요." },
-      { label: "주중 모임", value: "교회 정보에서 확인해 주세요." },
-    ];
+function MemberHomeLayout({ scope }: { scope: string | null }) {
+  const { viewer, organizations } = useAppData();
+  const { layout, saveLayout } = useHomeWidgetLayout(scope);
+  const [draft, setDraft] = useState<HomeWidgetId[] | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const church = organizations.find((organization) => organization.id === viewer?.membership?.organizationId);
+  const visibleWidgets = draft ?? layout;
+
+  function saveHome() {
+    if (!draft) return;
+    const persisted = saveLayout(draft);
+    setDraft(null);
+    setStatus(persisted
+      ? "홈 구성을 이 기기에 저장했습니다."
+      : "현재 화면에 적용했습니다. 이 기기에는 저장하지 못했습니다.");
+  }
 
   return (
-    <div className="home-page member-home-page">
-      <section className="home-hero member-home-hero">
-        <div className="home-hero__copy">
-          <p className="eyebrow">{church?.name ?? "재건 공동체"}</p>
-          <h1>안녕하세요, {firstName} {officeTitle}님</h1>
-          <p>오늘도 은혜 안에서 함께해요.</p>
+    <div className={`member-home-page${draft ? " member-home-page--editing" : ""}`}>
+      <header className="member-home-heading">
+        <div>
+          <h1>홈</h1>
           {church ? (
-            <nav className="member-community-home__breadcrumb" aria-label="소속 공동체">
-              <span>{church.presbytery}</span><CaretRight aria-hidden="true" /><strong>{church.name}</strong>
+            <nav className="member-home-church" aria-label="소속 공동체">
+              <Link to={`/app/churches/${church.id}`}><Church /><span>{church.name}</span><CaretRight /></Link>
+              <span>{church.presbytery}</span>
             </nav>
           ) : null}
         </div>
-        <img src="/assets/church-retreat-landscape.png" alt="산과 나무 사이에 자리한 교회" />
-      </section>
+        <button
+          className="member-home-edit-button"
+          type="button"
+          aria-expanded={draft !== null}
+          aria-controls="home-widget-editor"
+          onClick={() => {
+            setStatus(null);
+            setDraft(draft ? null : [...layout]);
+          }}
+        >
+          {draft ? <ArrowCounterClockwise /> : <SlidersHorizontal />}
+          {draft ? "편집 취소" : "홈 편집"}
+        </button>
+      </header>
 
-      <div className="home-content member-home-content">
-        <section className="home-primary" aria-labelledby="member-community-heading">
-          <div className="section-heading">
-            <h2 id="member-community-heading">오늘의 공동체</h2>
-          </div>
+      {status ? <p className="member-home-status" role="status">{status}</p> : null}
+      {draft ? (
+        <div id="home-widget-editor">
+          <HomeWidgetEditor
+            layout={draft}
+            onChange={setDraft}
+            onSave={saveHome}
+            onCancel={() => setDraft(null)}
+            onReset={() => setDraft([...HOME_WIDGET_IDS])}
+          />
+          <div className="member-home-preview-label"><span>미리보기</span><small>저장 전에는 기존 구성을 변경하지 않습니다.</small></div>
+        </div>
+      ) : null}
 
-          {officialPost ? (
-            <article className="official-card member-official-card">
-              <div className="official-card__author">
-                <span className="official-card__mark"><img src="/assets/brand-mark-tight.png" alt="" /></span>
-                <div><strong>{officialPost.authorName}</strong><span>{formatDateTime(officialPost.createdAt)}</span></div>
-                <span className="official-card__badge">공식</span>
-              </div>
-              <div className="official-card__divider" />
-              <h3>{officialPost.title}</h3>
-              <p>{officialPost.body}</p>
-              <Link className="button button--light" to={`/app/posts/${officialPost.id}`}>자세히 보기 <ArrowRight /></Link>
-            </article>
-          ) : (
-            <EmptyState
-              icon={<Article />}
-              title="새로운 공식 공지를 준비하고 있어요"
-              description="교회 소식이 등록되면 이곳에서 가장 먼저 알려드릴게요."
-            />
-          )}
-
-          <section className="member-community-home__groups" aria-labelledby="member-groups-heading">
-            <div className="member-community-home__groups-copy">
-              <span className="member-community-home__groups-icon"><UsersThree weight="fill" /></span>
-              <div>
-                <p className="eyebrow">함께하는 작은 모임</p>
-                <h2 id="member-groups-heading">마음 맞는 사람들과 시작해요</h2>
-                <p>찬양 연습, 성경 읽기, 봉사와 일상 나눔까지. 우리 교회 안에서 편하게 모여요.</p>
-              </div>
-            </div>
-            <div className="member-community-home__group-links">
-              <Link className="member-community-home__group-link member-community-home__group-link--primary" to="/app/chats/channels">
-                <UsersThree weight="fill" /><span>소모임 찾기</span><CaretRight aria-hidden="true" />
-              </Link>
-              <Link className="member-community-home__group-link" to="/app/chats/channels?create=1">
-                <Plus weight="bold" /><span>모임 만들기</span><CaretRight aria-hidden="true" />
-              </Link>
-              <Link className="member-community-home__group-link" to="/app/events">
-                <CalendarBlank weight="fill" /><span>모임 일정</span><CaretRight aria-hidden="true" />
-              </Link>
-              <Link className="member-community-home__group-link member-community-home__group-link--ai" to="/app/ai">
-                <Sparkle weight="fill" /><span>공동체 AI 둘러보기</span><CaretRight aria-hidden="true" />
-              </Link>
-            </div>
-            <p className="member-community-home__scope-note">소모임은 소속 교회 회원끼리 함께하는 공간이에요.</p>
-          </section>
-
-          <section className="member-quick-actions" aria-labelledby="member-quick-actions-heading">
-            <div className="section-heading section-heading--compact">
-              <h2 id="member-quick-actions-heading">바로 참여하기</h2>
-            </div>
-            <div className="profile-menu-group member-quick-actions__grid">
-              {MEMBER_QUICK_ACTIONS.map((action) => {
-                const Icon = action.icon;
-                return (
-                  <Link
-                    className={`profile-menu member-quick-action member-quick-action--${action.tone}`}
-                    key={action.label}
-                    to={action.to}
-                  >
-                    <span className="profile-menu__icon member-quick-action__icon"><Icon weight="fill" /></span>
-                    <span className="member-quick-action__copy"><strong>{action.label}</strong><small>{action.description}</small></span>
-                    <CaretRight className="member-quick-action__caret" />
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        </section>
-
-        <aside className="home-secondary member-home-secondary">
-          <section aria-labelledby="member-recent-heading">
-            <div className="section-heading section-heading--compact">
-              <h2 id="member-recent-heading">최근 게시글</h2>
-              <Link to="/app/posts">더보기 <CaretRight /></Link>
-            </div>
-            {recentPosts.length ? (
-              <div className="recent-list">
-                {recentPosts.map((post, index) => (
-                  <Link className="recent-post" key={post.id} to={`/app/posts/${post.id}`}>
-                    {post.media[0]?.kind === "image" ? (
-                      <ProtectedImage
-                        className="recent-post__image"
-                        src={post.media[0].url}
-                        storagePath={post.media[0].storagePath}
-                        refreshUrl={refreshProtectedMediaUrl}
-                        alt={post.media[0].alt ?? ""}
-                        fallbackLabel="게시글 이미지 없음"
-                        manualRetry={false}
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <span className="recent-post__placeholder"><ChatCircle weight="regular" /></span>
-                    )}
-                    <span className="recent-post__content">
-                      <span className="recent-post__author">
-                        <Avatar name={post.authorName} size="small" tone={index === 1 ? "blue" : "green"} />
-                        <strong>{post.authorName}</strong>
-                        <small>{formatRelativeKorean(post.createdAt)}</small>
-                      </span>
-                      <strong className="recent-post__title">{post.title}</strong>
-                      <span className="recent-post__body">{post.body}</span>
-                      <span className="recent-post__comments"><ChatCircle /> {post.comments.length}</span>
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                icon={<ChatCircle />}
-                title="아직 올라온 게시글이 없어요"
-                description="첫 번째 공동체 이야기를 나눠보세요."
-                action={<Link className="button button--secondary" to="/app/posts/new">글쓰기</Link>}
-              />
-            )}
-          </section>
-
-          <section className="member-schedule-card" aria-labelledby="member-schedule-heading">
-            <div className="section-heading section-heading--compact member-schedule-card__heading">
-              <div>
-                <p className="eyebrow">MY CHURCH</p>
-                <h2 id="member-schedule-heading">이번 주 우리 교회</h2>
-              </div>
-            </div>
-            <div className="profile-menu-group member-schedule-card__body">
-              <dl className="member-schedule-card__list">
-                {scheduleItems.map((schedule) => (
-                  <div className="profile-menu member-schedule-card__row" key={`${schedule.label}-${schedule.value}`}>
-                    <dt><CalendarBlank weight="fill" />{schedule.label}</dt>
-                    <dd>{schedule.value}</dd>
-                  </div>
-                ))}
-              </dl>
-              {church ? (
-                <Link className="profile-menu member-schedule-card__link" to={`/app/churches/${church.id}`}>
-                  <span><strong>교회 정보 보기</strong><small>주소와 연락처도 확인할 수 있어요.</small></span>
-                  <ArrowRight />
-                </Link>
-              ) : null}
-            </div>
-          </section>
-        </aside>
+      <div className="member-home-widgets" aria-label="홈 위젯">
+        {visibleWidgets.map((id) => {
+          const Widget = HOME_WIDGET_COMPONENTS[id];
+          return <Widget key={id} />;
+        })}
       </div>
     </div>
   );

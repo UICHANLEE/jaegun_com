@@ -175,9 +175,9 @@ describe("comment length contract", () => {
     storeViewer("member");
     renderApp(["/app/posts/post-retreat"]);
 
-    const comment = await screen.findByPlaceholderText(
-      "따뜻한 댓글을 남겨주세요",
-      undefined,
+    const comment = await screen.findByRole(
+      "textbox",
+      { name: /^댓글/ },
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     );
     expect(comment).toHaveAttribute("maxLength", "5000");

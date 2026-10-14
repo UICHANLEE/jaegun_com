@@ -120,14 +120,14 @@ describe("event route integration", () => {
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 });
 
-describe("event editor MFA boundary", () => {
-  it("requires MFA enrollment for an event-only delegate in production", () => {
+describe("event editor authentication boundary", () => {
+  it("never forces new authenticator enrollment for management routes", () => {
     expect(requiresManagementMfaEnrollment({
       mode: "supabase",
       pathname: "/manage/events/new",
       highPrivilege: false,
       verifiedFactorCount: 0,
-    })).toBe(true);
+    })).toBe(false);
     expect(requiresManagementMfaEnrollment({
       mode: "supabase",
       pathname: "/manage/events/occurrence-1/edit",

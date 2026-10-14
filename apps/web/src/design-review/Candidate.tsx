@@ -1,0 +1,71 @@
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Bell, CaretDown, CaretRight, ChatCircle, Check, CheckCircle, Church, DotsThree, FileText, House, LockKey, NotePencil, Plus, PushPin, Sparkle, UserCircle, UsersThree, Wallet, X } from "@phosphor-icons/react";
+import "./candidate.css";
+
+type Variant = "a" | "b" | "c";
+type Screen = "home" | "join" | "manage";
+const menus = [{ name: "홈", icon: House }, { name: "게시판", icon: FileText }, { name: "채팅", icon: ChatCircle }, { name: "AI", icon: Sparkle }, { name: "교회", icon: Church }, { name: "내 정보", icon: UserCircle }];
+const directory: Record<string, string[]> = { "서울노회": ["재건부평교회", "재건안양교회"], "부산노회": ["재건부산교회", "재건서면교회"] };
+const consents = ["개인정보 처리방침", "민감정보 수집·이용", "개인정보 국외 이전", "서비스 이용약관", "공동체 이용규칙"];
+const posts = [
+  { title: "토요일 소모임 사진", author: "김지은", category: "나눔", time: "1시간 전", comments: 8, image: true },
+  { title: "이번 주 기도 제목을 나눠주세요", author: "이재건", category: "기도", time: "3시간 전", comments: 4, image: false },
+];
+const details: Record<string, { title: string; body: string }> = {
+  notice: { title: "10월 감사예배 안내", body: "10월 25일 일요일 오전 11시 · 본당\n\n예배 후 공동 식사가 있습니다. 참석 안내는 교회 게시판에서 확인해 주세요.\n\n디자인 비교용 예시 공지입니다." },
+  groups: { title: "소모임", body: "성경 읽기 · 공개 모임 · 12명\n찬양 연습 · 공개 모임 · 8명\n\n소속 교회의 모임만 표시합니다. 비공개 모임은 초대 수락이 필요합니다. 이 예시에서는 참여 요청을 전송하지 않습니다." },
+  schedule: { title: "교회 일정", body: "10.14 수 · 19:30 수요예배\n10.17 토 · 14:00 성경 읽기 모임\n10.18 일 · 11:00 주일예배\n\n디자인 비교용 일정입니다." },
+  minutes: { title: "2026년 회의록", body: "10월 정기 임원회 · 초안\n9월 정기 임원회 · 확정\n\n동일 교회의 활성 임원은 열람할 수 있습니다. 작성은 허용된 연간 임원직에 한정됩니다. 실제 기록은 변경하지 않습니다." },
+  ledger: { title: "2026년 회계 장부", body: "서기 예시 계정에서는 열람만 가능합니다.\n작성은 허용된 연간 임원직에 한정됩니다.\n\n실제 회계 자료를 조회하거나 저장하지 않습니다." },
+  approvals: { title: "회원 승인 대기", body: "가입 요청 예시 A · 일반 성도\n가입 요청 예시 B · 일반 성도\n\n동일 교회의 승인 권한을 가진 사역자·임원이 처리합니다. 사역자·임원 역할의 가입 신청은 플랫폼 관리자 승인 대상입니다. 이 화면에서는 승인하지 않습니다." },
+};
+
+export function Candidate({ variant, screen }: { variant: Variant; screen: Screen }) {
+  const [active, setActive] = useState("홈");
+  const [panel, setPanel] = useState<string | null>(null);
+  const [filter, setFilter] = useState("전체");
+  const [step, setStep] = useState(1);
+  const [presbytery, setPresbytery] = useState("");
+  const [church, setChurch] = useState("");
+  const [age, setAge] = useState(false);
+  const [accepted, setAccepted] = useState<boolean[]>(Array(5).fill(false));
+  const [draft, setDraft] = useState("");
+  const [savedDraft, setSavedDraft] = useState("");
+  const dialog = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!panel || !dialog.current) return;
+    const element = dialog.current;
+    const previous = document.activeElement;
+    const controls = () => element.querySelectorAll<HTMLElement>("button:not(:disabled), textarea, input, select, [tabindex='0']");
+    controls()[0]?.focus();
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") { event.preventDefault(); setPanel(null); }
+      if (event.key !== "Tab") return;
+      const targets = controls();
+      const first = targets[0];
+      const last = targets[targets.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+    element.addEventListener("keydown", onKey);
+    return () => { element.removeEventListener("keydown", onKey); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, [panel]);
+
+  const navigation = <nav className={variant === "c" ? "cn-rail" : "cn-nav"} aria-label="커뮤니티 메뉴">{menus.map(({ name, icon: Icon }) => <button key={name} aria-current={active === name ? "page" : undefined} onClick={() => setActive(name)}><Icon weight={active === name ? "fill" : "regular"} /><span>{name}</span></button>)}</nav>;
+  function heading(title: string, target: string, label = "전체 보기") {
+    return <div className="cn-section-heading"><h2>{title}</h2><button onClick={() => setPanel(target)}>{label}<CaretRight /></button></div>;
+  }
+  const notice = <button className="cn-notice" onClick={() => setPanel("notice")}><span className="cn-icon-tile cn-orange"><PushPin weight="fill" /></span><span className="cn-notice-copy"><small>교회 공지 <span>10.12</span></small><strong>10월 감사예배 안내</strong><span>10.25 일요일 · 오전 11시</span></span><CaretRight /></button>;
+  const groups = <section className="cn-section cn-groups">{heading("소모임", "groups", "찾기")}<div className="cn-group-grid">{[{ title: "성경 읽기", subtitle: "12명 · 토요일 14:00", tone: "green", icon: FileText }, { title: "찬양 연습", subtitle: "8명 · 수요일 19:00", tone: "blue", icon: UsersThree }].map(({ title, subtitle, tone, icon: Icon }) => <button key={title} onClick={() => setPanel("groups")}><span className={`cn-icon-tile cn-${tone}`}><Icon /></span><strong>{title}</strong><small>{subtitle}</small></button>)}</div></section>;
+  const recent = <section className="cn-section">{heading("최근 게시글", "게시판")}<div className="cn-post-list">{posts.map(post => <button className="cn-post-row" key={post.title} onClick={() => setPanel(post.title)}><div><span className={`cn-category ${post.category === "기도" ? "cn-category--green" : ""}`}>{post.category}</span><strong>{post.title}</strong><small>{post.author} · {post.time} <span><ChatCircle /> {post.comments}</span></small></div>{post.image && <img src="/assets/community-small-group.jpg" alt="소모임 사진" />}</button>)}</div></section>;
+  const schedule = <section className="cn-section">{heading("이번 주 일정", "schedule", "달력")}<button className="cn-event" onClick={() => setPanel("schedule")}><span className="cn-date"><small>수</small><strong>14</strong></span><span><strong>수요예배</strong><small>19:30 · 본당</small></span><CaretRight /></button><button className="cn-event" onClick={() => setPanel("schedule")}><span className="cn-date"><small>일</small><strong>18</strong></span><span><strong>주일예배</strong><small>11:00 · 본당</small></span><CaretRight /></button></section>;
+  const feed = <><div className="cn-feed-tabs" role="group" aria-label="게시글 분류">{["전체", "공지", "나눔", "기도"].map(name => <button key={name} aria-pressed={filter === name} onClick={() => setFilter(name)}>{name}</button>)}</div><button className="cn-composer" onClick={() => setPanel("write")}><span className="cn-avatar">재</span><span>{savedDraft ? "작성 중인 글 보기" : "글 작성"}</span><Plus /></button>{(filter === "전체" || filter === "공지") && <article className="cn-feed-notice"><div><span className="cn-category cn-category--orange">공지</span><small>교회 운영팀 · 어제</small></div><button onClick={() => setPanel("notice")}><strong>10월 감사예배 안내</strong><p>10월 25일 오전 11시, 본당에서 드립니다.</p><span>자세히 보기 <ArrowRight /></span></button></article>}{posts.filter(post => filter === "전체" || filter === post.category).map(post => <article className="cn-feed-post" key={post.title}><header><span className={`cn-avatar ${post.image ? "cn-avatar--blue" : "cn-avatar--green"}`}>{post.author.slice(0,1)}</span><span><strong>{post.author}</strong><small>{post.category} · {post.time}</small></span><button aria-label={`${post.title} 상세 보기`} onClick={() => setPanel(post.title)}><DotsThree /></button></header><button className="cn-feed-story" onClick={() => setPanel(post.title)}><h2>{post.title}</h2>{post.image ? <img src="/assets/community-small-group.jpg" alt="소모임 사진" /> : <p>댓글로 기도 제목을 남겨주세요.</p>}</button><footer><ChatCircle /> 댓글 {post.comments}</footer></article>)}{filter === "전체" && groups}</>;
+
+  return <section className={`candidate candidate-${variant}`} aria-label={`${variant.toUpperCase()}안 디자인 예시`}>
+    <header className="cn-header"><div className="cn-brand"><img src="/assets/brand-mark-tight.png" alt="" /><strong>재건 공동체</strong></div><button className="cn-header-button" aria-label="알림" onClick={() => setPanel("알림")}><Bell /><span /></button></header>
+    {screen === "home" ? <><button className="cn-church" onClick={() => setPanel("교회")}><Church /><span>재건부평교회</span><CaretDown /></button><div className={`cn-home-body ${variant === "c" ? "cn-with-rail" : ""}`}>{variant === "c" && navigation}<main className="cn-main">
+      {active !== "홈" ? <section className="cn-destination"><h1>{active}</h1><p>디자인 비교용 화면입니다.</p><button className="cn-primary" onClick={() => setPanel(active)}>내용 보기 <ArrowRight /></button><button className="cn-secondary" onClick={() => setActive("홈")}><ArrowLeft /> 홈으로</button></section> : variant === "b" ? feed : <><div className="cn-page-heading"><h1>홈</h1><span>10월 13일 화요일</span></div>{notice}{variant === "a" && <div className="cn-shortcuts">{[{ label: "게시판", icon: NotePencil, tone: "orange" }, { label: "소모임", icon: UsersThree, tone: "green" }, { label: "AI", icon: Sparkle, tone: "blue" }].map(({ label, icon: Icon, tone }) => <button key={label} onClick={() => setPanel(label === "소모임" ? "groups" : label)}><span className={`cn-icon-tile cn-${tone}`}><Icon /></span>{label}</button>)}</div>}{variant === "c" ? <>{groups}{recent}{schedule}</> : <>{recent}{groups}{schedule}</>}</>}
+    </main></div>{variant !== "c" && navigation}</> : screen === "join" ? <main className="cn-main cn-join"><div className="cn-page-heading"><h1>{step === 1 ? "교회 선택" : step === 2 ? "필수 동의" : "승인 대기"}</h1><span>{step} / 3</span></div><ol className="cn-steps">{["소속", "동의", "승인"].map((name,index)=><li key={name} className={step>=index+1?"is-active":""}><span>{step>index+1?<Check />:index+1}</span>{name}</li>)}</ol>{step === 1 ? <><p className="cn-help">소속 노회를 선택한 뒤 교회를 선택하세요.</p><label className="cn-field">노회<select value={presbytery} onChange={event=>{setPresbytery(event.target.value);setChurch("");}}><option value="">노회 선택</option>{Object.keys(directory).map(name=><option key={name}>{name}</option>)}</select></label><label className="cn-field">교회<select value={church} disabled={!presbytery} onChange={event=>setChurch(event.target.value)}><option value="">{presbytery?"교회 선택":"노회를 먼저 선택하세요"}</option>{(directory[presbytery]??[]).map(name=><option key={name}>{name}</option>)}</select></label><div className="cn-inline-note"><LockKey /><p>교회 선택만으로 회원 자격이나 권한이 부여되지 않습니다.</p></div><button className="cn-primary" disabled={!church} onClick={()=>setStep(2)}>다음 <ArrowRight /></button></> : step === 2 ? <><p className="cn-help">각 문서를 확인하고 동의해 주세요.</p><label className="cn-consent cn-age"><input type="checkbox" checked={age} onChange={event=>setAge(event.target.checked)} /><span>만 14세 이상입니다.</span></label><fieldset className="cn-consents"><legend>필수 동의 5개</legend>{consents.map((name,index)=><div key={name}><label className="cn-consent"><input type="checkbox" checked={accepted[index]} onChange={event=>setAccepted(accepted.map((value,position)=>position===index?event.target.checked:value))} /><span>{name}<small>필수</small></span></label><button aria-label={`${name} 보기`} onClick={()=>setPanel(name)}><CaretRight /></button></div>)}</fieldset><button className="cn-primary" disabled={!age||!accepted.every(Boolean)} onClick={()=>setStep(3)}>승인 대기 화면 보기 <ArrowRight /></button><button className="cn-secondary" onClick={()=>setStep(1)}><ArrowLeft /> 이전</button></> : <><div className="cn-pending"><CheckCircle /><h2>가입 승인 대기</h2><p>{church}</p><span>일반 성도 · 예시 상태</span></div><div className="cn-inline-note"><LockKey /><p>실제 계정 생성·동의 기록·가입 요청은 전송하지 않았습니다.</p></div><button className="cn-primary" onClick={()=>{setStep(1);setPresbytery("");setChurch("");setAccepted(Array(5).fill(false));setAge(false);}}>다시 보기 <ArrowRight /></button></>}<p className="cn-preview-note">디자인 비교용 · 실제 인증 없음</p></main> : <main className="cn-main cn-manage"><div className="cn-page-heading"><h1>임원 운영</h1><span className="cn-year">2026 <CaretDown /></span></div><div className="cn-role"><Church /><span>재건부평교회<strong>임원 · 서기</strong></span><span className="cn-category cn-category--green">2026년</span></div><div className="cn-stat-grid"><button onClick={()=>setPanel("approvals")}><small>회원 승인 대기</small><strong className="cn-text-orange">2<span>건</span></strong></button><button onClick={()=>setPanel("minutes")}><small>회의록 초안</small><strong className="cn-text-blue">1<span>건</span></strong></button></div><section className="cn-section">{heading("처리할 업무","minutes")}<button className="cn-task" onClick={()=>setPanel("minutes")}><span className="cn-icon-tile cn-blue"><FileText /></span><span><strong>10월 정기 임원회 회의록</strong><small>초안 · 10.12 작성</small></span><CaretRight /></button><button className="cn-task" onClick={()=>setPanel("approvals")}><span className="cn-icon-tile cn-orange"><UsersThree /></span><span><strong>새 회원 가입 요청</strong><small>일반 성도 · 2건</small></span><CaretRight /></button></section><section className="cn-section">{heading("연간 기록","minutes")}<button className="cn-record" onClick={()=>setPanel("minutes")}><FileText /><strong>회의록</strong><span>열람 · 작성</span><CaretRight /></button><button className="cn-record" onClick={()=>setPanel("ledger")}><Wallet /><strong>회계 장부</strong><span>열람 전용</span><CaretRight /></button></section><div className="cn-inline-note"><LockKey /><p>작성 권한은 소속 교회와 연간 임원직을 기준으로 확인합니다.</p></div><button className="cn-secondary" onClick={()=>setPanel("공동체")}><House /> 공동체 도구</button><p className="cn-preview-note">디자인 비교용 · 실제 승인·저장 없음</p></main>}
+    {panel && <div className="cn-overlay"><section className="cn-dialog" ref={dialog} role="dialog" aria-modal="true" aria-label={details[panel]?.title??panel}><header><h2>{panel==="write"?"글 작성":details[panel]?.title??panel}</h2><button aria-label="닫기" onClick={()=>setPanel(null)}><X /></button></header>{panel==="write"?<><label className="cn-field">내용<textarea value={draft} onChange={event=>setDraft(event.target.value)} placeholder="내용 입력" rows={5} /></label><p className="cn-help">현재 화면에만 보관하며 서버에 게시하지 않습니다.</p><button className="cn-primary" disabled={!draft.trim()} onClick={()=>{setSavedDraft(draft);setPanel(null);}}>초안 보관 <Check /></button></>:<><p>{details[panel]?.body??(panel==="AI"?"편집 가능한 프롬프트를 준비하는 공간입니다. AI 응답 생성은 연결하지 않았습니다.":panel==="교회"?"서울노회 · 재건부평교회\n주일예배 · 일요일 오전 11시\n\n디자인 비교용 교회 정보입니다.":consents.includes(panel)?"실서비스에서는 해당 버전의 법적 문서 전문을 표시합니다. 이 화면은 문서 배치 예시이며 실제 동의를 기록하지 않습니다.":"디자인 비교용 예시입니다. 실제 데이터 조회나 작업은 실행하지 않습니다.")}</p><button className="cn-secondary" onClick={()=>setPanel(null)}>닫기</button></>}</section></div>}
+  </section>;
+}
