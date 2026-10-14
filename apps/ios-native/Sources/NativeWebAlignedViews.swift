@@ -35,6 +35,7 @@ struct NativeMemberHomeView: View {
                         Label("소속 교회 확인", systemImage: "building.2").font(.caption).frame(minHeight: 44)
                     }
                 }
+                NativeFaithHomeSummary()
                 VStack(alignment: .leading, spacing: 12) {
                     Text("교회 공지").font(.headline)
                     if loading { ProgressView("소식을 불러오고 있습니다") }
@@ -65,7 +66,7 @@ struct NativeMemberHomeView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("소모임").font(.headline)
                     Text("교회 회원끼리 채널에서 대화를 이어가세요.").font(.subheadline).foregroundStyle(NativePalette.muted)
-                    NavigationLink { NativeChannelListView() } label: {
+                    NavigationLink { NativeCommunityChatHubView() } label: {
                         NativeCard { Label("소모임 찾기", systemImage: "person.2").font(.subheadline.weight(.semibold)) }
                     }
                 }
@@ -122,7 +123,7 @@ struct NativeChurchSummaryView: View {
                 }
             }
             Section("공동체") {
-                NavigationLink("교회 채널") { NativeChannelListView() }
+                NavigationLink("교회 채널·개인 대화") { NativeCommunityChatHubView() }
                 NavigationLink("예배·모임 일정") { NativeEventOperationsView() }
             }
         }.navigationTitle("교회").nativePageStyle().task { await load() }.refreshable { await load() }

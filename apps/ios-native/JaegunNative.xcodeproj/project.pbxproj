@@ -7,10 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0E5E182D2DF0F70613BCDB4C /* NativeFaithViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43BED3BC51730C4E9C2A8B5B /* NativeFaithViews.swift */; };
+		12E1AEA343EB730AF0AA1454 /* NativeFaithTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C91154CAB59C1C64DC10AF6 /* NativeFaithTests.swift */; };
 		13F8E8958A22ED411863CBD7 /* NativeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 756574A99AF283A7DF99EE15 /* NativeConfig.swift */; };
 		1488D179E8310B2D519E8B72 /* NativeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F442E5B95FD5C40936BC43D /* NativeSession.swift */; };
 		1489D41389826D26034C584B /* NativeWebAlignedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08351006B1D2EAA2FBBA1927 /* NativeWebAlignedViews.swift */; };
+		17ECE5D01FC0EBED5794F32B /* NativeFaithWithdrawalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49D486BA6CC3704A7DA8E430 /* NativeFaithWithdrawalView.swift */; };
+		3C8EB1A2C089A1CB7D8D7F46 /* NativeCollaborationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */; };
 		42CFEFA8E03967008AAE4864 /* JaegunNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC000B221F723B87A9E585E /* JaegunNativeApp.swift */; };
+		44ED8BE983CB3AF105BAF4F1 /* FaithConsent.md in Resources */ = {isa = PBXBuildFile; fileRef = B6AD8F9F82B973B4774FA4D2 /* FaithConsent.md */; };
+		75CAF80A98823F59DE8300BA /* NativeCommunityCollaboration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3D66C83AEDE790E890913 /* NativeCommunityCollaboration.swift */; };
 		7EFF8D79FC827013012D5356 /* NativeDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E365B8E3A54D5777FD40343 /* NativeDesign.swift */; };
 		A3F021AB74EBA29D39B0635E /* NativeApprovalOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA9B0FE847661DAE51729C82 /* NativeApprovalOperations.swift */; };
 		AE733FE489BD34F4D39F9A5A /* NativeOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E55B492C032D9698DE7BF2E /* NativeOnboardingView.swift */; };
@@ -18,6 +24,7 @@
 		BBF699C0BC498702C4D10C10 /* NativeSignupOfficeRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761F36AD2AA7993D8002E53D /* NativeSignupOfficeRequests.swift */; };
 		BC7CEFAD06C959AC98630D70 /* NativeAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576C7FF82AB3606E675CDF1C /* NativeAPI.swift */; };
 		BDF432E799C07905F5C576BF /* LegalDocuments.json in Resources */ = {isa = PBXBuildFile; fileRef = B9391360E292500C2F27AB46 /* LegalDocuments.json */; };
+		C60DBB062DFFE238126CD470 /* BibleCanon.json in Resources */ = {isa = PBXBuildFile; fileRef = 84C207C5337B0C03AC5E9ADB /* BibleCanon.json */; };
 		D8C39F9CA021B4DD828DF7D1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8E9CB8E1109E2C13E2BAC121 /* Assets.xcassets */; };
 		E5AE03CF5EF8CDCEDCE0A0B1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 29A560F2DD8CB41D3C0A6923 /* PrivacyInfo.xcprivacy */; };
 		E623690B69A8C0C18DDD8858 /* NativeSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 940E4A821DA8DB38946024EC /* NativeSecurityTests.swift */; };
@@ -37,18 +44,25 @@
 
 /* Begin PBXFileReference section */
 		08351006B1D2EAA2FBBA1927 /* NativeWebAlignedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWebAlignedViews.swift; sourceTree = "<group>"; };
+		1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCollaborationTests.swift; sourceTree = "<group>"; };
+		1C91154CAB59C1C64DC10AF6 /* NativeFaithTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFaithTests.swift; sourceTree = "<group>"; };
 		2229D5A1E0180AC4D99703FC /* NativeEventEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventEditor.swift; sourceTree = "<group>"; };
 		29A560F2DD8CB41D3C0A6923 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3E365B8E3A54D5777FD40343 /* NativeDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDesign.swift; sourceTree = "<group>"; };
 		3E55B492C032D9698DE7BF2E /* NativeOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOnboardingView.swift; sourceTree = "<group>"; };
+		43BED3BC51730C4E9C2A8B5B /* NativeFaithViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFaithViews.swift; sourceTree = "<group>"; };
+		49D486BA6CC3704A7DA8E430 /* NativeFaithWithdrawalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFaithWithdrawalView.swift; sourceTree = "<group>"; };
 		4AC000B221F723B87A9E585E /* JaegunNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JaegunNativeApp.swift; sourceTree = "<group>"; };
 		576C7FF82AB3606E675CDF1C /* NativeAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAPI.swift; sourceTree = "<group>"; };
+		65A3D66C83AEDE790E890913 /* NativeCommunityCollaboration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCommunityCollaboration.swift; sourceTree = "<group>"; };
 		6F442E5B95FD5C40936BC43D /* NativeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSession.swift; sourceTree = "<group>"; };
 		756574A99AF283A7DF99EE15 /* NativeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConfig.swift; sourceTree = "<group>"; };
 		761F36AD2AA7993D8002E53D /* NativeSignupOfficeRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSignupOfficeRequests.swift; sourceTree = "<group>"; };
 		8386CB9E3495ECD9BF566B73 /* NativeCommunityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCommunityViews.swift; sourceTree = "<group>"; };
+		84C207C5337B0C03AC5E9ADB /* BibleCanon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = BibleCanon.json; sourceTree = "<group>"; };
 		8E9CB8E1109E2C13E2BAC121 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		940E4A821DA8DB38946024EC /* NativeSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSecurityTests.swift; sourceTree = "<group>"; };
+		B6AD8F9F82B973B4774FA4D2 /* FaithConsent.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = FaithConsent.md; sourceTree = "<group>"; };
 		B9391360E292500C2F27AB46 /* LegalDocuments.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = LegalDocuments.json; sourceTree = "<group>"; };
 		C6C17AB09F50B9066DE2595F /* JaegunNative.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = JaegunNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D76F13114AC9977C7C9E33C4 /* JaegunNativeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = JaegunNativeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -62,6 +76,8 @@
 			isa = PBXGroup;
 			children = (
 				8E9CB8E1109E2C13E2BAC121 /* Assets.xcassets */,
+				84C207C5337B0C03AC5E9ADB /* BibleCanon.json */,
+				B6AD8F9F82B973B4774FA4D2 /* FaithConsent.md */,
 				B9391360E292500C2F27AB46 /* LegalDocuments.json */,
 				29A560F2DD8CB41D3C0A6923 /* PrivacyInfo.xcprivacy */,
 			);
@@ -92,10 +108,13 @@
 				4AC000B221F723B87A9E585E /* JaegunNativeApp.swift */,
 				576C7FF82AB3606E675CDF1C /* NativeAPI.swift */,
 				EA9B0FE847661DAE51729C82 /* NativeApprovalOperations.swift */,
+				65A3D66C83AEDE790E890913 /* NativeCommunityCollaboration.swift */,
 				8386CB9E3495ECD9BF566B73 /* NativeCommunityViews.swift */,
 				756574A99AF283A7DF99EE15 /* NativeConfig.swift */,
 				3E365B8E3A54D5777FD40343 /* NativeDesign.swift */,
 				2229D5A1E0180AC4D99703FC /* NativeEventEditor.swift */,
+				43BED3BC51730C4E9C2A8B5B /* NativeFaithViews.swift */,
+				49D486BA6CC3704A7DA8E430 /* NativeFaithWithdrawalView.swift */,
 				3E55B492C032D9698DE7BF2E /* NativeOnboardingView.swift */,
 				FAA28B2098A596187BD46A4A /* NativeRootView.swift */,
 				6F442E5B95FD5C40936BC43D /* NativeSession.swift */,
@@ -108,6 +127,8 @@
 		76B507CB934DD73951932092 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */,
+				1C91154CAB59C1C64DC10AF6 /* NativeFaithTests.swift */,
 				940E4A821DA8DB38946024EC /* NativeSecurityTests.swift */,
 			);
 			path = Tests;
@@ -208,6 +229,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				D8C39F9CA021B4DD828DF7D1 /* Assets.xcassets in Resources */,
+				C60DBB062DFFE238126CD470 /* BibleCanon.json in Resources */,
+				44ED8BE983CB3AF105BAF4F1 /* FaithConsent.md in Resources */,
 				BDF432E799C07905F5C576BF /* LegalDocuments.json in Resources */,
 				E5AE03CF5EF8CDCEDCE0A0B1 /* PrivacyInfo.xcprivacy in Resources */,
 			);
@@ -223,10 +246,13 @@
 				42CFEFA8E03967008AAE4864 /* JaegunNativeApp.swift in Sources */,
 				BC7CEFAD06C959AC98630D70 /* NativeAPI.swift in Sources */,
 				A3F021AB74EBA29D39B0635E /* NativeApprovalOperations.swift in Sources */,
+				75CAF80A98823F59DE8300BA /* NativeCommunityCollaboration.swift in Sources */,
 				E7C673E58B6CFC0108589492 /* NativeCommunityViews.swift in Sources */,
 				13F8E8958A22ED411863CBD7 /* NativeConfig.swift in Sources */,
 				7EFF8D79FC827013012D5356 /* NativeDesign.swift in Sources */,
 				E990FD75F37C5A6B97A02BB2 /* NativeEventEditor.swift in Sources */,
+				0E5E182D2DF0F70613BCDB4C /* NativeFaithViews.swift in Sources */,
+				17ECE5D01FC0EBED5794F32B /* NativeFaithWithdrawalView.swift in Sources */,
 				AE733FE489BD34F4D39F9A5A /* NativeOnboardingView.swift in Sources */,
 				B27C2CEBBBAAF15C2046B9AA /* NativeRootView.swift in Sources */,
 				1488D179E8310B2D519E8B72 /* NativeSession.swift in Sources */,
@@ -239,6 +265,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3C8EB1A2C089A1CB7D8D7F46 /* NativeCollaborationTests.swift in Sources */,
+				12E1AEA343EB730AF0AA1454 /* NativeFaithTests.swift in Sources */,
 				E623690B69A8C0C18DDD8858 /* NativeSecurityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

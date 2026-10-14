@@ -123,6 +123,7 @@ const SafetyPrivacyContext = createContext<SafetyPrivacyContextValue | null>(nul
 const MfaBootstrapContext = createContext<MfaBootstrapContextValue | null>(null);
 const MfaGateContext = createContext<{ refresh: () => Promise<MfaStatus | null> } | null>(null);
 const GATE_ALLOWED_PATHS = new Set([
+  "/app/faith/withdraw",
   "/account-deletion",
   "/support",
   "/auth/callback/social",
@@ -622,6 +623,7 @@ export function PrivacyConsentPage() {
     <div className="page safety-page">
       <SafetyPageIntro eyebrow="PRIVACY & CONSENT" title="개인정보와 동의" description="교회 소속 정보와 명단 공개 범위를 직접 관리하세요." />
       <DemoNotice />
+      <Link to="/app/faith/withdraw">개인 통독·QT 동의 철회 및 기록 삭제</Link>
       {consentRequired ? (
         <div className="safety-alert safety-alert--required" role="alert">
           <ShieldWarning weight="fill" />

@@ -31,7 +31,7 @@ function EditorHarness() {
 describe("home widget preferences", () => {
   it.each([
     ["malformed JSON", "{"],
-    ["unknown version", JSON.stringify({ version: 2, layout: ["notice"] })],
+    ["unknown version", JSON.stringify({ version: 9, layout: ["notice"] })],
     ["non-numeric version", JSON.stringify({ version: "1", layout: ["notice"] })],
     ["duplicate widgets", JSON.stringify({ version: 1, layout: ["feed", "feed"] })],
     ["unknown widgets", JSON.stringify({ version: 1, layout: ["notice", "management"] })],
@@ -159,10 +159,10 @@ describe("home widget editor", () => {
     expect(within(visibleList).getAllByRole("listitem")[0]).toHaveTextContent("교회 공지");
     expect(setItem).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "기본 구성" }));
-    expect(within(visibleList).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(visibleList).getAllByRole("listitem")).toHaveLength(5);
     expect(setItem).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "저장" }));
-    expect(JSON.parse(window.localStorage.getItem(LIVE_KEY)!)).toEqual({ version: 1, layout: HOME_WIDGET_IDS });
+    expect(JSON.parse(window.localStorage.getItem(LIVE_KEY)!)).toEqual({ version: 2, layout: HOME_WIDGET_IDS });
     expect(setItem).toHaveBeenCalledTimes(1);
   });
 });

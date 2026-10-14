@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { HOME_WIDGET_IDS, type HomeWidgetId } from "./homeWidgetTypes";
 
 const STORAGE_PREFIX = "jaegun-home-widgets-v1";
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 
 function defaultLayout(): HomeWidgetId[] {
   return [...HOME_WIDGET_IDS];
@@ -32,9 +32,11 @@ function readLayout(scope: string | null): HomeWidgetId[] {
     const preference = stored as Record<string, unknown>;
     if (
       Object.keys(preference).length !== 2
-      || preference.version !== STORAGE_VERSION
+      || (preference.version !== 1 && preference.version !== STORAGE_VERSION)
       || !isWidgetLayout(preference.layout)
     ) return defaultLayout();
+    // A saved v1 layout is an explicit preference. Do not insert a new widget,
+    // reorder it, or rewrite device storage merely because the app upgraded.
     return preference.layout;
   } catch {
     return defaultLayout();

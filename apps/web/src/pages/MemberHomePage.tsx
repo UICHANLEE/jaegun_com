@@ -7,8 +7,10 @@ import { HomeFeedWidget, HomeGroupsWidget, HomeNoticeWidget, HomeScheduleWidget 
 import { HOME_WIDGET_IDS, type HomeWidgetId } from "../components/home/homeWidgetTypes";
 import { useHomeWidgetLayout } from "../components/home/useHomeWidgetLayout";
 import "./member-community-home.css";
+import { FaithHomeWidget } from "./FaithPages";
 
 const HOME_WIDGET_COMPONENTS = {
+  faith: FaithHomeWidget,
   notice: HomeNoticeWidget,
   feed: HomeFeedWidget,
   groups: HomeGroupsWidget,

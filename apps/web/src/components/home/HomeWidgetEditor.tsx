@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { ArrowDown, ArrowUp, CalendarDots, ChatCircleText, Megaphone, UsersThree } from "@phosphor-icons/react";
+import { ArrowDown, ArrowUp, BookOpen, CalendarDots, ChatCircleText, Megaphone, UsersThree } from "@phosphor-icons/react";
 import { HOME_WIDGET_DEFINITIONS, HOME_WIDGET_IDS, type HomeWidgetId } from "./homeWidgetTypes";
 
 export interface HomeWidgetEditorProps {
@@ -11,6 +11,7 @@ export interface HomeWidgetEditorProps {
 }
 
 const WIDGET_ICONS = {
+  faith: BookOpen,
   notice: Megaphone,
   feed: ChatCircleText,
   groups: UsersThree,

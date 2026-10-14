@@ -66,6 +66,7 @@ struct NativeEventOperationsView: View {
                     Text(NativeEventDraft.dateLabel(nativeText(row, "starts_at"))).font(.subheadline).foregroundStyle(NativePalette.muted)
                     if !nativeText(row, "host_name").isEmpty { Text("주최자 · " + nativeText(row, "host_name")).font(.subheadline) }
                     if !nativeText(row, "location_text").isEmpty { Label(nativeText(row, "location_text"), systemImage: "mappin.and.ellipse").font(.subheadline) }
+                    NavigationLink("참석·미정·불참 응답") { NativeGatheringRSVPView(occurrence: row) }.frame(minHeight: 44)
                     if row["can_manage"] as? Bool == true && nativeText(row, "event_status") == "scheduled" {
                         HStack {
                             Button("일정 수정") { Task { await edit(row) } }.frame(minHeight: 44)

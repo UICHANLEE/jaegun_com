@@ -36,6 +36,8 @@
 
 ## Production Service
 
+- On 2026-10-14 the user approved a separate optional consent for private Bible reading progress and QT. Preserve the existing five required consents and their history. Require exact `faith_private_records` document version/hash before private-record access; never auto-accept on OAuth, approval or feature entry. Store actor-owned records only, without officer/admin read bypass, ranking opt-in or bundled Bible verse text. Withdrawal remains a minimal authenticated self-service operation even after core consent becomes stale or church membership ends and deletes the actor’s reading/QT/idempotency records; shared board copies are managed separately.
+
 - On 2026-10-14 the user explicitly selected pure SwiftUI for the iPhone application. Develop it independently under `apps/ios-native/` with native views, URLSession, device-only Keychain, and system OAuth authentication. Do not present a Capacitor/WebView app or a Vercel browser page as the requested native product. Preserve the existing web service and backend authorization boundaries. Native development builds are not App Store-ready until feature parity and actual release gates are verified.
 - On 2026-10-14 the user rejected the separate native card-style redesign. The existing web service is the native app's visual source of truth: reuse `apps/web/src/theme.css`, mobile auth hierarchy, clean feed B widgets, and member destinations (홈·게시판·채팅·교회·AI·내 정보). Adapt only native safe areas, touch targets and system interactions; do not invent a different product shell or pretend unported features work.
 

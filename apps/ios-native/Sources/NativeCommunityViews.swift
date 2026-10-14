@@ -17,7 +17,7 @@ struct NativeCommunityTabs: View {
                 switch selectedTab {
                 case "home": NativeMemberHomeView()
                 case "posts": NativeFeedView()
-                case "chats": NativeChannelListView()
+                case "chats": NativeCommunityChatHubView()
                 case "churches": NativeChurchSummaryView()
                 case "ai": NativeAILandingView()
                 case "management": if isManager { NativeApprovalOperationsView() } else { NativeMemberHomeView() }

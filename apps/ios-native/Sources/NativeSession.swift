@@ -44,6 +44,7 @@ private enum NativeKeychain {
     private var authSession: ASWebAuthenticationSession?
     private var authPresentationContext: NativeAuthPresentationContext?
     private var epoch = UUID()
+    var sessionGeneration: UUID { epoch }
     private var privacy: [String: Any] = [:]
 
     override init() {

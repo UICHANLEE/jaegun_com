@@ -1,7 +1,7 @@
 import Foundation
 
 enum NativeAPIError: LocalizedError {
-    case response(Int), invalidData, sessionExpired, security(String)
+    case response(Int), invalidData, sessionExpired, security(String), faithQuota(String)
     var errorDescription: String? {
         switch self {
         case .response(let code):
@@ -12,6 +12,7 @@ enum NativeAPIError: LocalizedError {
         case .invalidData: return "서버 응답을 확인하지 못했습니다."
         case .sessionExpired: return "로그인이 만료되었습니다. 다시 로그인해 주세요."
         case .security(let message): return message
+        case .faithQuota(let message): return message
         }
     }
 }
@@ -107,7 +108,15 @@ struct NativeTokens: Codable {
             try await refresh()
             return try await self.request(path: path, query: query, method: method, body: body, authenticated: true, retry: false)
         }
-        guard (200..<300).contains(response.statusCode) else { throw NativeAPIError.response(response.statusCode) }
+        guard (200..<300).contains(response.statusCode) else {
+            // Translate only two exact, definitive quota refusals. Never display raw provider errors.
+            if response.statusCode == 400, path == "/rest/v1/rpc/create_my_qt",
+               let failure = try? JSONSerialization.jsonObject(with: data) as? [String: Any], failure["code"] as? String == "23514" {
+                if failure["message"] as? String == "qt_daily_creation_limit" { throw NativeAPIError.faithQuota("개인 묵상은 한국 날짜 기준 하루 20개까지 새로 작성할 수 있습니다.") }
+                if failure["message"] as? String == "qt_storage_limit" { throw NativeAPIError.faithQuota("개인 묵상은 1,000개까지 보관할 수 있습니다. 기존 기록을 직접 정리한 뒤 다시 시도해 주세요.") }
+            }
+            throw NativeAPIError.response(response.statusCode)
+        }
         if data.isEmpty { return NSNull() }
         return try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
     }

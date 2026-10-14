@@ -213,6 +213,7 @@ private struct NativeConsentView: View {
                     if !validContract { Text("필수 문서 구성이 올바르지 않습니다. 다시 불러와 주세요.").foregroundStyle(.red) }
                     Button("다시 불러오기") { Task { await session.restore() } }.disabled(submitting)
                     Button("로그아웃", role: .destructive) { Task { await session.signOut() } }.disabled(submitting)
+                    NavigationLink("개인 통독·QT 동의 철회·삭제") { NativeFaithWithdrawalView() }
                 }
             }.navigationTitle("필수 동의").nativePageStyle()
                 .onChange(of: documents.map(\.id).sorted()) { _, _ in

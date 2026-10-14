@@ -29,6 +29,9 @@ const ConversationPage = lazy(() => import("./pages/ChatPages").then((module) =>
 const ChurchDirectoryPage = lazy(() => import("./pages/ChurchPages").then((module) => ({ default: module.ChurchDirectoryPage })));
 const ChurchDetailPage = lazy(() => import("./pages/ChurchPages").then((module) => ({ default: module.ChurchDetailPage })));
 const EventCalendarPage = lazy(() => import("./pages/EventPages").then((module) => ({ default: module.EventCalendarPage })));
+const FaithLegalPage = lazy(() => import("./pages/FaithConsentPages").then((module) => ({ default: module.FaithLegalPage })));
+const FaithWithdrawalPage = lazy(() => import("./pages/FaithConsentPages").then((module) => ({ default: module.FaithWithdrawalPage })));
+const FaithPage = lazy(() => import("./pages/FaithPages").then((module) => ({ default: module.FaithPage })));
 const EventDetailPage = lazy(() => import("./pages/EventPages").then((module) => ({ default: module.EventDetailPage })));
 const EventEditorPage = lazy(() => import("./pages/EventPages").then((module) => ({ default: module.EventEditorPage })));
 const ProfilePage = lazy(() => import("./pages/ProfilePages").then((module) => ({ default: module.ProfilePage })));
@@ -165,6 +168,7 @@ function SignedOutRoutes() {
       <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
       <Route path="/legal/terms" element={<LegalTermsPage />} />
       <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
+      <Route path="/legal/faith/2026-10-14" element={<FaithLegalPage />} />
       <Route path="/legal/community" element={<CommunityPolicyPage />} />
       <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
@@ -195,12 +199,14 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
       <Route path="/legal/terms" element={<LegalTermsPage />} />
       <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
+      <Route path="/legal/faith/2026-10-14" element={<FaithLegalPage />} />
       <Route path="/legal/community" element={<CommunityPolicyPage />} />
       <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
       <Route path="/support" element={<PublicSupportPage />} />
       <Route path="/auth" element={<Navigate to="/" replace />} />
       <Route path="/signup" element={<Navigate to="/" replace />} />
+      <Route path="/app/faith/withdraw" element={<FaithWithdrawalPage />} />
       <Route path="/app/*" element={accountStatePage} />
       <Route path="/manage/*" element={accountStatePage} />
       <Route path="*" element={<NotFoundPage homePath="/" />} />
@@ -220,13 +226,15 @@ function ConsentRequiredRoutes() {
         <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
         <Route path="/legal/terms" element={<LegalTermsPage />} />
         <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
-        <Route path="/legal/community" element={<CommunityPolicyPage />} />
+        <Route path="/legal/faith/2026-10-14" element={<FaithLegalPage />} />
+      <Route path="/legal/community" element={<CommunityPolicyPage />} />
         <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
         <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
         <Route path="/support" element={<PublicSupportPage />} />
         <Route path="/auth/callback/social" element={<Navigate to="/app/privacy" replace />} />
         <Route path="/auth/callback/signup" element={<Navigate to="/app/privacy" replace />} />
         <Route path="/app/privacy" element={<PrivacyConsentPage />} />
+        <Route path="/app/faith/withdraw" element={<FaithWithdrawalPage />} />
         <Route path="/app/account" element={<AccountDeletionPage />} />
         <Route path="*" element={<Navigate to="/app/privacy" replace state={{ consentRequired: true }} />} />
       </Routes>
@@ -252,13 +260,16 @@ function AuthenticatedRoutes() {
           <Route path="/legal/overseas/:version" element={<OverseasTransferPage />} />
           <Route path="/legal/terms" element={<LegalTermsPage />} />
           <Route path="/legal/terms/:version" element={<LegalTermsPage />} />
-          <Route path="/legal/community" element={<CommunityPolicyPage />} />
+          <Route path="/legal/faith/2026-10-14" element={<FaithLegalPage />} />
+      <Route path="/legal/community" element={<CommunityPolicyPage />} />
           <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
           <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
           <Route path="/support" element={<PublicSupportPage />} />
           <Route path="/app/mfa-challenge" element={<MfaChallengePage />} />
+          <Route path="/app/faith/withdraw" element={<FaithWithdrawalPage />} />
           <Route element={<AppShell />}>
             <Route path="/app/home" element={<MemberHomePage />} />
+            <Route path="/app/faith" element={<MemberOnly><FaithPage /></MemberOnly>} />
             <Route path="/app/ai" element={<AIAssistantPage />} />
             <Route path="/app/posts" element={<FeedPage />} />
             <Route path="/app/posts/new" element={<MemberOnly><ComposerPage /></MemberOnly>} />
