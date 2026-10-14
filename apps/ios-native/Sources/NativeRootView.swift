@@ -133,6 +133,12 @@ private struct NativeLoginView: View {
                     Button("연결 다시 확인") { Task { await session.restore() } }.disabled(submitting)
                 }
             }.navigationTitle("로그인").navigationBarTitleDisplayMode(.inline)
+                .alert("로그인 안내", isPresented: Binding(
+                    get: { session.error != nil },
+                    set: { if !$0 { session.error = nil } }
+                )) {
+                    Button("확인") { session.error = nil }
+                } message: { Text(session.error ?? "") }
                 .sheet(item: $selectedDocument) { document in
                     NativeLegalView(document: document) { readDocuments.insert(document.id); selectedDocument = nil }
                 }

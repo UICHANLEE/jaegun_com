@@ -33,7 +33,7 @@ private enum NativeKeychain {
     }
 }
 
-@MainActor final class NativeSession: NSObject, ObservableObject, ASWebAuthenticationPresentationContextProviding {
+@MainActor final class NativeSession: NSObject, ObservableObject {
     @Published var signedIn = false
     @Published var loading = false
     @Published var error: String?
@@ -42,6 +42,7 @@ private enum NativeKeychain {
     @Published var requiredDocuments: [[String: Any]] = []
     let api = NativeAPI()
     private var authSession: ASWebAuthenticationSession?
+    private var authPresentationContext: NativeAuthPresentationContext?
     private var epoch = UUID()
     private var privacy: [String: Any] = [:]
 
@@ -85,8 +86,16 @@ private enum NativeKeychain {
 
     func googleSignIn() async {
         guard !loading else { return }
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .filter({ $0.activationState == .foregroundActive })
+            .flatMap(\.windows).first(where: { $0.isKeyWindow && !$0.isHidden }) else {
+            error = "로그인 창을 표시할 앱 화면을 찾지 못했습니다. 앱을 다시 열어 주세요. (AUTH-WINDOW)"
+            return
+        }
         loading = true; error = nil
-        defer { loading = false; authSession = nil }
+        let presentation = NativeAuthPresentationContext(window: window)
+        authPresentationContext = presentation
+        defer { loading = false; authSession = nil; authPresentationContext = nil }
         do {
             let verifier = try randomString()
             let intent = UUID().uuidString.lowercased()
@@ -106,14 +115,22 @@ private enum NativeKeychain {
                 URLQueryItem(name: "prompt", value: "select_account")
             ]
             let result: URL = try await withCheckedThrowingContinuation { continuation in
-                let session = ASWebAuthenticationSession(url: authorize.url!, callback: .https(host: callbackHost, path: callbackPath)) { url, failure in
-                    if let failure { continuation.resume(throwing: failure) }
-                    else if let url { continuation.resume(returning: url) }
-                    else { continuation.resume(throwing: NativeAPIError.invalidData) }
+                var completed = false
+                let complete: (Result<URL, Error>) -> Void = { result in
+                    guard !completed else { return }
+                    completed = true
+                    continuation.resume(with: result)
                 }
-                session.presentationContextProvider = self
+                let session = ASWebAuthenticationSession(url: authorize.url!, callback: .https(host: callbackHost, path: callbackPath)) { url, failure in
+                    Task { @MainActor in
+                        if let failure { complete(.failure(failure)) }
+                        else if let url { complete(.success(url)) }
+                        else { complete(.failure(NativeAPIError.invalidData)) }
+                    }
+                }
+                session.presentationContextProvider = presentation
                 self.authSession = session
-                if !session.start() { continuation.resume(throwing: NativeAPIError.security("Google 인증 창을 열지 못했습니다.")) }
+                if !session.start() { complete(.failure(NativeAPIError.security("Google 인증 창을 시작하지 못했습니다. (AUTH-START)"))) }
             }
             let code = try NativeOAuthCallback.authorizationCode(result, expectedIntent: intent)
             let tokens = try await api.authenticate(grant: "pkce", body: ["auth_code": code, "code_verifier": verifier])
@@ -121,8 +138,12 @@ private enum NativeKeychain {
             epoch = UUID(); context = [:]; privacy = [:]; consentRequired = true; api.tokens = tokens; signedIn = true
             try await loadState()
         } catch {
-            if (error as NSError).domain == ASWebAuthenticationSessionErrorDomain, (error as NSError).code == 1 { self.error = nil }
-            else { self.error = error.localizedDescription }
+            let failure = error as NSError
+            if failure.domain == ASWebAuthenticationSessionErrorDomain {
+                self.error = failure.code == 1
+                    ? "Google 로그인이 취소되었습니다. 선택한 동의는 유지됩니다."
+                    : "iOS에서 Google 인증 창을 열지 못했습니다. (AUTH-\(failure.code))"
+            } else { self.error = error.localizedDescription }
         }
     }
 
@@ -198,11 +219,12 @@ private enum NativeKeychain {
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw NativeAPIError.security("안전한 로그인 요청을 생성하지 못했습니다.") }
         return Data(bytes).base64URLEncoded()
     }
-    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
-    }
+}
+
+@MainActor private final class NativeAuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private let window: UIWindow
+    init(window: UIWindow) { self.window = window }
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { window }
 }
 
 enum NativeConsentContract {
