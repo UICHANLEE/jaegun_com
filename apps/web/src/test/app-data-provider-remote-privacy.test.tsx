@@ -12,8 +12,18 @@ const remote = vi.hoisted(() => {
     getSession: vi.fn(() => sessionPromise),
     signOut: vi.fn(async (): Promise<{ error: Error | null }> => ({ error: null })),
     unsubscribe: vi.fn(),
-    from: vi.fn(() => {
-      throw new Error("a stale load continued into private tables");
+    from: vi.fn((table: string) => {
+      if (!["consent_documents", "public_organization_directory"].includes(table)) {
+        throw new Error("a stale load continued into private tables");
+      }
+      // These are explicitly public signup resources, not protected data.
+      const result = { data: [], error: null };
+      const query = {
+        select: vi.fn(() => query), eq: vi.fn(() => query), is: vi.fn(() => query),
+        order: vi.fn(() => query), abortSignal: vi.fn(async () => result),
+        then: (resolve: (value: typeof result) => unknown) => Promise.resolve(result).then(resolve),
+      };
+      return query;
     }),
     rpc: vi.fn(() => {
       throw new Error("a stale load continued into private RPCs");
@@ -105,7 +115,9 @@ describe("AppDataProvider remote request invalidation", () => {
       viewerId: null,
       privateCounts: [0, 0, 0, 0, 0, 0, 0, 0],
     });
-    expect(remote.from).not.toHaveBeenCalled();
+    expect(remote.from.mock.calls.every(([table]) => (
+      table === "consent_documents" || table === "public_organization_directory"
+    ))).toBe(true);
     expect(remote.rpc).not.toHaveBeenCalled();
   });
 

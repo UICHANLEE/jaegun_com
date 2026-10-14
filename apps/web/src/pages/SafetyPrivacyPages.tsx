@@ -1,3 +1,4 @@
+import "./social-auth.css";
 import {
   createContext,
   type FormEvent,
@@ -33,7 +34,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { canManageChurch, canModerateCommunity } from "../components/access";
 import { AccessibleConfirmDialog } from "../components/AccessibleConfirmDialog";
 import { safeSafetyReturnPath } from "../components/SafetyControls";
@@ -59,7 +60,6 @@ import type { AcceptedConsentVersions } from "../data/legalConsentContract";
 import {
   ACCOUNT_DELETION_CONFIRMATION,
   cancelAccountDeletion,
-  enrollTotp,
   getDemoSafetyPrivacyState,
   isReportTargetType,
   loadMfaStatus,
@@ -84,7 +84,6 @@ import {
   verifyTotpEnrollment,
   type AccountDeletionStatus,
   type DirectoryVisibility,
-  type MfaEnrollment,
   type MfaStatus,
   type ModerationAction,
   type ModerationReport,
@@ -96,8 +95,10 @@ import {
   type SessionSummary,
 } from "../data/safetyPrivacy";
 import type { AppMode } from "../types/domain";
+import type { SocialAuthProvider } from "../data/socialAuth";
 import { supportEmail as SUPPORT_EMAIL } from "../data/runtimeConfig";
 import { isOfficialIosNativeClient } from "../native/platform";
+import { loadSensitiveActionAuthStatus } from "../data/sensitiveActionAuth";
 
 export {
   BlockUserControl,
@@ -124,17 +125,15 @@ const MfaGateContext = createContext<{ refresh: () => Promise<MfaStatus | null> 
 const GATE_ALLOWED_PATHS = new Set([
   "/account-deletion",
   "/support",
-  "/auth/callback/recovery",
+  "/auth/callback/social",
   "/app/privacy",
   "/app/account",
-  "/reset-password",
 ]);
 const MFA_GATE_ALLOWED_PATHS = new Set([
   "/support",
   "/account-deletion",
-  "/auth/callback/recovery",
+  "/auth/callback/social",
   "/app/mfa-challenge",
-  "/reset-password",
 ]);
 
 function errorMessage(reason: unknown, fallback: string) {
@@ -145,18 +144,16 @@ function isGateAllowedPath(pathname: string) {
   return GATE_ALLOWED_PATHS.has(pathname) || pathname.startsWith("/legal/");
 }
 
-export function requiresManagementMfaEnrollment(input: {
+export function requiresManagementMfaEnrollment(_input: {
   mode: AppMode;
   pathname: string;
   highPrivilege: boolean;
   verifiedFactorCount: number;
 }) {
-  const eventManagementRoute = input.pathname.startsWith("/manage/events/");
-  return input.mode !== "demo"
-    && (input.highPrivilege || eventManagementRoute)
-    && input.pathname.startsWith("/manage/")
-    && input.pathname !== "/manage/profile"
-    && input.verifiedFactorCount === 0;
+  // Management writes use server-authoritative Google reauthentication. Existing
+  // enrolled factors still require their login challenge, but no new enrollment
+  // is forced by entering a management page.
+  return false;
 }
 
 export function SafetyPrivacyGate({ children }: { children: ReactNode }) {
@@ -300,20 +297,110 @@ export function MfaChallengeGate({ children }: { children: ReactNode }) {
   if (challengeRequired && !allowed) {
     return <Navigate to="/app/mfa-challenge" replace state={{ from: pathname }} />;
   }
-  const highPrivilege = viewer.profile.globalRole === "platform_admin"
-    || viewer.membership?.role === "minister"
-    || viewer.membership?.role === "executive"
-    || canManageChurch(viewer);
-  const managementEnrollmentRequired = requiresManagementMfaEnrollment({
-    mode,
-    pathname,
-    highPrivilege,
-    verifiedFactorCount: verifiedFactors.length,
-  });
-  if (managementEnrollmentRequired) {
-    return <Navigate to="/app/security" replace state={{ mfaEnrollmentRequired: true, from: pathname }} />;
-  }
   return <MfaGateContext.Provider value={{ refresh: load }}>{children}</MfaGateContext.Provider>;
+}
+
+/** UX boundary only: each sensitive write is independently checked by its RPC. */
+export function SensitiveActionGate({ children }: { children?: ReactNode }) {
+  const { mode, viewer, socialProviders, linkedSocialProviders, socialAuthWorking, reauthenticateWithSocial } = useAppData();
+  const location = useLocation();
+  const actorId = viewer?.profile.id ?? "";
+  const binding = `${mode}:${actorId}:${location.key}:${location.pathname}`;
+  const [result, setResult] = useState<{ binding: string; verified: boolean; remainingMs: number | null; receivedAt: number } | null>(null);
+  const [mountedBinding, setMountedBinding] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [working, setWorking] = useState(false);
+  const sequenceRef = useRef(0);
+  const workingRef = useRef(false);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const check = useCallback(async () => {
+    const sequence = ++sequenceRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setResult((previous) => previous?.binding === binding && previous.verified
+      && (previous.remainingMs === null || previous.remainingMs > performance.now() - previous.receivedAt)
+      ? previous : null);
+    setChecking(true);
+    setError(null);
+    try {
+      const next = await loadSensitiveActionAuthStatus(mode, actorId, controller.signal);
+      if (sequenceRef.current !== sequence) return;
+      const remainingMs = next.expiresAt === null ? null : Math.max(0, Date.parse(next.expiresAt) - Date.parse(next.serverNow));
+      setResult({ binding, verified: next.verified, remainingMs, receivedAt: performance.now() });
+      if (next.verified && (remainingMs === null || remainingMs > 0)) setMountedBinding(binding);
+    } catch {
+      if (sequenceRef.current === sequence) {
+        setResult(null);
+        setError("본인 인증 상태를 확인하지 못했습니다. 관리 작업은 아직 실행되지 않았습니다.");
+      }
+    } finally {
+      if (sequenceRef.current === sequence) setChecking(false);
+    }
+  }, [mode, actorId, binding]);
+
+  useEffect(() => {
+    setMountedBinding(null);
+    void check();
+    const onFocus = () => { void check(); };
+    const onVisibility = () => { if (document.visibilityState === "visible") void check(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      ++sequenceRef.current;
+      controllerRef.current?.abort();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [check]);
+
+  useEffect(() => {
+    if (!result?.verified || result.binding !== binding || result.remainingMs === null) return;
+    const delay = Math.max(0, result.remainingMs - (performance.now() - result.receivedAt));
+    const timer = window.setTimeout(() => { void check(); }, Math.min(delay, 300_000));
+    return () => window.clearTimeout(timer);
+  }, [result, binding, check]);
+
+  async function reauthenticate() {
+    if (workingRef.current || socialAuthWorking || mode === "demo" || !socialProviders.google || !linkedSocialProviders.includes("google")) return;
+    workingRef.current = true;
+    setWorking(true);
+    setError(null);
+    try {
+      await reauthenticateWithSocial("google", safeSafetyReturnPath(location.pathname));
+    } catch {
+      setError("Google 본인 확인을 완료하지 못했습니다. 관리 작업은 실행되지 않았습니다.");
+    } finally {
+      workingRef.current = false;
+      setWorking(false);
+    }
+  }
+
+  const authorized = Boolean(actorId && result?.binding === binding && result.verified
+    && (result.remainingMs === null || result.remainingMs > performance.now() - result.receivedAt));
+  // An editor mounts only after proof for this exact actor/route. Expiry hides
+  // and disables the mounted form instead of discarding its in-memory draft.
+  // A different actor/route never inherits either the draft or its proof.
+  const preserveEditor = Boolean(actorId && mountedBinding === binding);
+  const googleReady = socialProviders.google && linkedSocialProviders.includes("google");
+  return <>
+    {preserveEditor ? <div key={binding} hidden={!authorized} inert={!authorized} aria-hidden={!authorized || undefined}>{children ?? <Outlet />}</div> : null}
+    {authorized ? null : checking || !actorId ? <LoadingScreen /> : <section className="system-card" aria-labelledby="sensitive-action-title">
+    <span className="system-card__icon" aria-hidden="true"><ShieldCheck weight="fill" /></span>
+    <h1 id="sensitive-action-title">관리 작업 전 본인 확인</h1>
+    <p>승인·권한 변경 등 중요한 관리 작업은 최근 본인 확인이 필요합니다. 별도 인증 앱을 새로 등록할 필요는 없습니다.</p>
+    {error ? <ErrorBanner message={error} /> : null}
+    {!googleReady ? <p>현재 계정에 Google 로그인을 연결해야 합니다. 다른 계정으로 변경하면 관리 권한이 이전되지 않습니다.</p> : null}
+    <div className="system-card__actions">
+      <button type="button" className="button button--primary" disabled={!googleReady || working || socialAuthWorking} onClick={() => void reauthenticate()}>{working || socialAuthWorking ? <CircleNotch className="spin" /> : <LockKey />} Google로 다시 인증</button>
+      <button type="button" className="button button--secondary" disabled={working || socialAuthWorking} onClick={() => void check()}>인증 상태 다시 확인</button>
+      <Link className="button button--secondary" to="/app/security">보안센터</Link>
+      <Link className="button button--quiet" to="/manage/home">관리 홈으로</Link>
+    </div>
+  </section>}
+  </>;
 }
 
 export function MfaChallengePage() {
@@ -791,23 +878,58 @@ export function NotificationPreferencesPage() {
 }
 
 export function SecurityCenterPage() {
-  const { mode, viewer } = useAppData();
-  const location = useLocation();
+  const { mode, viewer, linkSocialIdentity, linkedSocialProviders, socialProviders, socialAuthWorking, reauthenticateWithSocial } = useAppData();
   const mfaGate = useContext(MfaGateContext);
   const userId = viewer?.profile.id ?? "";
-  const enrollmentRequired = Boolean((location.state as { mfaEnrollmentRequired?: boolean } | null)?.mfaEnrollmentRequired);
   const [mfa, setMfa] = useState<MfaStatus | null>(null);
   const [session, setSession] = useState<SessionSummary | null>(null);
   const [activities, setActivities] = useState<SecurityActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [enrollment, setEnrollment] = useState<MfaEnrollment | null>(null);
-  const [verificationCode, setVerificationCode] = useState("");
   const [working, setWorking] = useState(false);
   const [removingFactorId, setRemovingFactorId] = useState<string | null>(null);
   const [confirmGlobalSignOut, setConfirmGlobalSignOut] = useState(false);
   const loadSequenceRef = useRef(0);
+  const linkingRef = useRef(false);
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const reauthRef = useRef(false);
+  const [reauthWorking, setReauthWorking] = useState(false);
+  const isManager = viewer?.profile.globalRole === "platform_admin"
+    || viewer?.membership?.role === "minister"
+    || viewer?.membership?.role === "executive"
+    || canManageChurch(viewer);
+
+  async function startReauthentication() {
+    if (reauthRef.current || socialAuthWorking || linking || mode === "demo" || !socialProviders.google || !linkedSocialProviders.includes("google")) return;
+    reauthRef.current = true;
+    setReauthWorking(true);
+    setActionError(null);
+    try {
+      await reauthenticateWithSocial("google", "/app/security");
+    } catch {
+      setActionError("Google 본인 확인을 완료하지 못했습니다. 현재 계정과 권한은 변경되지 않았습니다.");
+    } finally {
+      reauthRef.current = false;
+      setReauthWorking(false);
+    }
+  }
+
+  async function startLink(provider: SocialAuthProvider) {
+    if (!userId || mode === "demo" || linkingRef.current || reauthWorking || socialAuthWorking || !socialProviders[provider] || linkedSocialProviders.includes(provider)) return;
+    linkingRef.current = true;
+    setLinking(true);
+    setLinkError(null);
+    try {
+      await linkSocialIdentity(provider);
+    } catch {
+      setLinkError("계정 연결을 완료하지 못했습니다. 취소했다면 현재 계정은 그대로 유지됩니다. 다시 시도해 주세요.");
+    } finally {
+      linkingRef.current = false;
+      setLinking(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const sequence = ++loadSequenceRef.current;
@@ -835,37 +957,6 @@ export function SecurityCenterPage() {
     void load();
     return () => { loadSequenceRef.current += 1; };
   }, [load]);
-
-  async function startEnrollment() {
-    if (working) return;
-    setWorking(true);
-    setActionError(null);
-    try {
-      setEnrollment(await enrollTotp(mode, userId));
-    } catch (reason) {
-      setActionError(errorMessage(reason, "MFA 등록을 시작하지 못했습니다."));
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function verifyEnrollment(event: FormEvent) {
-    event.preventDefault();
-    if (!enrollment || working) return;
-    setWorking(true);
-    setActionError(null);
-    try {
-      await verifyTotpEnrollment(mode, userId, enrollment.factorId, verificationCode);
-      await mfaGate?.refresh();
-      setEnrollment(null);
-      setVerificationCode("");
-      await load();
-    } catch (reason) {
-      setActionError(errorMessage(reason, "MFA 코드를 확인하지 못했습니다."));
-    } finally {
-      setWorking(false);
-    }
-  }
 
   async function removeFactor() {
     if (!removingFactorId || working) return;
@@ -897,15 +988,33 @@ export function SecurityCenterPage() {
 
   return (
     <div className="page safety-page">
-      <SafetyPageIntro eyebrow="SECURITY CENTER" title="보안센터" description="다단계 인증, 로그인 세션과 중요한 보안 활동을 확인하세요." />
+      <SafetyPageIntro eyebrow="SECURITY CENTER" title="보안센터" description="Google 계정 연결, 로그인 세션과 중요한 보안 활동을 확인하세요." />
       <DemoNotice />
-      {enrollmentRequired ? <div className="safety-alert safety-alert--required" role="alert"><ShieldWarning weight="fill" /><span><strong>관리 기능을 사용하려면 MFA 등록이 필요합니다</strong><small>인증 앱을 등록하고 6자리 코드를 확인한 뒤 원래 관리 화면으로 돌아갈 수 있습니다.</small></span></div> : null}
+      {isManager ? <section className="safety-card">
+        <div className="safety-card__heading"><span><ShieldCheck weight="fill" /></span><div><h2>중요한 관리 작업 본인 확인</h2><p>승인·권한 변경 전 Google 계정으로 다시 확인합니다. 별도 인증 앱을 새로 등록하지 않아도 됩니다.</p></div></div>
+        <button className="button button--primary button--full" type="button" disabled={mode === "demo" || !socialProviders.google || !linkedSocialProviders.includes("google") || reauthWorking || socialAuthWorking || linking} onClick={() => void startReauthentication()}>{reauthWorking || socialAuthWorking ? <CircleNotch className="spin" /> : <LockKey />} Google로 다시 인증</button>
+        {!linkedSocialProviders.includes("google") ? <p className="safety-muted-copy">아래에서 현재 계정에 Google 로그인을 먼저 연결해 주세요.</p> : null}
+      </section> : null}
+      <section className="safety-card social-link-card">
+        <div className="safety-card__heading"><span><LockKey weight="fill" /></span><div><h2>연결된 Google 계정</h2><p>현재 로그인한 본인 계정에만 Google 로그인을 연결합니다.</p></div></div>
+        <p className="safety-muted-copy">Google 계정의 이름이나 이메일이 같아도 다른 계정을 임의로 합치지 않습니다. 이미 별도 계정에 연결된 Google 계정은 연결할 수 없습니다.</p>
+        <div className="social-link-list">
+          <div className="social-link-list__item">
+            <span><strong>Google</strong><small>{linkedSocialProviders.includes("google") ? "현재 계정에 연결됨" : socialProviders.google && mode !== "demo" ? "아직 연결하지 않음" : "연결 설정 준비 중"}</small></span>
+            <button className="button button--secondary" type="button" disabled={!userId || linkedSocialProviders.includes("google") || !socialProviders.google || mode === "demo" || linking || reauthWorking || socialAuthWorking} onClick={() => void startLink("google")}>{linkedSocialProviders.includes("google") ? <CheckCircle /> : null}{linkedSocialProviders.includes("google") ? "연결됨" : "계정 연결"}</button>
+          </div>
+        </div>
+        {linkError ? <ErrorBanner message={linkError} /> : null}
+        {linking || socialAuthWorking ? <p className="safety-inline-loading" role="status"><CircleNotch className="spin" /> 로그인 제공자에서 계정 연결을 확인해 주세요.</p> : null}
+        <p className="safety-muted-copy">로그인 계정이나 비밀번호를 잊었다면 해당 제공자에서 복구해 주세요. 재건 공동체에서는 제공자의 비밀번호를 받거나 변경하지 않습니다.</p>
+        <div className="social-provider-recovery"><a href="https://accounts.google.com/signin/recovery" target="_blank" rel="noopener noreferrer">Google 계정 복구</a></div>
+      </section>
       {loading ? <div className="safety-inline-loading" role="status"><CircleNotch className="spin" /> 보안 상태를 확인하고 있어요.</div> : null}
       {loadError ? <StateError message={loadError} retry={() => void load()} /> : null}
       {!loading && !loadError && mfa && session ? (
         <div className="safety-form">
-          <section className="safety-card">
-            <div className="safety-card__heading"><span><Fingerprint weight="fill" /></span><div><h2>인증 앱 MFA</h2><p>관리자·사역자·임원 계정에는 등록을 권장합니다.</p></div></div>
+          {mfa.factors.length ? <section className="safety-card">
+            <div className="safety-card__heading"><span><Fingerprint weight="fill" /></span><div><h2>기존 인증 앱 관리</h2><p>이미 등록한 인증 앱의 로그인 보호는 유지됩니다. 해제는 본인 확인 후 직접 진행합니다.</p></div></div>
             <div className={`safety-status-pill ${mfa.currentLevel === "aal2" ? "is-safe" : "is-warning"}`}><ShieldCheck weight="fill" /> 현재 인증 수준 {mfa.currentLevel?.toUpperCase() ?? "확인 불가"}</div>
             {mfa.factors.length ? (
               <div className="safety-factor-list">
@@ -914,15 +1023,6 @@ export function SecurityCenterPage() {
                 ))}
               </div>
             ) : <p className="safety-muted-copy">등록된 인증 앱이 없습니다.</p>}
-            {!enrollment ? <button className="button button--secondary button--full" type="button" disabled={working || mode === "demo"} onClick={() => void startEnrollment()}><Fingerprint /> 인증 앱 등록</button> : (
-              <form className="safety-enrollment" onSubmit={verifyEnrollment}>
-                <h3>인증 앱에서 QR 코드를 읽어 주세요</h3>
-                {enrollment.qrCodeDataUrl ? <img src={enrollment.qrCodeDataUrl} alt="MFA 인증 앱 등록용 QR 코드" /> : null}
-                {enrollment.secret ? <p><span>직접 입력 키</span><code>{enrollment.secret}</code></p> : null}
-                <label><span>인증 앱의 6자리 코드</span><input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, ""))} /></label>
-                <div><button className="button button--secondary" type="button" onClick={() => setEnrollment(null)}>취소</button><button className="button button--primary" type="submit" disabled={working || verificationCode.length !== 6}>{working ? <CircleNotch className="spin" /> : <Check />} 등록 확인</button></div>
-              </form>
-            )}
             {removingFactorId ? <AccessibleConfirmDialog
               title="MFA를 해제할까요?"
               description="관리 계정 보호 수준이 낮아집니다. 다른 인증 수단을 먼저 등록하는 것을 권장합니다."
@@ -932,7 +1032,7 @@ export function SecurityCenterPage() {
               onCancel={() => setRemovingFactorId(null)}
               onConfirm={() => void removeFactor()}
             /> : null}
-          </section>
+          </section> : null}
 
           <section className="safety-card">
             <div className="safety-card__heading"><span><Devices weight="fill" /></span><div><h2>로그인 세션</h2><p>브라우저에서는 현재 세션만 표시하며, 서버에서 모든 기기의 갱신 토큰을 폐기할 수 있습니다.</p></div></div>
@@ -960,43 +1060,52 @@ export function SecurityCenterPage() {
 }
 
 export function AccountDeletionPage() {
-  const { mode, viewer, signOut } = useAppData();
+  const { mode, viewer, signOut, reauthenticateWithSocial, linkedSocialProviders, socialProviders, socialAuthWorking } = useAppData();
   const { state, error, refresh } = useSafetyPrivacy();
   const userId = viewer?.profile.id ?? "";
   const [status, setStatus] = useState<AccountDeletionStatus | null>(null);
-  const [session, setSession] = useState<SessionSummary | null>(null);
   const [mfa, setMfa] = useState<MfaStatus | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const [reason, setReason] = useState("");
-  const [password, setPassword] = useState("");
   const [working, setWorking] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmRequest, setConfirmRequest] = useState(false);
+  const reauthenticatingRef = useRef(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
+
+  async function reauthenticate(provider: SocialAuthProvider) {
+    if (!userId || reauthenticatingRef.current || socialAuthWorking || !linkedSocialProviders.includes(provider) || !socialProviders[provider]) return;
+    reauthenticatingRef.current = true;
+    setReauthenticating(true);
+    setActionError(null);
+    setConfirmRequest(false);
+    setConfirmation("");
+    try {
+      await reauthenticateWithSocial(provider);
+    } catch {
+      setActionError("본인 인증을 완료하지 못했습니다. 삭제는 요청되지 않았습니다. 다시 시도해 주세요.");
+    } finally {
+      reauthenticatingRef.current = false;
+      setReauthenticating(false);
+    }
+  }
 
   useEffect(() => {
     setStatus(state?.accountDeletion ?? null);
   }, [state]);
   useEffect(() => {
     let active = true;
-    void Promise.all([loadSessionSummary(mode, userId), loadMfaStatus(mode, userId)])
-      .then(([nextSession, nextMfa]) => { if (active) { setSession(nextSession); setMfa(nextMfa); } })
-      .catch(() => { if (active) { setSession(null); setMfa(null); } });
+    void loadMfaStatus(mode, userId)
+      .then((nextMfa) => { if (active) setMfa(nextMfa); })
+      .catch(() => { if (active) setMfa(null); });
     return () => { active = false; };
   }, [mode, userId]);
 
-  const recentlySignedIn = mode === "demo" || Boolean(
-    session?.signedInAt && Date.now() - new Date(session.signedInAt).getTime() <= 10 * 60 * 1_000,
-  );
-  const privileged = viewer?.profile.globalRole === "platform_admin"
-    || viewer?.membership?.role === "minister"
-    || viewer?.membership?.role === "executive"
-    || canManageChurch(viewer);
   const aal2Ready = mode === "demo" || mfa?.currentLevel === "aal2";
-  const passwordRequired = mode !== "demo" && !aal2Ready && !privileged;
-  const verificationReady = aal2Ready || (passwordRequired && password.length > 0);
+  const verificationReady = aal2Ready || (socialProviders.google && linkedSocialProviders.includes("google"));
 
   async function submitDeletion() {
-    if (working) return;
+    if (working || reauthenticating || socialAuthWorking || !verificationReady) return;
     setWorking(true);
     setActionError(null);
     try {
@@ -1005,12 +1114,10 @@ export function AccountDeletionPage() {
         userId,
         confirmation,
         reason,
-        passwordRequired ? password : undefined,
       ));
       setConfirmRequest(false);
       setConfirmation("");
       setReason("");
-      setPassword("");
       await refresh();
     } catch (requestError) {
       setActionError(errorMessage(requestError, "계정 삭제를 예약하지 못했습니다."));
@@ -1052,19 +1159,22 @@ export function AccountDeletionPage() {
             <ul className="safety-bullet-list"><li>프로필, 교회 소속과 공개 명단 정보</li><li>인증 세션, 기기 토큰과 개인 알림 설정</li><li>업로드한 사진·영상 원본과 개인 대화 연결 정보</li><li>다른 사용자의 안전을 위해 필요한 신고·감사 증거는 법적 근거와 운영정책 범위에서 분리 보존 또는 익명화될 수 있습니다.</li></ul>
           </section>
           <section className="safety-card">
-            <div className="safety-card__heading"><span><LockKey weight="fill" /></span><div><h2>최근 로그인 확인</h2><p>탈취된 세션의 삭제 요청을 막기 위해 서버는 최근 인증을 요구합니다.</p></div></div>
-            <div className={`safety-status-pill ${recentlySignedIn ? "is-safe" : "is-warning"}`}>{recentlySignedIn ? <CheckCircle weight="fill" /> : <WarningCircle weight="fill" />}{recentlySignedIn ? "최근 10분 이내 로그인이 확인되었습니다." : "로그인한 지 오래되어 추가 확인이 필요합니다."}</div>
-            <div className={`safety-status-pill ${aal2Ready ? "is-safe" : "is-warning"}`}>{aal2Ready ? <ShieldCheck weight="fill" /> : <ShieldWarning weight="fill" />}{aal2Ready ? `${privileged ? "관리 계정 " : ""}AAL2 인증이 확인되었습니다.` : privileged ? "관리 계정은 AAL2 MFA 인증 후 삭제를 요청할 수 있습니다." : "AAL2 MFA 또는 현재 비밀번호로 본인을 확인해야 합니다."}</div>
-            {!aal2Ready ? <Link className="button button--secondary button--full" to="/app/security"><Fingerprint /> MFA 등록·인증</Link> : null}
-            <div className="safety-alert"><LockKey weight="fill" /><span><strong>서버 전용 삭제 기능이 본인을 다시 확인합니다</strong><small>AAL2 세션은 검증된 토큰으로 확인하고, 일반 회원의 비밀번호는 별도 임시 인증 세션에서 확인한 뒤 즉시 폐기합니다. 비밀번호는 앱 저장소나 데이터베이스에 보관하지 않습니다.</small></span></div>
-            {!recentlySignedIn ? <button className="button button--quiet button--full" type="button" onClick={() => void signOut()}><SignOut /> 로그아웃 후 다시 로그인</button> : null}
+            <div className="safety-card__heading"><span><LockKey weight="fill" /></span><div><h2>삭제 전 본인 인증</h2><p>서버가 현재 계정과 인증 수단을 검증한 뒤에만 삭제를 예약합니다.</p></div></div>
+            <div className={`safety-status-pill ${aal2Ready ? "is-safe" : "is-warning"}`}>{aal2Ready ? <ShieldCheck weight="fill" /> : <ShieldWarning weight="fill" />}{aal2Ready ? "기존 추가 인증이 확인되었습니다." : "연결된 Google 계정으로 다시 인증해 주세요. 서버가 5분 이내의 OAuth 인증을 확인합니다."}</div>
+            {!aal2Ready ? (
+              <div className="social-auth-buttons">
+                {linkedSocialProviders.includes("google") ? <button className="button button--secondary button--full" type="button" disabled={!socialProviders.google || reauthenticating || socialAuthWorking || working} onClick={() => void reauthenticate("google")}>Google로 다시 인증</button> : null}
+                {!linkedSocialProviders.length ? <Link className="button button--secondary button--full" to="/app/security">보안센터에서 로그인 계정 연결</Link> : null}
+              </div>
+            ) : null}
+            <div className="safety-alert"><LockKey weight="fill" /><span><strong>재인증만으로 계정이 삭제되지는 않습니다</strong><small>이 화면으로 돌아온 뒤 확인 문구를 다시 입력하고 삭제를 요청해 주세요. 서버는 현재 세션의 서명된 OAuth 인증 기록 또는 AAL2 인증을 확인합니다. 제공자의 비밀번호는 재건 공동체에 입력하지 마세요.</small></span></div>
+            <button className="button button--quiet button--full" type="button" onClick={() => void signOut()}><SignOut /> 로그아웃</button>
           </section>
           <section className="safety-card safety-card--danger">
             <label className="safety-field"><span>탈퇴 사유 <small>선택</small></span><textarea maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="서비스 개선을 위해 남겨 주세요." /><small>{reason.length}/500</small></label>
-            {passwordRequired ? <label className="safety-field"><span>현재 비밀번호</span><input type="password" autoComplete="current-password" maxLength={512} value={password} onChange={(event) => setPassword(event.target.value)} aria-describedby="deletion-password-help" /><small id="deletion-password-help">본인 확인에만 사용하며 서버 전용 삭제 기능으로 직접 전송합니다.</small></label> : null}
             <label className="safety-field"><span>확인 문구</span><input autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder={ACCOUNT_DELETION_CONFIRMATION} aria-describedby="deletion-confirmation-help" /><small id="deletion-confirmation-help"><strong>{ACCOUNT_DELETION_CONFIRMATION}</strong>를 정확히 입력해 주세요.</small></label>
             {actionError ? <ErrorBanner message={actionError} /> : null}
-            <button className="button button--danger button--full" type="button" disabled={!verificationReady || confirmation !== ACCOUNT_DELETION_CONFIRMATION} onClick={() => setConfirmRequest(true)}><Trash /> 계정 삭제 요청</button>
+            <button className="button button--danger button--full" type="button" disabled={!verificationReady || working || reauthenticating || socialAuthWorking || confirmation !== ACCOUNT_DELETION_CONFIRMATION} onClick={() => setConfirmRequest(true)}><Trash /> 계정 삭제 요청</button>
             {confirmRequest ? <AccessibleConfirmDialog
               title="계정 삭제를 예약할까요?"
               description="서버가 안내한 유예기간이 지나면 삭제 처리가 시작됩니다."
@@ -1376,7 +1486,7 @@ export function PublicSupportPage() {
       </section>
       <section>
         <h2>로그인과 가입 승인</h2>
-        <p>비밀번호를 잊었다면 로그인 화면의 ‘비밀번호를 잊으셨나요?’에서 새 링크를 요청하세요. 교회 가입 승인은 소속 교회의 사역자 또는 임원이 처리하며, 사역자·임원 권한은 플랫폼 관리자가 확인합니다.</p>
+        <p>Google 계정 또는 이메일 계정으로 로그인합니다. 이메일 비밀번호를 잊었다면 로그인 화면의 ‘비밀번호를 잊으셨나요?’에서 재설정 메일을 요청하세요. Google 계정의 비밀번호는 Google에서 복구해 주세요. 기존 계정에 Google 로그인을 추가할 때는 로그인 후 보안센터에서 직접 연결해야 합니다. 이름이나 이메일만으로 계정을 합치지 않습니다. 교회 가입 승인은 소속 교회의 사역자 또는 임원이 처리하며, 사역자·임원 권한은 플랫폼 관리자가 확인합니다.</p>
       </section>
       <section>
         <h2>신고와 사용자 차단</h2>

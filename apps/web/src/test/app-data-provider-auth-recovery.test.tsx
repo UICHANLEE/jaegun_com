@@ -30,6 +30,7 @@ const remote = vi.hoisted(() => ({
     error: null as Error | null,
   })),
   resetPassword: vi.fn(async () => ({ error: null as Error | null })),
+  verifyOtp: vi.fn(async (): Promise<MockExchangeResponse> => ({ data: { user, session, redirectType: "recovery" }, error: null })),
   signOut: vi.fn(async (): Promise<{ error: Error | null }> => ({ error: null })),
   updateUser: vi.fn(async () => ({ data: {}, error: null })),
   unsubscribe: vi.fn(),
@@ -94,6 +95,7 @@ vi.mock("../data/supabase", () => ({
       signOut: remote.signOut,
       updateUser: remote.updateUser,
       resetPasswordForEmail: remote.resetPassword,
+      verifyOtp: remote.verifyOtp,
       onAuthStateChange: vi.fn((callback) => {
         remote.authCallback = callback;
         if (remote.emitInitialSessionDuringSubscription) {
@@ -147,6 +149,9 @@ vi.mock("../native/runtime", async (importOriginal) => {
   const original = await importOriginal<typeof import("../native/runtime")>();
   return {
     ...original,
+    clearNativeSocialAuthIntent: vi.fn(async () => undefined),
+    subscribeToNativeSocialAuthCancellation: vi.fn(async () => () => undefined),
+    closeNativeSocialAuthBrowser: vi.fn(async () => undefined),
     beginNativePasswordRecoveryIntent: remote.beginNativeRecovery,
     clearNativePasswordRecoveryIntent: remote.clearNativeRecovery,
     readNativePasswordRecoveryIntent: vi.fn(async () => remote.nativeRecoveryIntent),
@@ -162,6 +167,11 @@ vi.mock("../native/runtime", async (importOriginal) => {
 
 import { AppDataProvider, useAppData } from "../data/AppDataProvider";
 import App from "../App";
+
+vi.mock("../data/socialAuth", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../data/socialAuth")>(),
+  fetchSocialAuthProviders: vi.fn(async () => ({ google: false })),
+}));
 
 let latestData: ReturnType<typeof useAppData> | null = null;
 
@@ -265,7 +275,6 @@ describe("AppDataProvider password recovery trust boundary", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole("heading", { name: "공동체에 함께해요" })).toBeInTheDocument();
     expect(screen.getByLabelText("이름")).toHaveValue("가입 상태 보존");
     expect(screen.getByLabelText("소속 노회")).toHaveValue("서울노회");
     expect(screen.getByLabelText("소속 교회")).toHaveValue("org-19");
@@ -311,7 +320,6 @@ describe("AppDataProvider password recovery trust boundary", () => {
     remote.directoryError = null;
     fireEvent.click(screen.getByRole("button", { name: "데이터 다시 불러오기" }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "데이터 다시 불러오기" })).not.toBeInTheDocument());
-    expect(screen.getByRole("heading", { name: "공동체에 함께해요" })).toBeInTheDocument();
     expect(screen.getByLabelText("이름")).toHaveValue("재시도 사용자");
     expect(screen.getByLabelText("이메일")).toHaveValue("retry@example.com");
   });
@@ -483,7 +491,7 @@ describe("AppDataProvider password recovery trust boundary", () => {
     render(<AppDataProvider><AuthProbe /></AppDataProvider>);
     await waitFor(() => expect(remote.authCallback).not.toBeNull());
 
-    await expect(remote.authCallback?.("INITIAL_SESSION", session)).resolves.toBeUndefined();
+    expect(remote.authCallback?.("INITIAL_SESSION", session)).toBeUndefined();
     await waitFor(() => expect(remote.signOut).toHaveBeenCalledWith({ scope: "local" }));
     expect(remote.clearNativeRecovery).not.toHaveBeenCalled();
     expect(remote.from).not.toHaveBeenCalledWith("organizations");
@@ -589,6 +597,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
   });
 
   it("blocks browser recovery data loads until the authoritative event, then removes the callback query", async () => {
+    let completeExchange!: (value: MockExchangeResponse) => void;
+    remote.exchangeCode.mockImplementationOnce(() => new Promise((resolve) => { completeExchange = resolve; }));
     window.history.replaceState(
       {},
       "",
@@ -606,6 +616,7 @@ describe("AppDataProvider password recovery trust boundary", () => {
 
     await act(async () => {
       remote.authCallback?.("PASSWORD_RECOVERY", session);
+      completeExchange({ data: { user, session, redirectType: "recovery" }, error: null });
     });
     expect(window.location.pathname).toBe("/reset-password");
     expect(window.location.search).toBe("");
@@ -615,7 +626,38 @@ describe("AppDataProvider password recovery trust boundary", () => {
     expect(remote.from).not.toHaveBeenCalledWith("organizations");
   });
 
+  it("verifies an email recovery code without a PKCE verifier and blocks protected reads", async () => {
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(latestData?.requiredConsentDocuments).toHaveLength(2));
+    remote.verifyOtp.mockImplementationOnce(async () => {
+      remote.currentSession = session;
+      remote.authCallback?.("PASSWORD_RECOVERY", session);
+      return { data: { user, session, redirectType: "recovery" }, error: null };
+    });
+    remote.from.mockClear();
+    await act(async () => { await latestData!.verifyPasswordRecoveryCode(" USER@example.com ", "123456"); });
+    expect(remote.verifyOtp).toHaveBeenCalledWith({ email: "user@example.com", token: "123456", type: "recovery" });
+    expect(remote.exchangeCode).not.toHaveBeenCalled();
+    expect(latestData?.passwordRecoveryReady).toBe(true);
+    expect(remote.from).not.toHaveBeenCalledWith("organizations");
+    await expect(latestData!.signIn({ email: user.email, password: "password123" })).rejects.toThrow("복구");
+  });
+
+  it("does not authorize password changes when an email recovery code is rejected", async () => {
+    render(<AppDataProvider><AuthProbe /></AppDataProvider>);
+    await waitFor(() => expect(latestData?.requiredConsentDocuments).toHaveLength(2));
+    remote.verifyOtp.mockResolvedValueOnce({ data: { user: null, session: null, redirectType: null }, error: new Error("expired code") });
+    await act(async () => { await expect(latestData!.verifyPasswordRecoveryCode(user.email, "123456")).rejects.toThrow("expired code"); });
+    expect(latestData?.passwordRecoveryReady).toBe(false);
+    expect(remote.updateUser).not.toHaveBeenCalled();
+  });
+
   it("removes a successful browser signup callback before continuing account loading", async () => {
+    remote.exchangeCode.mockImplementationOnce(async () => {
+      remote.currentSession = session;
+      remote.authCallback?.("SIGNED_IN", session);
+      return { data: { user, session, redirectType: "signup" }, error: null };
+    });
     window.history.replaceState(
       {},
       "",
@@ -783,11 +825,12 @@ describe("AppDataProvider password recovery trust boundary", () => {
       </MemoryRouter>,
     );
 
+    fireEvent.click(await screen.findByText("이메일로 로그인·회원가입"));
     const emailInput = await screen.findByLabelText("이메일");
     const passwordInput = screen.getByLabelText("비밀번호");
     fireEvent.change(emailInput, { target: { value: "member@example.com" } });
     fireEvent.change(passwordInput, { target: { value: "password123" } });
-    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    fireEvent.click(screen.getByRole("button", { name: "이메일로 로그인" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("이메일 확인이 필요합니다");
     expect(emailInput).toHaveValue("member@example.com");
@@ -804,6 +847,7 @@ describe("AppDataProvider password recovery trust boundary", () => {
       </MemoryRouter>,
     );
 
+    fireEvent.click(await screen.findByText("이메일로 로그인·회원가입"));
     fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
     fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
@@ -814,7 +858,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
     fireEvent.click(screen.getByRole("checkbox", { name: /개인정보 수집·이용 동의/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /공동체 운영정책 동의/ }));
-    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /만 14세 이상입니다/ }));
+    fireEvent.click(screen.getByRole("button", { name: "이메일로 계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("가입 확인 메일을 보낼 수 없습니다");
     expect(remote.signUp).toHaveBeenCalledWith({
@@ -851,6 +896,7 @@ describe("AppDataProvider password recovery trust boundary", () => {
       </MemoryRouter>,
     );
 
+    fireEvent.click(await screen.findByText("이메일로 로그인·회원가입"));
     fireEvent.click(await screen.findByRole("tab", { name: "회원가입" }));
     fireEvent.change(screen.getByLabelText("이름"), { target: { value: "가입자" } });
     fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
@@ -861,7 +907,8 @@ describe("AppDataProvider password recovery trust boundary", () => {
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
     fireEvent.click(screen.getByRole("checkbox", { name: /개인정보 수집·이용 동의/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /공동체 운영정책 동의/ }));
-    fireEvent.click(screen.getByRole("button", { name: "계정 만들기" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /만 14세 이상입니다/ }));
+    fireEvent.click(screen.getByRole("button", { name: "이메일로 계정 만들기" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("올바른 이메일 주소를 입력해 주세요");
     expect(emailInput).toHaveValue("member@example.com");

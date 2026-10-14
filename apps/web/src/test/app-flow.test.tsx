@@ -22,7 +22,7 @@ describe("primary service journeys", () => {
   it("redirects signed-out protected routes to the explicit authentication page", async () => {
     renderApp(["/app/posts"]);
 
-    expect(await screen.findByRole("heading", { name: "다시 만나 반가워요" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "공동체와 함께 시작해요" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "비밀번호를 잊으셨나요?" })).toHaveAttribute("href", "/forgot-password");
   });
 
@@ -30,7 +30,7 @@ describe("primary service journeys", () => {
     renderApp(["/auth"]);
     fireEvent.change(await screen.findByLabelText("이메일"), { target: { value: "member@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "password123" } });
-    fireEvent.click(screen.getByRole("button", { name: "로그인" }));
+    fireEvent.click(screen.getByRole("button", { name: "이메일로 로그인" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("로그인하지 못했습니다");
     expect(screen.getByRole("alert")).not.toHaveTextContent("실서비스 로그인이 아직 연결되지 않았습니다");
@@ -43,7 +43,9 @@ describe("primary service journeys", () => {
     fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "new@example.com" } });
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password123" } });
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "different123" } });
-    fireEvent.submit(screen.getByRole("button", { name: "계정 만들기" }).closest("form")!);
+    fireEvent.change(screen.getByLabelText("소속 노회"), { target: { value: "서울노회" } });
+    fireEvent.change(screen.getByLabelText("소속 교회"), { target: { value: "org-19" } });
+    fireEvent.submit(screen.getByRole("button", { name: "이메일로 계정 만들기" }).closest("form")!);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("비밀번호가 서로 일치하지 않습니다");
   });
@@ -58,7 +60,7 @@ describe("primary service journeys", () => {
     fireEvent.change(screen.getByLabelText("비밀번호", { selector: "input" }), { target: { value: "password1234" } });
     fireEvent.change(screen.getByLabelText("비밀번호 확인"), { target: { value: "password1234" } });
 
-    const submit = screen.getByRole("button", { name: "계정 만들기" });
+    const submit = screen.getByRole("button", { name: "이메일로 계정 만들기" });
     fireEvent.submit(submit.closest("form")!);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("현재 필수 동의 문서를 각각 확인하고 동의해 주세요");
@@ -66,7 +68,7 @@ describe("primary service journeys", () => {
       /개인정보 수집·이용 동의/,
       /종교 관련 민감정보 처리 동의/,
       /개인정보 국외 이전 동의/,
-      /이용약관 동의 및 만 14세 이상 확인/,
+      /이용약관 동의/,
       /공동체 운영정책 동의/,
     ]) {
       expect(screen.getByRole("checkbox", { name })).toBeRequired();
@@ -92,19 +94,19 @@ describe("primary service journeys", () => {
 
   it("offers password recovery and rejects a reset page without a valid recovery session", async () => {
     const forgotView = renderApp(["/forgot-password"]);
-    expect(await screen.findByRole("heading", { name: "비밀번호를 잊으셨나요?" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "재설정 링크 받기" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /로그인으로 돌아가기/ })).toHaveAttribute("href", "/auth");
+    expect(await screen.findByRole("heading", { name: "비밀번호 재설정" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "재설정 메일 받기" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "로그인으로 돌아가기" })).toHaveAttribute("href", "/auth");
     forgotView.unmount();
 
     const missingView = renderApp(["/reset-password"]);
     expect(await screen.findByRole("heading", { name: "새 비밀번호 설정" })).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("유효한 비밀번호 재설정 정보가 없습니다");
-    expect(screen.getByRole("link", { name: "새 재설정 링크 요청" })).toHaveAttribute("href", "/forgot-password");
+    expect(screen.getByText(/메일 인증을 먼저 완료/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "재설정 메일 요청" })).toHaveAttribute("href", "/forgot-password");
     missingView.unmount();
 
     renderApp(["/reset-password?error=access_denied&error_code=otp_expired"]);
-    expect(await screen.findByRole("alert")).toHaveTextContent("재설정 링크가 만료되었거나 이미 사용되었습니다");
+    expect(await screen.findByText(/메일 인증을 먼저 완료/)).toBeInTheDocument();
   });
 
   it("keeps public auth callback routes inside the intended signup and recovery flows", async () => {
@@ -119,7 +121,7 @@ describe("primary service journeys", () => {
 
   it("does not trust an unverified recovery code from the URL", async () => {
     renderApp(["/reset-password?code=recovery-code"]);
-    expect(await screen.findByRole("alert")).toHaveTextContent("유효한 비밀번호 재설정 정보가 없습니다");
+    expect(await screen.findByText(/메일 인증을 먼저 완료/)).toBeInTheDocument();
     expect(screen.queryByLabelText("새 비밀번호")).not.toBeInTheDocument();
   });
 
@@ -189,6 +191,22 @@ describe("primary service journeys", () => {
       target: { value: "부산노회" },
     });
     expect(screen.getByRole("button", { name: "가입 승인 요청" })).toBeDisabled();
+  });
+
+  it("saves an edited own name before requesting membership without inferring a role", async () => {
+    renderApp();
+    fireEvent.click((await screen.findByText("신규 가입자")).closest("button")!);
+    fireEvent.change(await screen.findByLabelText("본인 이름"), { target: { value: "  김재건  " } });
+    fireEvent.change(screen.getByRole("combobox", { name: "소속 노회" }), { target: { value: "서울노회" } });
+    fireEvent.click(screen.getByRole("radio", { name: /재건부평교회/ }));
+    expect(screen.getByRole("radio", { name: /^회원/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "가입 승인 요청" }));
+    await screen.findByRole("heading", { name: "공동체가 확인하고 있어요" });
+    const saved = JSON.parse(window.localStorage.getItem(DEMO_STORAGE_KEY)!);
+    expect(saved.viewer.profile.displayName).toBe("김재건");
+    expect(saved.viewer.application.applicantName).toBe("김재건");
+    expect(saved.viewer.application.requestedRole).toBe("member");
+    expect(saved.viewer.membership).toBeUndefined();
   });
 
   it("lets an executive choose multiple offices and projects office-specific operations", async () => {

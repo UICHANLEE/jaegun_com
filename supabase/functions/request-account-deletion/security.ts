@@ -2,6 +2,7 @@ export const ACCOUNT_DELETION_CONFIRMATION = "계정 삭제";
 export const MAX_REQUEST_BODY_BYTES = 8 * 1024;
 export const MAX_REASON_LENGTH = 500;
 export const MAX_PASSWORD_LENGTH = 4096;
+export const SOCIAL_REAUTH_MAX_AGE_SECONDS = 5 * 60;
 
 /**
  * Custom-scheme origins used by native WebViews. HTTPS localhost origins are
@@ -279,6 +280,54 @@ export function verifiedTokenHasAal2(token: string, verifiedUserId: string): boo
       claims.sub === verifiedUserId &&
       claims.aal === "aal2"
     );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Auth must verify these exact bearer bytes before calling. The signed OAuth
+ * AMR belongs to this token's session/subject; refreshing a token or signing in
+ * on a different device does not update this session's OAuth authentication.
+ * Linked providers come from that same auth.getUser response, never the body.
+ */
+export function verifiedTokenHasFreshSocialAuthentication(
+  token: string,
+  verifiedUserId: string,
+  verifiedProviders: readonly string[],
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): boolean {
+  if (!verifiedProviders.includes("google")) {
+    return false;
+  }
+  try {
+    const segments = token.split(".");
+    if (segments.length !== 3) return false;
+    const claims: unknown = JSON.parse(decodeBase64UrlUtf8(segments[1]));
+    if (!isPlainRecord(claims)
+      || claims.sub !== verifiedUserId
+      || claims.role !== "authenticated"
+      || claims.is_anonymous !== false
+      || !(claims.aud === "authenticated"
+        || (Array.isArray(claims.aud) && claims.aud.includes("authenticated")))
+      || typeof claims.session_id !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claims.session_id)
+      || typeof claims.iat !== "number" || !Number.isSafeInteger(claims.iat)
+      || typeof claims.exp !== "number" || !Number.isSafeInteger(claims.exp)
+      || claims.iat > nowSeconds || claims.exp <= nowSeconds
+      || !Array.isArray(claims.amr)) {
+      return false;
+    }
+    const issuedAt = claims.iat;
+    return claims.amr.some((entry: unknown) => (
+      isPlainRecord(entry)
+      && entry.method === "oauth"
+      && typeof entry.timestamp === "number"
+      && Number.isSafeInteger(entry.timestamp)
+      && entry.timestamp <= issuedAt
+      && entry.timestamp <= nowSeconds
+      && nowSeconds - entry.timestamp <= SOCIAL_REAUTH_MAX_AGE_SECONDS
+    ));
   } catch {
     return false;
   }

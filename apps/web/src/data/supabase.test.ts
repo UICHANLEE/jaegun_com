@@ -58,7 +58,7 @@ describe("Supabase configuration validation", () => {
     })).toBe(false);
   });
 
-  it("keeps exact PKCE callbacks but strips auth material from every other browser URL", () => {
+  it("keeps exact social PKCE callbacks but strips auth material from every other browser URL", () => {
     let replacement: string | null = null;
     const historyObject = {
       state: { test: true },
@@ -68,7 +68,7 @@ describe("Supabase configuration validation", () => {
     };
 
     expect(sanitizeUntrustedBrowserAuthUrl({
-      href: "https://jaegun-com.vercel.app/auth/callback/signup?code=signup-code-1234&sb_flow_id=flow_id_12345678",
+      href: "https://jaegun-com.vercel.app/auth/callback/social?code=social-code-1234&sb_flow_id=flow_id_12345678&social_intent=intent_nonce_12345678",
     }, historyObject)).toBe(false);
     expect(replacement).toBeNull();
 
@@ -76,5 +76,39 @@ describe("Supabase configuration validation", () => {
       href: "https://jaegun-com.vercel.app/app/home?code=stolen-code-1234&sb_flow_id=flow_id_12345678#access_token=secret",
     }, historyObject)).toBe(true);
     expect(replacement).toBe("https://jaegun-com.vercel.app/app/home");
+  });
+
+  it.each([
+    "https://jaegun-com.vercel.app/auth/callback/signup?code=signup-code-1234&access_token=secret",
+    "https://jaegun-com.vercel.app/auth/callback/recovery?code=recovery-code-1234&code=duplicate-code-1234",
+    "https://jaegun-com.vercel.app/auth/callback/social?code=social-code-1234",
+    "https://jaegun-com.vercel.app/auth/callback/social?code=first-code-1234&code=second-code-1234&social_intent=intent_nonce_12345678",
+    "https://jaegun-com.vercel.app/auth/callback/social?error=access_denied&error_code=provider_denied&error_description=secret&social_intent=intent_nonce_12345678",
+    "https://evil.example/auth/callback/social?code=social-code-1234&social_intent=intent_nonce_12345678",
+    "https://jaegun-com.vercel.app/auth/callback/social?access_token=secret&refresh_token=secret&provider_token=secret&provider_refresh_token=secret",
+    "https://jaegun-com.vercel.app/app/home#code=social-code-1234&social_intent=intent_nonce_12345678",
+  ])("scrubs retired, untrusted, duplicate and denied OAuth material: %s", (href) => {
+    let replacement = "";
+    const historyObject = {
+      state: null,
+      replaceState(_data: unknown, _unused: string, url?: string | URL | null) {
+        replacement = String(url);
+      },
+    };
+    expect(sanitizeUntrustedBrowserAuthUrl({ href }, historyObject)).toBe(true);
+    const sanitized = new URL(replacement);
+    expect(sanitized.search).toBe("");
+    expect(sanitized.hash).toBe("");
+  });
+
+  it("rejects raw URL normalization tricks before the URL parser canonicalizes them", () => {
+    let replacement = "";
+    expect(sanitizeUntrustedBrowserAuthUrl({
+      href: "https://jaegun-com.vercel.app/auth/callback/other/../social?code=social-code-1234&social_intent=intent_nonce_12345678",
+    }, {
+      state: null,
+      replaceState(_data: unknown, _unused: string, url?: string | URL | null) { replacement = String(url); },
+    })).toBe(true);
+    expect(replacement).toBe("https://jaegun-com.vercel.app/auth/callback/social");
   });
 });

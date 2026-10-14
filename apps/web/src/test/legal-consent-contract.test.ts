@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildSignupConsentMetadata,
+  assertAcceptedConsentVersions,
   bundledCurrentConsentDocuments,
   classifyRequiredConsentDocuments,
   legalDocumentUrl,
@@ -38,7 +38,7 @@ function acceptedFor(documents: readonly RequiredConsentDocument[]): AcceptedCon
 }
 
 describe("active legal-consent contract", () => {
-  it("accepts the exact current five-document set and emits atomic v2 signup metadata", async () => {
+  it("accepts the exact current five-document set and validates explicit decisions", async () => {
     const rows = CURRENT_LEGAL_DOCUMENTS.map((document) => rowFor(document.key, document.version));
     const documents = await validateActiveConsentRows(rows);
     const accepted = acceptedFor(documents);
@@ -51,32 +51,20 @@ describe("active legal-consent contract", () => {
       "terms_of_service",
       "community_guidelines",
     ]);
-    expect(legalDocumentUrl("sensitive_information", "2026-08-30")).toBe("/legal/sensitive/2026-08-30");
-    expect(legalDocumentUrl("overseas_transfer", "2026-08-30")).toBe("/legal/overseas/2026-08-30");
-    expect(buildSignupConsentMetadata(documents, accepted)).toEqual({
-      consent_contract: "required-consents-v2",
-      accepted_required_consents: Object.fromEntries(documents.map((document) => [
-        document.key,
-        { accepted: true, version: document.version },
-      ])),
-    });
+    expect(() => assertAcceptedConsentVersions(documents, accepted)).not.toThrow();
   });
 
-  it("keeps the exact frozen two-document rollout compatible with legacy metadata", async () => {
+  it("recognizes exact immutable historical contracts without mixing versions", async () => {
     const documents = await validateActiveConsentRows([
       rowFor("privacy_policy", "2026-08-27"),
       rowFor("community_guidelines", "2026-08-27"),
     ]);
-    const metadata = buildSignupConsentMetadata(documents, acceptedFor(documents));
 
     expect(classifyRequiredConsentDocuments(documents)).toBe("legacy-v1");
-    expect(metadata).toMatchObject({
-      consent_contract: "required-consents-v1",
-      accepted_privacy: true,
-      accepted_privacy_version: "2026-08-27",
-      accepted_community: true,
-      accepted_community_version: "2026-08-27",
-    });
+    const previous = CURRENT_LEGAL_DOCUMENTS.map((document) => rowFor(document.key, "2026-08-30"));
+    expect(classifyRequiredConsentDocuments(await validateActiveConsentRows(previous))).toBe("independent-v2");
+    const mixed = previous.map((row, index) => index === 0 ? rowFor(row.document_key, "2026-10-14") : row);
+    await expect(validateActiveConsentRows(mixed)).rejects.toThrow("구성이 안전한 출시 계약과 일치하지 않습니다");
   });
 
   it("fails closed for a partial, duplicate, unknown, or extra submitted set", async () => {
@@ -94,7 +82,7 @@ describe("active legal-consent contract", () => {
       document_key: "unknown_document",
     }, rowFor("community_guidelines", "2026-08-27")])).rejects.toThrow("알 수 없는 필수 동의 문서");
 
-    expect(() => buildSignupConsentMetadata(current, {
+    expect(() => assertAcceptedConsentVersions(current, {
       ...acceptedFor(current),
       arbitrary_runtime_key: "2026-08-30",
     } as AcceptedConsentVersions)).toThrow("현재 필수 동의 문서와 다른 항목");

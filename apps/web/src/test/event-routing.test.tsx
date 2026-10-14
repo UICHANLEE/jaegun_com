@@ -121,13 +121,13 @@ describe("event route integration", () => {
 });
 
 describe("event editor MFA boundary", () => {
-  it("requires MFA enrollment for an event-only delegate in production", () => {
+  it("does not force new authenticator enrollment for management", () => {
     expect(requiresManagementMfaEnrollment({
       mode: "supabase",
       pathname: "/manage/events/new",
       highPrivilege: false,
       verifiedFactorCount: 0,
-    })).toBe(true);
+    })).toBe(false);
     expect(requiresManagementMfaEnrollment({
       mode: "supabase",
       pathname: "/manage/events/occurrence-1/edit",

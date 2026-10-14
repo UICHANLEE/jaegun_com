@@ -52,32 +52,48 @@ import { normalizeGovernanceAccess } from "./governance";
 import {
   assertAcceptedConsentVersions,
   buildSignupConsentMetadata,
+  type AcceptedConsentVersions,
   consentSetFingerprint,
   fetchActiveConsentDocuments,
 } from "./legalConsentContract";
 import {
   loadSafetyPrivacyState,
   requiredConsentsAreCurrent,
+  savePrivacyAndConsents,
 } from "./safetyPrivacy";
 import { assertNativeMediaUploadsAllowed } from "./ugcSafety";
 import {
   beginNativePasswordRecoveryIntent,
+  verifyNativePasswordRecoveryIntent,
+  emailAuthRedirectUrl,
   claimNativeAuthCallbackUrl,
   clearNativePasswordRecoveryIntent,
+  closeNativeSocialAuthBrowser,
   getPublicAuthCallbackPathKind,
+  openNativeSocialAuthUrl,
+  normalizeAllowedNativeSocialAuthUrl,
+  parseNativeAuthCallbackUrl,
+  parseNativeSocialAuthErrorUrl,
   readNativePasswordRecoveryIntent,
-  RECOVERY_AUTH_CALLBACK_URL,
-  SIGNUP_AUTH_CALLBACK_URL,
   subscribeToNativeAppUrls,
-  verifyNativePasswordRecoveryIntent,
+  subscribeToNativeSocialAuthCancellation,
 } from "../native/runtime";
+import {
+  clearSocialAuthIntent,
+  createSocialAuthIntent,
+  fetchSocialAuthProviders,
+  isSocialAuthProvider,
+  readSocialAuthIntent,
+  saveSocialAuthIntent,
+  socialAuthRedirectUrl,
+  type SocialAuthIntent,
+  type SocialAuthMode,
+  type SocialAuthProvider,
+  type SocialAuthProviders,
+} from "./socialAuth";
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
 
-interface LoginInput {
-  email: string;
-  password: string;
-}
 
 interface PendingMessageBatch {
   textNonce?: string;
@@ -113,17 +129,27 @@ interface PendingMessageReconciliation {
 
 type DemoPersona = "owner" | "member" | "new" | "minister" | "executive";
 
-interface AppDataContextValue extends AppDataState {
+interface LoginInput { email: string; password: string }
+
+export interface AppDataContextValue extends AppDataState {
+  updateOwnDisplayName: (displayName: string) => Promise<void>;
+  passwordRecoveryReady: boolean;
+  signIn: (input: LoginInput) => Promise<void>;
+  signUp: (input: SignUpInput) => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  verifyPasswordRecoveryCode: (email: string, code: string) => Promise<void>;
+  updatePassword: (password: string) => Promise<void>;
   error: string | null;
   hasMorePosts: boolean;
   serviceYear: number;
   getServerNow: () => number;
-  passwordRecoveryReady: boolean;
+  socialProviders: SocialAuthProviders;
+  socialAuthWorking: boolean;
+  linkedSocialProviders: SocialAuthProvider[];
   enterDemo: (persona?: DemoPersona, executiveOfficeCodes?: ExecutiveOfficeCode[]) => void;
-  signIn: (input: LoginInput) => Promise<void>;
-  signUp: (input: SignUpInput) => Promise<void>;
-  requestPasswordReset: (email: string) => Promise<void>;
-  updatePassword: (password: string) => Promise<void>;
+  signInWithSocial: (provider: SocialAuthProvider, acceptedConsents: AcceptedConsentVersions) => Promise<void>;
+  linkSocialIdentity: (provider: SocialAuthProvider) => Promise<void>;
+  reauthenticateWithSocial: (provider: SocialAuthProvider, returnTo?: string) => Promise<void>;
   signOut: () => Promise<void>;
   requestMembership: (input: MembershipRequestInput) => Promise<void>;
   createPost: (draft: PostDraft, onProgress?: (progress: number) => void) => Promise<Post>;
@@ -163,7 +189,8 @@ const SIGNED_URL_CACHE_TTL_MS = {
   avatars: 45_000,
   "community-media": 45_000,
 } as const;
-const RECOVERY_SESSION_KEY = "jaegun-password-recovery-v1";
+const LEGACY_PASSWORD_RECOVERY_STORAGE_KEY = "jaegun-password-recovery-v1";
+const RECOVERY_SESSION_KEY = LEGACY_PASSWORD_RECOVERY_STORAGE_KEY;
 const RECOVERY_SESSION_TTL_MS = 30 * 60 * 1000;
 const STORAGE_CLEANUP_STORAGE_KEY = "jaegun-storage-cleanup-v1";
 const DRAFT_CLEANUP_STORAGE_KEY = "jaegun-draft-cleanup-v1";
@@ -264,6 +291,7 @@ function writeDraftCleanupQueue(queue: Map<string, Set<string>>) {
   }
 }
 
+
 function readRecoverySession(userId: string) {
   if (!canPersistSensitiveClientState()) return null;
   try {
@@ -273,6 +301,7 @@ function readRecoverySession(userId: string) {
     return value.userId === userId
       && typeof value.expiresAt === "number"
       && value.expiresAt > Date.now()
+      && value.expiresAt <= Date.now() + RECOVERY_SESSION_TTL_MS
       ? value.expiresAt
       : null;
   } catch {
@@ -892,6 +921,15 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const [governanceRefreshDeadline, setGovernanceRefreshDeadline] = useState<number | null>(null);
   const [realtimeSubscriptionEpoch, setRealtimeSubscriptionEpoch] = useState(0);
   const [passwordRecoveryReady, setPasswordRecoveryReady] = useState(false);
+  const recoveryUserIdRef = useRef<string | null>(null);
+  const recoveryExpiresAtRef = useRef<number | null>(null);
+  const recoveryOperationRef = useRef(false);
+  const [socialProviders, setSocialProviders] = useState<SocialAuthProviders>({ google: false });
+  const [socialAuthWorking, setSocialAuthWorking] = useState(false);
+  const [linkedSocialProviders, setLinkedSocialProviders] = useState<SocialAuthProvider[]>([]);
+  const socialAuthWorkingRef = useRef(false);
+  const socialCallbackPromiseRef = useRef<Promise<void> | null>(null);
+  const socialCancellationReadyRef = useRef<Promise<() => void> | null>(null);
   const serverClockRef = useRef({
     unixMs: Date.now(),
     monotonicMs: performance.now(),
@@ -911,8 +949,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const pendingMeetingMinuteSavesRef = useRef(new Map<string, Promise<string>>());
   const pendingLedgerEntryIdsRef = useRef(new Map<string, string>());
   const pendingLedgerEntrySavesRef = useRef(new Map<string, Promise<string>>());
-  const recoveryUserIdRef = useRef<string | null>(null);
-  const recoveryExpiresAtRef = useRef<number | null>(null);
   const conversationMessageLoadGenerationRef = useRef(new Map<string, number>());
   const conversationStateGenerationRef = useRef(new Map<string, number>());
   const conversationSummaryLoadGenerationRef = useRef(0);
@@ -963,12 +999,14 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     setState(next);
   }, [persistDemo]);
 
+
   const clearPasswordRecovery = useCallback(() => {
     recoveryUserIdRef.current = null;
     recoveryExpiresAtRef.current = null;
     removeRecoverySession();
     setPasswordRecoveryReady(false);
   }, []);
+
 
   const queueStorageCleanup = useCallback((userId: string, paths: string[]) => {
     const pending = storageCleanupQueueRef.current.get(userId) ?? new Set<string>();
@@ -1822,366 +1860,350 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     loadRemoteRef.current = loadRemote;
   }, [loadRemote]);
 
+  const acceptPasswordRecovery = useCallback(async (userId: string) => {
+    remoteLoadsBlockedRef.current = true;
+    invalidateRemoteWork(null);
+    replaceState(createAuthState(stateRef.current, "supabase", false, true));
+    const expiresAt = isNativeAppRuntime()
+      ? await verifyNativePasswordRecoveryIntent(userId)
+      : writeRecoverySession(userId);
+    if (!expiresAt) throw new Error("복구 상태를 확인하지 못했습니다. 새 인증 코드를 요청해 주세요.");
+    recoveryUserIdRef.current = userId;
+    recoveryExpiresAtRef.current = expiresAt;
+    setPasswordRecoveryReady(true);
+    window.history.replaceState(window.history.state, "", "/reset-password");
+    window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+  }, [invalidateRemoteWork, replaceState]);
   const scheduleRemoteRefresh = useCallback(() => {
     void loadRemote().catch(() => undefined);
   }, [loadRemote]);
 
   useEffect(() => {
     if (!supabase) return;
+    const controller = new AbortController();
+    void fetchSocialAuthProviders(controller.signal).then(setSocialProviders).catch((reason: unknown) => {
+      if (!controller.signal.aborted) setError(remoteLoadErrorMessage(reason));
+    });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
     const authClient = supabase.auth;
     const nativeRuntime = isNativeAppRuntime();
-    let authLoadTimer: number | undefined;
-    let browserCallbackFallbackTimer: number | undefined;
-    let browserCallbackHandled = false;
     let disposed = false;
-    let nativeAppUrlDrainComplete = !nativeRuntime;
-    let nativeRecoveryCallbackClaimed = false;
-    let nativeInitialSessionBeforeUrlDrain: string | null | undefined;
-    let nativeRecoveryCleanupPromise: Promise<void> | null = null;
-    const browserCallbackKind = getPublicAuthCallbackPathKind(window.location.href);
-    const nativeRecoveryStartupPromise = nativeRuntime
-      ? readNativePasswordRecoveryIntent().catch(() => ({ status: "invalid" as const }))
-      : null;
-    if (browserCallbackKind || nativeRuntime) remoteLoadsBlockedRef.current = true;
-    const scheduleRemoteLoad = () => {
-      window.clearTimeout(authLoadTimer);
-      authLoadTimer = window.setTimeout(() => {
-        void loadRemote().catch(() => undefined);
-      }, 0);
-    };
-    const replaceBrowserCallbackLocation = (pathname: string) => {
+    let startupComplete = false;
+    let authLoadTimer: number | undefined;
+    const startupUrls: string[] = [];
+    const startupEpoch = remoteSessionEpochRef.current;
+    remoteLoadsBlockedRef.current = true;
+    const navigateAfterAuth = (pathname: string) => {
+      if (disposed) return;
       window.history.replaceState(window.history.state, "", pathname);
       window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
     };
-    const finishBrowserCallback = (pathname: string, message?: string) => {
-      browserCallbackHandled = true;
-      window.clearTimeout(browserCallbackFallbackTimer);
-      replaceBrowserCallbackLocation(pathname);
-      if (message) setError(message);
-    };
-    const blockNativeRecoveryState = () => {
-      remoteLoadsBlockedRef.current = true;
-      clearPasswordRecovery();
-      invalidateRemoteWork(null);
-      replaceState(createAuthState(stateRef.current, "supabase", false));
-    };
-    const removeNativeRecoverySessionThenMarker = (message: string) => {
-      if (nativeRecoveryCleanupPromise) return nativeRecoveryCleanupPromise;
-      nativeRecoveryCleanupPromise = (async () => {
-        let signOutFailed = false;
-        try {
-          const { error: signOutError } = await authClient.signOut({ scope: "local" });
-          signOutFailed = Boolean(signOutError);
-        } catch {
-          signOutFailed = true;
-        }
-
-        // Never remove the durable intent until the persisted Auth session has
-        // been removed. If sign-out fails or the app terminates first, the
-        // marker remains and the next launch fails closed again.
-        if (!signOutFailed) {
-          try {
-            await clearNativePasswordRecoveryIntent();
-          } catch {
-            // A stale marker paired with no Auth session is safe and is retried
-            // by the next fail-closed launch cleanup.
-          }
-        }
-        if (!disposed) {
-          setError(signOutFailed
-            ? "복구 세션을 안전하게 종료하지 못했습니다. 앱을 완전히 종료한 뒤 다시 열어 주세요."
-            : message);
-        }
-      })();
-      return nativeRecoveryCleanupPromise;
-    };
-    const failClosedNativeRecovery = async (message: string) => {
-      blockNativeRecoveryState();
-      await removeNativeRecoverySessionThenMarker(message);
-    };
-    const deferFailClosedNativeRecovery = (message: string) => {
-      blockNativeRecoveryState();
-      // Supabase invokes auth callbacks while holding its internal Auth lock.
-      // Return first, then remove the local session on the next task.
-      window.setTimeout(() => {
-        void removeNativeRecoverySessionThenMarker(message);
+    const scheduleRemoteLoad = (message?: string) => {
+      window.clearTimeout(authLoadTimer);
+      authLoadTimer = window.setTimeout(() => {
+        if (disposed) return;
+        void loadRemote().catch(() => undefined).finally(() => {
+          if (!disposed && message) setError(message);
+        });
       }, 0);
     };
-    const restoreNativeRecoveryIntent = async (nextUserId: string | null) => {
-      const intent = await nativeRecoveryStartupPromise!;
-      if (disposed) return "handled" as const;
-      if (!nativeAppUrlDrainComplete || nativeRecoveryCallbackClaimed) {
-        remoteLoadsBlockedRef.current = true;
-        return "handled" as const;
-      }
-      if (intent.status === "missing") {
-        clearPasswordRecovery();
-        remoteLoadsBlockedRef.current = false;
-        return "normal" as const;
-      }
-      if (intent.status === "verified" && nextUserId === intent.userId) {
-        remoteLoadsBlockedRef.current = true;
-        recoveryUserIdRef.current = intent.userId;
-        recoveryExpiresAtRef.current = intent.expiresAt;
-        setPasswordRecoveryReady(true);
-        invalidateRemoteWork(null);
-        replaceState(createAuthState(stateRef.current, "supabase", false));
-        replaceBrowserCallbackLocation("/reset-password");
-        return "handled" as const;
-      }
-      deferFailClosedNativeRecovery(
-        "완료되지 않았거나 만료된 비밀번호 복구 요청을 안전하게 종료했습니다. 새 링크를 요청해 주세요.",
-      );
-      return "handled" as const;
+    const discardLegacyRecoverySession = async () => {
+      const { error: signOutError } = await authClient.signOut({ scope: "local" });
+      if (signOutError) throw new Error("이전 복구 세션을 안전하게 종료하지 못했습니다. 앱을 다시 열어 주세요.");
+      if (nativeRuntime) await clearNativePasswordRecoveryIntent();
+      else window.sessionStorage.removeItem(LEGACY_PASSWORD_RECOVERY_STORAGE_KEY);
     };
-    void loadRemote().catch(() => undefined);
-    const { data } = authClient.onAuthStateChange(async (event, session) => {
-      const nextUserId = session?.user.id ?? null;
-      if (browserCallbackKind && !browserCallbackHandled) {
-        if (event === "INITIAL_SESSION") {
-          remoteLoadsBlockedRef.current = true;
-          if (!nextUserId) {
-            clearPasswordRecovery();
-            remoteLoadsBlockedRef.current = false;
-            finishBrowserCallback(
-              browserCallbackKind === "recovery" ? "/forgot-password" : "/auth",
-              "확인 링크가 만료되었거나 이미 사용되었습니다. 앱에서 새 링크를 요청해 주세요.",
-            );
-            scheduleRemoteLoad();
-          } else {
-            // Successful URL exchange emits SIGNED_IN/PASSWORD_RECOVERY on the
-            // next task. If it does not, this was a rejected callback layered
-            // over an older valid session: remove the code-bearing URL without
-            // granting recovery intent or replacing that existing session.
-            browserCallbackFallbackTimer = window.setTimeout(() => {
-              if (browserCallbackHandled) return;
-              clearPasswordRecovery();
-              remoteLoadsBlockedRef.current = false;
-              finishBrowserCallback(
-                browserCallbackKind === "recovery" ? "/forgot-password" : "/auth",
-                "확인 링크를 처리하지 못했습니다. 앱에서 새 링크를 요청해 주세요.",
-              );
-              scheduleRemoteLoad();
-            }, 100);
-          }
-          return;
-        }
-
-        if (event === "SIGNED_IN" || event === "PASSWORD_RECOVERY") {
-          const eventKind = event === "PASSWORD_RECOVERY" ? "recovery" : "signup";
-          if (eventKind !== browserCallbackKind) {
-            remoteLoadsBlockedRef.current = true;
-            clearPasswordRecovery();
-            invalidateRemoteWork(null);
-            replaceState(createAuthState(stateRef.current, "supabase", false));
-            finishBrowserCallback(
-              "/auth",
-              "확인 링크의 용도를 확인하지 못했습니다. 앱에서 새 링크를 요청해 주세요.",
-            );
-            window.setTimeout(() => {
-              void authClient.signOut({ scope: "local" }).then(({ error: signOutError }) => {
-                if (signOutError) {
-                  setError("확인 링크 세션을 종료하지 못했습니다. 앱을 완전히 종료한 뒤 다시 열어 주세요.");
-                }
-              });
-            }, 0);
-            return;
-          }
-
-          if (eventKind === "recovery") {
-            finishBrowserCallback("/reset-password");
-          } else {
-            remoteLoadsBlockedRef.current = false;
-            finishBrowserCallback("/auth");
-          }
-        }
-      }
-
-      if (nativeRuntime && event === "INITIAL_SESSION" && !nativeAppUrlDrainComplete) {
-        // Keep the session snapshot but return before any async Auth work. The
-        // buffered Universal Link queue is drained immediately after listener
-        // registration; only then can a missing marker safely mean a normal
-        // launch rather than a recovery callback that is about to be claimed.
-        nativeInitialSessionBeforeUrlDrain = nextUserId;
-        remoteLoadsBlockedRef.current = true;
-        return;
-      }
-
-      if (nativeRuntime && event === "INITIAL_SESSION") {
-        if (await restoreNativeRecoveryIntent(nextUserId) === "handled") return;
-      }
-
-      if (nativeRuntime && event === "PASSWORD_RECOVERY") {
-        // The native URL handler owns the pending -> verified transition. Auth
-        // emits this event before exchangeCodeForSession returns, so accepting
-        // it here would create a restart window with an unverified session.
-        remoteLoadsBlockedRef.current = true;
-        return;
-      }
-
-      if (event === "PASSWORD_RECOVERY" && nextUserId) {
-        // A password-recovery session may update only the password. Do not
-        // load protected community data until the password is changed and the
-        // recovery session has been explicitly ended.
-        remoteLoadsBlockedRef.current = true;
-        recoveryUserIdRef.current = nextUserId;
-        recoveryExpiresAtRef.current = writeRecoverySession(nextUserId);
-        setPasswordRecoveryReady(true);
-        invalidateRemoteWork(null);
-        replaceState(createAuthState(stateRef.current, "supabase", false, true));
-      } else if (event === "INITIAL_SESSION" && nextUserId) {
-        const recoveryExpiresAt = readRecoverySession(nextUserId);
-        if (recoveryExpiresAt) {
-          remoteLoadsBlockedRef.current = true;
-          recoveryUserIdRef.current = nextUserId;
-          recoveryExpiresAtRef.current = recoveryExpiresAt;
-          setPasswordRecoveryReady(true);
-        } else {
-          clearPasswordRecovery();
-        }
-      } else if (!nextUserId || (recoveryUserIdRef.current && recoveryUserIdRef.current !== nextUserId)) {
-        clearPasswordRecovery();
-      }
-      if (remoteLoadsBlockedRef.current || stateRef.current.mode === "demo") return;
-      if (nextUserId !== activeRemoteUserIdRef.current) {
-        invalidateRemoteWork(nextUserId);
-        replaceState(createAuthState(stateRef.current, "supabase", Boolean(nextUserId)));
-      }
-      scheduleRemoteLoad();
-    });
-
-    // Register only after onAuthStateChange. The native entry buffers cold and
-    // hot app links in memory until this subscriber is ready, then each exact
-    // allow-listed PKCE code is claimed before its single exchange attempt.
-    const unsubscribeNativeAppUrls = subscribeToNativeAppUrls((url) => {
+    const processEmailCallback = async (url: string) => {
+      const parsed = parseNativeAuthCallbackUrl(url);
+      if (!parsed || parsed.kind === "social") return false;
       const callback = claimNativeAuthCallbackUrl(url);
-      if (!callback) return;
-      if (callback.kind === "recovery") {
-        // This synchronous claim closes the gap where INITIAL_SESSION observes
-        // a pre-link `missing` snapshot while the buffered callback starts.
-        nativeRecoveryCallbackClaimed = true;
-        blockNativeRecoveryState();
-      }
-      void (async () => {
-        if (callback.kind === "recovery") {
-          try {
-            await beginNativePasswordRecoveryIntent();
-          } catch {
-            await failClosedNativeRecovery(
-              "비밀번호 복구를 안전하게 시작하지 못했습니다. 앱을 다시 연 뒤 새 링크를 요청해 주세요.",
-            );
-            return;
-          }
+      if (!callback) return true;
+      recoveryOperationRef.current = true;
+      remoteLoadsBlockedRef.current = true;
+      const emailCallbackEpoch = invalidateRemoteWork(null).sessionEpoch;
+      replaceState(createAuthState(stateRef.current, "supabase", false, true));
+      try {
+        if (callback.kind === "recovery" && nativeRuntime) await beginNativePasswordRecoveryIntent();
+        const { data: result, error: exchangeError } = await authClient.exchangeCodeForSession(
+          callback.code, callback.flowId ? { flowId: callback.flowId } : undefined,
+        );
+        if (exchangeError) throw new Error("확인 링크가 만료되었거나 다른 기기에서 요청되었습니다. 이메일의 인증 코드를 입력하거나 새 링크를 요청해 주세요.");
+        const isRecovery = (result as typeof result & { redirectType?: string }).redirectType === "recovery";
+        if ((callback.kind === "recovery") !== isRecovery || !result.user || result.session?.user.id !== result.user.id) {
+          throw new Error("확인 링크의 용도를 확인하지 못했습니다. 새 링크를 요청해 주세요.");
         }
+        if (disposed || signOutPromiseRef.current || emailCallbackEpoch !== remoteSessionEpochRef.current) {
+          throw new Error("확인 링크 처리가 취소되었습니다. 새 링크를 요청해 주세요.");
+        }
+        if (isRecovery) await acceptPasswordRecovery(result.user.id);
+        else {
+          clearPasswordRecovery();
+          remoteLoadsBlockedRef.current = false;
+          navigateAfterAuth("/auth");
+          scheduleRemoteLoad();
+        }
+      } catch (reason) {
+        await discardLegacyRecoverySession();
+        clearPasswordRecovery();
+        if (!disposed) {
+          remoteLoadsBlockedRef.current = false;
+          navigateAfterAuth(callback.kind === "recovery" ? "/forgot-password" : "/auth");
+          setError(reason instanceof Error ? reason.message : "확인 링크를 처리하지 못했습니다.");
+        }
+      } finally { recoveryOperationRef.current = false; }
+      return true;
+    };
+    const processSocialCallback = (url: string): Promise<void> => {
+      if (signOutPromiseRef.current) return Promise.resolve();
+      if (socialCallbackPromiseRef.current) return socialCallbackPromiseRef.current;
+      const candidate = parseNativeAuthCallbackUrl(url);
+      const callback = candidate?.kind === "social" ? claimNativeAuthCallbackUrl(url) : null;
+      const denied = parseNativeSocialAuthErrorUrl(url);
+      if (!callback && !denied) return Promise.resolve();
+      remoteLoadsBlockedRef.current = true;
+      socialAuthWorkingRef.current = true;
+      setSocialAuthWorking(true);
+      const callbackEpoch = invalidateRemoteWork(null).sessionEpoch;
+      const operation = (async () => {
+        let exchanged = false;
+        let matchedIntent = false;
+        let safeToResume = true;
+        let callbackError: string | undefined;
         try {
-          const { data: exchangeData, error: exchangeError } = await authClient.exchangeCodeForSession(
+          const intent = await readSocialAuthIntent();
+          if (!intent || intent.id !== (callback?.intentId ?? denied?.intentId)) {
+            throw new Error("이 기기에서 시작한 Google 로그인 요청이 아닙니다. 다시 로그인해 주세요.");
+          }
+          matchedIntent = true;
+          if (denied) throw new Error("Google 로그인이 취소되었거나 허용되지 않았습니다. 다시 시도해 주세요.");
+          if (!callback || disposed || remoteSessionEpochRef.current !== callbackEpoch) return;
+          if (intent.mode !== "login") {
+            const { data, error: sessionError } = await authClient.getSession();
+            if (sessionError) throw sessionError;
+            if (data.session?.user.id !== intent.expectedUserId) {
+              throw new Error("계정 연결 요청의 사용자가 변경되었습니다. 현재 계정에서 다시 시작해 주세요.");
+            }
+          }
+          const { data, error: exchangeError } = await authClient.exchangeCodeForSession(
             callback.code,
             callback.flowId ? { flowId: callback.flowId } : undefined,
           );
-          if (exchangeError) {
-            if (callback.kind === "recovery") {
-              await failClosedNativeRecovery(
-                "확인 링크가 만료되었거나 다른 기기에서 요청되었습니다. 새 링크를 요청해 주세요.",
-              );
-            } else {
-              setError("확인 링크가 만료되었거나 다른 기기에서 요청되었습니다. 새 링크를 요청해 주세요.");
-            }
-            return;
+          if (exchangeError) throw new Error("Google 로그인 요청이 만료되었거나 다른 기기에서 시작되었습니다. 다시 시도해 주세요.");
+          exchanged = true;
+          const user = data.user;
+          if (!user || data.session?.user.id !== user.id
+            || (data as typeof data & { redirectType?: string }).redirectType === "recovery"
+            || (intent.expectedUserId && user.id !== intent.expectedUserId)
+            || !user.identities?.some((identity) => identity.provider === intent.provider)) {
+            throw new Error("Google 계정이 요청한 계정과 일치하지 않습니다. 기존 계정에서 다시 시작해 주세요.");
           }
-
-          const redirectType = (exchangeData as typeof exchangeData & { redirectType?: string | null }).redirectType;
-          const isRecoveryExchange = redirectType === "recovery";
-          if ((callback.kind === "recovery") !== isRecoveryExchange) {
-            if (callback.kind === "recovery") {
-              await failClosedNativeRecovery(
-                "확인 링크의 용도를 확인하지 못했습니다. 앱에서 새 링크를 요청해 주세요.",
-              );
-              return;
-            }
-            remoteLoadsBlockedRef.current = true;
-            clearPasswordRecovery();
-            invalidateRemoteWork(null);
-            replaceState(createAuthState(stateRef.current, "supabase", false));
-            const { error: signOutError } = await authClient.signOut({ scope: "local" });
-            setError(signOutError
-              ? "확인 링크 세션을 종료하지 못했습니다. 앱을 완전히 종료한 뒤 다시 열어 주세요."
-              : "확인 링크의 용도를 확인하지 못했습니다. 앱에서 새 링크를 요청해 주세요.");
-            return;
+          if (disposed || remoteSessionEpochRef.current !== callbackEpoch) {
+            throw new Error("로그인 요청이 취소되었습니다.");
           }
-
+          if (intent.mode === "login") {
+            const documents = await fetchActiveConsentDocuments();
+            if (consentSetFingerprint(documents) !== intent.consentFingerprint) {
+              throw new Error("필수 동의 문서가 변경되었습니다. 새 내용을 확인한 뒤 다시 로그인해 주세요.");
+            }
+            assertAcceptedConsentVersions(documents, intent.acceptedConsents!);
+            const privacy = await loadSafetyPrivacyState("supabase", user.id);
+            if (disposed || remoteSessionEpochRef.current !== callbackEpoch) {
+              throw new Error("로그인 요청이 취소되었습니다.");
+            }
+            await savePrivacyAndConsents("supabase", user.id, {
+              requiredDocuments: documents,
+              acceptedConsents: intent.acceptedConsents!,
+              directoryVisibility: privacy.directoryVisibility,
+            });
+          }
+          if (disposed || remoteSessionEpochRef.current !== callbackEpoch) {
+            throw new Error("로그인 요청이 취소되었습니다.");
+          }
+          await clearSocialAuthIntent();
+          setLinkedSocialProviders(["google"]);
+          invalidateRemoteWork(user.id);
+          replaceState(createAuthState(stateRef.current, "supabase", true));
           setError(null);
-          if (callback.kind === "recovery") {
-            const recoveryUserId = exchangeData.user?.id ?? null;
-            if (!recoveryUserId || exchangeData.session?.user.id !== recoveryUserId) {
-              await failClosedNativeRecovery(
-                "복구할 사용자 정보를 확인하지 못했습니다. 새 링크를 요청해 주세요.",
-              );
-              return;
-            }
-            let recoveryExpiresAt: number | null;
+          navigateAfterAuth(intent.mode === "link" ? "/app/security" : intent.mode === "reauthenticate" ? (intent.returnTo ?? "/app/account") : "/");
+        } catch (reason) {
+          if (exchanged) {
+            const { error: signOutError } = await authClient.signOut({ scope: "local" });
+            if (signOutError) safeToResume = false;
+            replaceState(createAuthState(stateRef.current, "supabase", false, true));
+            setLinkedSocialProviders([]);
+          }
+          if (matchedIntent) {
             try {
-              recoveryExpiresAt = await verifyNativePasswordRecoveryIntent(recoveryUserId);
+              await clearSocialAuthIntent();
             } catch {
-              await failClosedNativeRecovery(
-                "비밀번호 복구 상태를 확인하지 못했습니다. 앱에서 새 링크를 요청해 주세요.",
-              );
-              return;
+              safeToResume = false;
             }
-            if (!recoveryExpiresAt) {
-              await failClosedNativeRecovery(
-                "비밀번호 복구 상태를 확인하지 못했습니다. 앱에서 새 링크를 요청해 주세요.",
-              );
-              return;
-            }
-            remoteLoadsBlockedRef.current = true;
-            recoveryUserIdRef.current = recoveryUserId;
-            recoveryExpiresAtRef.current = recoveryExpiresAt;
-            setPasswordRecoveryReady(true);
-            invalidateRemoteWork(null);
-            replaceState(createAuthState(stateRef.current, "supabase", false));
-            window.history.replaceState(window.history.state, "", "/reset-password");
-            window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
           }
-        } catch {
-          if (callback.kind === "recovery") {
-            await failClosedNativeRecovery(
-              "확인 링크를 처리하지 못했습니다. 네트워크 연결을 확인하고 새 링크를 요청해 주세요.",
-            );
-          } else {
-            setError("확인 링크를 처리하지 못했습니다. 네트워크 연결을 확인하고 새 링크를 요청해 주세요.");
+          if (!disposed) {
+            callbackError = safeToResume && reason instanceof Error
+              ? reason.message : "로그인 상태를 안전하게 정리하지 못했습니다. 앱을 다시 열어 주세요.";
+            setError(callbackError);
+            navigateAfterAuth(exchanged ? "/auth" : "/app/security");
           }
+        } finally {
+          socialAuthWorkingRef.current = false;
+          if (!disposed) setSocialAuthWorking(false);
+          remoteLoadsBlockedRef.current = !safeToResume || Boolean(signOutPromiseRef.current);
+          if (nativeRuntime) await closeNativeSocialAuthBrowser().catch(() => undefined);
+          if (!disposed && !remoteLoadsBlockedRef.current) scheduleRemoteLoad(callbackError);
         }
       })();
+      const tracked = operation.finally(() => {
+        if (socialCallbackPromiseRef.current === tracked) socialCallbackPromiseRef.current = null;
+      });
+      socialCallbackPromiseRef.current = tracked;
+      return tracked;
+    };
+    const { data } = authClient.onAuthStateChange((event, session) => {
+      if (disposed) return;
+      if (event === "SIGNED_IN" && recoveryUserIdRef.current && !recoveryOperationRef.current) {
+        clearPasswordRecovery();
+        remoteLoadsBlockedRef.current = true;
+        invalidateRemoteWork(null);
+        replaceState(createAuthState(stateRef.current, "supabase", false, true));
+        window.setTimeout(() => { void discardLegacyRecoverySession().catch(() => undefined); }, 0);
+        return;
+      }
+      if (recoveryUserIdRef.current && session?.user.id !== recoveryUserIdRef.current && !recoveryOperationRef.current) {
+        clearPasswordRecovery();
+        remoteLoadsBlockedRef.current = true;
+        invalidateRemoteWork(null);
+        replaceState(createAuthState(stateRef.current, "supabase", false, true));
+      }
+      if (event === "PASSWORD_RECOVERY") {
+        if (recoveryOperationRef.current) { remoteLoadsBlockedRef.current = true; return; }
+        remoteLoadsBlockedRef.current = true;
+        invalidateRemoteWork(null);
+        replaceState(createAuthState(stateRef.current, "supabase", false, true));
+        if (!nativeRuntime && session?.user.id) {
+          recoveryUserIdRef.current = session.user.id;
+          recoveryExpiresAtRef.current = writeRecoverySession(session.user.id);
+          setPasswordRecoveryReady(true);
+          navigateAfterAuth("/reset-password");
+          return;
+        }
+        // Never call Auth while its event callback holds the SDK lock.
+        window.setTimeout(() => {
+          if (disposed || !session?.user.id) return;
+          void (async () => {
+            if (nativeRuntime) await beginNativePasswordRecoveryIntent();
+            if (!disposed) await acceptPasswordRecovery(session.user.id);
+          })().catch((reason: unknown) => {
+            if (!disposed) setError(remoteLoadErrorMessage(reason));
+          });
+        }, 0);
+        return;
+      }
+      if (event === "SIGNED_OUT") clearPasswordRecovery();
+      if (!startupComplete || remoteLoadsBlockedRef.current || stateRef.current.mode === "demo") return;
+      const nextUserId = session?.user.id ?? null;
+      setLinkedSocialProviders(session?.user.identities?.some((identity) => identity.provider === "google") ? ["google"] : []);
+      if (nextUserId !== activeRemoteUserIdRef.current) {
+        invalidateRemoteWork(nextUserId);
+        replaceState(createAuthState(stateRef.current, "supabase", Boolean(nextUserId), true));
+      }
+      scheduleRemoteLoad();
     });
-    nativeAppUrlDrainComplete = true;
-    if (nativeInitialSessionBeforeUrlDrain !== undefined) {
-      const initialUserId = nativeInitialSessionBeforeUrlDrain;
-      // This replay runs outside Supabase's auth callback/lock. It opens a
-      // normal native session only after every buffered URL had a synchronous
-      // chance to claim the recovery gate.
-      window.setTimeout(() => {
-        void (async () => {
-          if (await restoreNativeRecoveryIntent(initialUserId) === "handled") return;
-          if (disposed || remoteLoadsBlockedRef.current || stateRef.current.mode === "demo") return;
-          if (initialUserId !== activeRemoteUserIdRef.current) {
-            invalidateRemoteWork(initialUserId);
-            replaceState(createAuthState(stateRef.current, "supabase", Boolean(initialUserId)));
-          }
-          scheduleRemoteLoad();
-        })();
-      }, 0);
+    const unsubscribeNativeAppUrls = subscribeToNativeAppUrls((url) => {
+      if (disposed || stateRef.current.mode === "demo") return;
+      if (!startupComplete) startupUrls.push(url);
+      else void processEmailCallback(url).then((handled) => { if (!handled) return processSocialCallback(url); });
+    });
+    if (nativeRuntime) {
+      const ready = subscribeToNativeSocialAuthCancellation(() => {
+        if (disposed || socialCallbackPromiseRef.current || !socialAuthWorkingRef.current) return;
+        void clearSocialAuthIntent().then(() => {
+          if (disposed) return;
+          socialAuthWorkingRef.current = false;
+          setSocialAuthWorking(false);
+          remoteLoadsBlockedRef.current = false;
+          setError("Google 로그인을 취소했습니다.");
+          scheduleRemoteLoad("Google 로그인을 취소했습니다.");
+        }).catch(() => {
+          if (!disposed) setError("로그인 요청을 정리하지 못했습니다. 앱을 다시 열어 주세요.");
+        });
+      });
+      socialCancellationReadyRef.current = ready;
+      void ready.then((unsubscribe) => {
+        if (disposed) unsubscribe();
+      }).catch(() => {
+        if (!disposed) setError("Google 로그인 창을 연결하지 못했습니다. 앱을 다시 열어 주세요.");
+      });
     }
+    void (async () => {
+      try {
+        if (disposed) return;
+        startupComplete = true;
+        const browserSocialPath = !nativeRuntime && getPublicAuthCallbackPathKind(window.location.href) === "social";
+        const callbackUrl = startupUrls.shift() ?? (!nativeRuntime && getPublicAuthCallbackPathKind(window.location.href) ? window.location.href : undefined);
+        if (callbackUrl && await processEmailCallback(callbackUrl)) return;
+        if (callbackUrl && (parseNativeAuthCallbackUrl(callbackUrl) || parseNativeSocialAuthErrorUrl(callbackUrl))) {
+          await processSocialCallback(callbackUrl);
+          return;
+        }
+        if (!nativeRuntime) {
+          await clearSocialAuthIntent();
+          if (browserSocialPath) {
+            setError("Google 로그인이 취소되었거나 요청이 만료되었습니다. 다시 시도해 주세요.");
+            navigateAfterAuth("/auth");
+          }
+        }
+        const { data: sessionData, error: sessionError } = await authClient.getSession();
+        if (sessionError) throw sessionError;
+        if (disposed || remoteSessionEpochRef.current !== startupEpoch) return;
+        const intent = nativeRuntime ? await readNativePasswordRecoveryIntent() : null;
+        if (disposed || remoteSessionEpochRef.current !== startupEpoch) return;
+        const userId = sessionData.session?.user.id;
+        const expiresAt = intent?.status === "verified" && intent.userId === userId
+          ? intent.expiresAt : userId && !nativeRuntime ? readRecoverySession(userId) : null;
+        if (expiresAt && userId) {
+          remoteLoadsBlockedRef.current = true;
+          recoveryUserIdRef.current = userId;
+          recoveryExpiresAtRef.current = expiresAt;
+          setPasswordRecoveryReady(true);
+          replaceState(createAuthState(stateRef.current, "supabase", false, true));
+          navigateAfterAuth("/reset-password");
+          return;
+        }
+        if ((intent && intent.status !== "missing") || (!nativeRuntime && window.sessionStorage.getItem(RECOVERY_SESSION_KEY))) {
+          await discardLegacyRecoverySession();
+          clearPasswordRecovery();
+          replaceState(createAuthState(stateRef.current, "supabase", false, true));
+          setError("완료되지 않았거나 만료된 비밀번호 복구 요청을 안전하게 종료했습니다. 새 링크를 요청해 주세요.");
+          return;
+        }
+        setLinkedSocialProviders(sessionData.session?.user.identities?.some((identity) => identity.provider === "google") ? ["google"] : []);
+        remoteLoadsBlockedRef.current = false;
+        scheduleRemoteLoad(browserSocialPath ? "Google 로그인이 취소되었거나 요청이 만료되었습니다. 다시 시도해 주세요." : undefined);
+      } catch (reason) {
+        if (!disposed) {
+          replaceState(createAuthState(stateRef.current, "supabase", false, true));
+          setError(reason instanceof Error ? reason.message : remoteLoadErrorMessage(reason));
+        }
+      }
+    })();
     return () => {
       disposed = true;
       window.clearTimeout(authLoadTimer);
-      window.clearTimeout(browserCallbackFallbackTimer);
       remoteLoadGenerationRef.current += 1;
       remoteSessionEpochRef.current += 1;
       clearSignedUrlCaches();
       unsubscribeNativeAppUrls();
+      const ready = socialCancellationReadyRef.current;
+      socialCancellationReadyRef.current = null;
+      if (ready) void ready.then((unsubscribe) => unsubscribe()).catch(() => undefined);
       data.subscription.unsubscribe();
     };
-  }, [clearPasswordRecovery, invalidateRemoteWork, loadRemote, replaceState]);
+  }, [acceptPasswordRecovery, clearPasswordRecovery, invalidateRemoteWork, loadRemote, replaceState]);
 
   useEffect(() => {
     let observedServiceYear = currentServiceYear();
@@ -2306,7 +2328,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           };
         })
       : fresh.members;
-    clearPasswordRecovery();
     remoteLoadsBlockedRef.current = true;
     invalidateRemoteWork(null);
     setError(null);
@@ -2318,9 +2339,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       members,
       loading: false,
     }));
-  }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
+  }, [invalidateRemoteWork, replaceState]);
 
   const signIn = useCallback(async ({ email, password }: LoginInput) => {
+    if (socialAuthWorkingRef.current || recoveryOperationRef.current || recoveryUserIdRef.current) {
+      throw new Error("진행 중인 인증이나 비밀번호 복구를 완료하거나 로그아웃한 뒤 다시 시도해 주세요.");
+    }
     if (!supabase) {
       throw new Error("실서비스 로그인이 아직 연결되지 않았습니다. 아래의 역할별 미리보기를 이용해 주세요.");
     }
@@ -2356,6 +2380,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     organizationId,
     acceptedConsents,
   }: SignUpInput) => {
+    if (socialAuthWorkingRef.current || recoveryOperationRef.current || recoveryUserIdRef.current) {
+      throw new Error("진행 중인 인증이나 비밀번호 복구를 완료하거나 로그아웃한 뒤 다시 시도해 주세요.");
+    }
     if (!supabase) {
       throw new Error("실서비스 회원가입이 아직 연결되지 않았습니다. 아래에서 신규 가입자 흐름을 미리볼 수 있어요.");
     }
@@ -2395,7 +2422,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       email,
       password,
       options: {
-        emailRedirectTo: SIGNUP_AUTH_CALLBACK_URL,
+        emailRedirectTo: emailAuthRedirectUrl("signup", isNativeAppRuntime()),
         data: {
           display_name: displayName,
           signup_organization_id: selectedOrganization.id,
@@ -2412,16 +2439,56 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
 
   const requestPasswordReset = useCallback(async (email: string) => {
+    if (socialAuthWorkingRef.current || recoveryOperationRef.current || recoveryUserIdRef.current) {
+      throw new Error("진행 중인 인증이나 비밀번호 복구를 완료하거나 로그아웃한 뒤 다시 요청해 주세요.");
+    }
     if (!supabase) throw new Error("비밀번호 재설정 서비스가 아직 연결되지 않았습니다.");
     const normalizedEmail = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       throw new Error("올바른 이메일 주소를 입력해 주세요.");
     }
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-      redirectTo: RECOVERY_AUTH_CALLBACK_URL,
+      redirectTo: emailAuthRedirectUrl("recovery", isNativeAppRuntime()),
     });
     if (resetError) throw resetError;
   }, []);
+
+  const verifyPasswordRecoveryCode = useCallback(async (email: string, code: string) => {
+    if (!supabase) throw new Error("비밀번호 복구 서비스가 아직 연결되지 않았습니다.");
+    const normalizedEmail = email.trim().toLowerCase();
+    const token = code.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) || !/^\d{6,10}$/.test(token)) {
+      throw new Error("이메일 주소와 이메일에 있는 6~10자리 인증 코드를 확인해 주세요.");
+    }
+    if (socialAuthWorkingRef.current || recoveryOperationRef.current || signOutPromiseRef.current) {
+      throw new Error("진행 중인 인증 요청을 먼저 완료하거나 취소해 주세요.");
+    }
+    recoveryOperationRef.current = true;
+    remoteLoadsBlockedRef.current = true;
+    clearPasswordRecovery();
+    const operationEpoch = invalidateRemoteWork(null).sessionEpoch;
+    replaceState(createAuthState(stateRef.current, "supabase", false, true));
+    try {
+      if (isNativeAppRuntime()) await beginNativePasswordRecoveryIntent();
+      const { data, error: otpError } = await supabase.auth.verifyOtp({ email: normalizedEmail, token, type: "recovery" });
+      if (otpError) throw otpError;
+      if (!data.user || data.session?.user.id !== data.user.id
+        || data.user.email?.toLowerCase() !== normalizedEmail
+        || operationEpoch !== remoteSessionEpochRef.current || signOutPromiseRef.current) {
+        throw new Error("복구할 사용자 정보를 확인하지 못했습니다. 새 인증 코드를 요청해 주세요.");
+      }
+      await acceptPasswordRecovery(data.user.id);
+    } catch (reason) {
+      const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+      if (!signOutError) {
+        if (isNativeAppRuntime()) await clearNativePasswordRecoveryIntent();
+        clearPasswordRecovery();
+        remoteLoadsBlockedRef.current = false;
+        void loadRemoteRef.current().catch(() => undefined);
+      }
+      throw reason;
+    } finally { recoveryOperationRef.current = false; }
+  }, [acceptPasswordRecovery, clearPasswordRecovery, invalidateRemoteWork, replaceState]);
 
   const updatePassword = useCallback(async (password: string) => {
     if (!supabase) throw new Error("비밀번호 변경 서비스가 아직 연결되지 않았습니다.");
@@ -2481,6 +2548,130 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     }
   }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
 
+  const beginSocialAuth = useCallback(async (
+    provider: SocialAuthProvider,
+    mode: SocialAuthMode,
+    acceptedConsents?: AcceptedConsentVersions,
+    returnTo?: string,
+  ) => {
+    if (recoveryOperationRef.current || recoveryUserIdRef.current) {
+      throw new Error("진행 중인 비밀번호 복구를 완료하거나 로그아웃한 뒤 다시 시도해 주세요.");
+    }
+    if (!supabase || !isSocialAuthProvider(provider) || !socialProviders.google) {
+      throw new Error("Google 로그인이 아직 연결되지 않았습니다.");
+    }
+    await signOutPromiseRef.current;
+    if (socialAuthWorkingRef.current) throw new Error("진행 중인 Google 로그인을 먼저 완료하거나 취소해 주세요.");
+    socialAuthWorkingRef.current = true;
+    setSocialAuthWorking(true);
+    let intentSaved = false;
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      const expectedUserId = sessionData.session?.user.id;
+      let intent: SocialAuthIntent;
+      if (mode === "login") {
+        if (!acceptedConsents) throw new Error("필수 동의 문서를 모두 확인해 주세요.");
+        const documents = await fetchActiveConsentDocuments();
+        if (documents.length !== 5 || consentSetFingerprint(documents)
+          !== consentSetFingerprint(stateRef.current.requiredConsentDocuments)) {
+          throw new Error("필수 동의 문서가 변경되었습니다. 새 내용을 확인해 주세요.");
+        }
+        assertAcceptedConsentVersions(documents, acceptedConsents);
+        intent = createSocialAuthIntent({
+          provider, mode, acceptedConsents: { ...acceptedConsents },
+          consentFingerprint: consentSetFingerprint(documents),
+        });
+        const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+        if (signOutError) throw signOutError;
+        if (isNativeAppRuntime()) await clearNativePasswordRecoveryIntent();
+        else window.sessionStorage.removeItem(LEGACY_PASSWORD_RECOVERY_STORAGE_KEY);
+      } else {
+        if (!expectedUserId || stateRef.current.viewer?.profile.id !== expectedUserId) {
+          throw new Error("현재 로그인한 계정을 확인하지 못했습니다. 다시 로그인해 주세요.");
+        }
+        if (mode === "reauthenticate" && !sessionData.session?.user.identities?.some((identity) => identity.provider === provider)) {
+          throw new Error("현재 계정에 연결된 Google 계정으로 다시 인증해 주세요.");
+        }
+        intent = createSocialAuthIntent({ provider, mode, expectedUserId, ...(returnTo ? { returnTo } : {}) });
+      }
+      remoteLoadsBlockedRef.current = true;
+      invalidateRemoteWork(mode === "login" ? null : expectedUserId!);
+      if (mode === "login") replaceState(createAuthState(stateRef.current, "supabase", false, true));
+      await saveSocialAuthIntent(intent);
+      intentSaved = true;
+      setError(null);
+      const options = {
+        redirectTo: socialAuthRedirectUrl(intent),
+        skipBrowserRedirect: true,
+        scopes: "openid email profile",
+        queryParams: { prompt: "select_account" },
+      };
+      const result = mode === "link"
+        ? await supabase.auth.linkIdentity({ provider, options })
+        : await supabase.auth.signInWithOAuth({ provider, options });
+      if (result.error) throw result.error;
+      if (!result.data.url) throw new Error("Google 로그인 주소를 확인하지 못했습니다.");
+      if (isNativeAppRuntime()) {
+        await socialCancellationReadyRef.current;
+        await openNativeSocialAuthUrl(result.data.url, mode === "link" ? provider : undefined);
+      } else {
+        const url = normalizeAllowedNativeSocialAuthUrl(result.data.url, mode === "link" ? provider : undefined);
+        if (!url) throw new Error("Google 로그인 주소를 확인하지 못했습니다.");
+        window.location.assign(url);
+      }
+    } catch (reason) {
+      let cleared = !intentSaved;
+      if (intentSaved) {
+        try {
+          await clearSocialAuthIntent();
+          cleared = true;
+        } catch {
+          cleared = false;
+        }
+      }
+      socialAuthWorkingRef.current = false;
+      setSocialAuthWorking(false);
+      remoteLoadsBlockedRef.current = !cleared;
+      if (cleared) void loadRemoteRef.current().catch(() => undefined);
+      if (!cleared) throw new Error("Google 로그인 요청을 안전하게 정리하지 못했습니다. 앱을 다시 열어 주세요.");
+      throw reason;
+    }
+  }, [invalidateRemoteWork, replaceState, socialProviders.google]);
+
+  const signInWithSocial = useCallback((provider: SocialAuthProvider, acceptedConsents: AcceptedConsentVersions) =>
+    beginSocialAuth(provider, "login", acceptedConsents), [beginSocialAuth]);
+  const linkSocialIdentity = useCallback((provider: SocialAuthProvider) =>
+    beginSocialAuth(provider, "link"), [beginSocialAuth]);
+  const reauthenticateWithSocial = useCallback((provider: SocialAuthProvider, returnTo?: string) =>
+    beginSocialAuth(provider, "reauthenticate", undefined, returnTo), [beginSocialAuth]);
+
+  const updateOwnDisplayName = useCallback(async (displayName: string) => {
+    const name = displayName.trim();
+    const current = stateRef.current;
+    const userId = current.viewer?.profile.id;
+    if (!userId || current.consentGateOpen !== true) throw new Error("로그인과 필수 동의가 필요합니다.");
+    if (!name || Array.from(name).length > 80 || /[\u0000-\u001f\u007f]/u.test(name)) {
+      throw new Error("이름을 1~80자로 입력해 주세요.");
+    }
+    const sessionEpoch = remoteSessionEpochRef.current;
+    let savedName = name;
+    if (current.mode === "supabase") {
+      if (!supabase || !isRemoteActorCurrent(sessionEpoch, userId)) throw new Error("현재 계정을 확인하지 못했습니다.");
+      const { data, error: saveError } = await supabase.rpc("update_my_display_name", { p_display_name: name });
+      if (saveError) throw saveError;
+      if (!isRemoteActorCurrent(sessionEpoch, userId)) throw new Error("이름 변경 중 로그인 계정이 변경되었습니다.");
+      if (typeof data !== "string") throw new Error("이름 변경 결과를 확인하지 못했습니다.");
+      savedName = data;
+    }
+    const next = stateRef.current;
+    if (next.viewer?.profile.id !== userId) throw new Error("이름 변경 중 로그인 계정이 변경되었습니다.");
+    replaceState({
+      ...next,
+      viewer: { ...next.viewer, profile: { ...next.viewer.profile, displayName: savedName } },
+    });
+  }, [isRemoteActorCurrent, replaceState]);
+
   const signOut = useCallback((): Promise<void> => {
     if (signOutPromiseRef.current) return signOutPromiseRef.current;
     clearPasswordRecovery();
@@ -2490,10 +2681,14 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       stateRef.current,
       import.meta.env.DEV && !isSupabaseConfigured ? "demo" : "supabase",
       false,
-      true,
+      import.meta.env.DEV && !isSupabaseConfigured,
     ));
     setError(null);
     const operation = (async () => {
+      if (socialCallbackPromiseRef.current) await socialCallbackPromiseRef.current;
+      socialAuthWorkingRef.current = false;
+      setSocialAuthWorking(false);
+      setLinkedSocialProviders([]);
       if (!supabase) return;
       if (nativePushRegistrationAvailable()) await detachCurrentNativePushDevice();
       let sessionRemoved = false;
@@ -2516,18 +2711,42 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           // The Auth session is already gone; the retained marker fails closed.
         }
       }
+      await clearSocialAuthIntent();
+      if (isNativeAppRuntime()) await closeNativeSocialAuthBrowser().catch(() => undefined);
+      remoteLoadsBlockedRef.current = false;
+      // Logout refreshes anonymous-safe signup material directly. A late or
+      // cached getSession response must never restart protected actor loading.
+      const signedOutEpoch = remoteSessionEpochRef.current;
+      try {
+      const [directory, documents] = await Promise.all([
+        supabase.from("public_organization_directory").select(PUBLIC_ORGANIZATION_DIRECTORY_FIELDS).order("display_name"),
+        fetchActiveConsentDocuments(),
+      ]);
+      if (directory.error) throw directory.error;
+      if (signedOutEpoch !== remoteSessionEpochRef.current || activeRemoteUserIdRef.current !== null) return;
+      replaceState({
+        ...createEmptyState("supabase", false),
+        organizations: mapOrganizationDirectory(directory.data),
+        requiredConsentDocuments: documents,
+      });
+      } catch {
+        // Session removal already succeeded; public bootstrap failure cannot
+        // undo logout or restore protected content.
+      }
     })();
     const trackedOperation = operation.finally(() => {
       if (signOutPromiseRef.current === trackedOperation) signOutPromiseRef.current = null;
     });
     signOutPromiseRef.current = trackedOperation;
     return trackedOperation;
-  }, [clearPasswordRecovery, invalidateRemoteWork, replaceState]);
+  }, [invalidateRemoteWork, replaceState]);
 
   const requestMembership = useCallback(async (input: MembershipRequestInput) => {
-    if (!state.viewer) throw new Error("로그인이 필요합니다.");
+    const current = stateRef.current;
+    const viewer = current.viewer;
+    if (!viewer || current.consentGateOpen !== true) throw new Error("로그인과 필수 동의가 필요합니다.");
     const requestSessionEpoch = remoteSessionEpochRef.current;
-    const requestUserId = state.viewer.profile.id;
+    const requestUserId = viewer.profile.id;
     const requestedExecutiveOfficeCodes = normalizeExecutiveOfficeCodes(input.executiveOfficeCodes);
     if (input.requestedRole !== "executive" && (requestedExecutiveOfficeCodes.length || input.serviceYear !== undefined)) {
       throw new Error("임원 직책과 임기는 임원 역할을 신청할 때만 선택할 수 있습니다.");
@@ -2538,7 +2757,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     const requestedServiceYear = input.requestedRole === "executive"
       ? input.serviceYear ?? serviceYear
       : undefined;
-    if (supabase && state.mode === "supabase") {
+    if (supabase && current.mode === "supabase") {
       const { error: rpcError } = await supabase.rpc("submit_membership_application", {
         p_organization_id: input.organizationId,
         p_requested_role: input.requestedRole,
@@ -2552,9 +2771,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       const application: MembershipApplication = {
         id: `pending-${crypto.randomUUID()}`,
         organizationId: input.organizationId,
-        userId: state.viewer.profile.id,
-        applicantName: state.viewer.profile.displayName,
-        applicantEmail: state.viewer.profile.email,
+        userId: viewer.profile.id,
+        applicantName: viewer.profile.displayName,
+        applicantEmail: viewer.profile.email,
         requestedRole: input.requestedRole,
         churchTitleCode: input.churchTitleCode,
         requestedExecutiveOfficeCodes,
@@ -2574,9 +2793,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     const application: MembershipApplication = {
       id: crypto.randomUUID(),
       organizationId: input.organizationId,
-      userId: state.viewer.profile.id,
-      applicantName: state.viewer.profile.displayName,
-      applicantEmail: state.viewer.profile.email,
+      userId: viewer.profile.id,
+      applicantName: viewer.profile.displayName,
+      applicantEmail: viewer.profile.email,
       requestedRole: input.requestedRole,
       churchTitleCode: input.churchTitleCode,
       requestedExecutiveOfficeCodes,
@@ -2590,7 +2809,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       viewer: previous.viewer ? { ...previous.viewer, application } : null,
       applications: [application, ...previous.applications],
     }));
-  }, [isRemoteActorCurrent, scheduleRemoteRefresh, serviceYear, state.mode, state.viewer, updateState]);
+  }, [isRemoteActorCurrent, scheduleRemoteRefresh, serviceYear, updateState]);
 
   const createPost = useCallback(async (draft: PostDraft, onProgress?: (progress: number) => void) => {
     const viewer = state.viewer;
@@ -4079,12 +4298,15 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     hasMorePosts,
     serviceYear,
     getServerNow,
-    passwordRecoveryReady,
+    socialProviders,
+    socialAuthWorking,
+    linkedSocialProviders,
+    passwordRecoveryReady, signIn, signUp, requestPasswordReset, verifyPasswordRecoveryCode, updatePassword,
     enterDemo,
-    signIn,
-    signUp,
-    requestPasswordReset,
-    updatePassword,
+    signInWithSocial,
+    linkSocialIdentity,
+    reauthenticateWithSocial,
+    updateOwnDisplayName,
     signOut,
     requestMembership,
     createPost,
@@ -4120,8 +4342,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     loadMorePosts,
     markConversationRead,
     markNotificationsRead,
-    passwordRecoveryReady,
-    requestPasswordReset,
+    socialProviders,
+    socialAuthWorking,
+    linkedSocialProviders,
+    passwordRecoveryReady, signIn, signUp, requestPasswordReset, verifyPasswordRecoveryCode, updatePassword,
     requestMembership,
     refreshProtectedMediaUrl,
     reviewApplication,
@@ -4132,11 +4356,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     setMembershipStatus,
     setExecutiveOffices,
     startConversation,
-    signIn,
+    signInWithSocial,
+    linkSocialIdentity,
+    reauthenticateWithSocial,
     signOut,
-    signUp,
     state,
-    updatePassword,
+    updateOwnDisplayName,
   ]);
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;

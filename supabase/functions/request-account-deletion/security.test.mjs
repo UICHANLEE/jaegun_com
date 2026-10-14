@@ -12,6 +12,7 @@ import {
   RequestValidationError,
   verifyPasswordUserWithCleanup,
   verifiedTokenHasAal2,
+  verifiedTokenHasFreshSocialAuthentication,
 } from "./security.ts";
 
 function jwt(claims) {
@@ -124,6 +125,46 @@ test("uses AAL2 only when verified token subject matches the verified user", () 
   assert.equal(verifiedTokenHasAal2(token, "another-user"), false);
   assert.equal(verifiedTokenHasAal2(jwt({ sub: "user-id", aal: "aal1" }), "user-id"), false);
   assert.equal(verifiedTokenHasAal2("not.a.jwt", "user-id"), false);
+});
+
+test("fresh OAuth proof is bound to the verified actor and signed session AMR", () => {
+  const now = 1800000000;
+  const claims = {
+    sub: "social-user", aal: "aal1", role: "authenticated", aud: "authenticated",
+    session_id: "11111111-1111-4111-8111-111111111111", is_anonymous: false,
+    iat: now - 10, exp: now + 3600,
+    amr: [{ method: "oauth", timestamp: now - 10 }],
+  };
+  const check = (overrides = {}, actor = "social-user", providers = ["google"]) =>
+    verifiedTokenHasFreshSocialAuthentication(jwt({ ...claims, ...overrides }), actor, providers, now);
+  assert.equal(check(), true);
+  assert.equal(check({}, "another-user"), false);
+  assert.equal(check({}, "social-user", ["email"]), false);
+  assert.equal(check({ session_id: undefined }), false);
+  assert.equal(check({ session_id: "client-marker" }), false);
+  assert.equal(check({ is_anonymous: true }), false);
+  assert.equal(check({ exp: now }), false);
+  assert.equal(check({ amr: [{ method: "oauth", timestamp: now - 301 }] }), false);
+  assert.equal(check({ amr: [{ method: "oauth", timestamp: now + 1 }] }), false);
+  assert.equal(check({ amr: [{ method: "oauth", timestamp: String(now - 10) }] }), false);
+  assert.equal(check({ amr: [{ method: "password", timestamp: now - 10 }] }), false);
+  assert.equal(check({ amr: [{ method: "token_refresh", timestamp: now - 10 }] }), false);
+  assert.equal(check({ iat: now, amr: [{ method: "oauth", timestamp: now - 301 }, { method: "token_refresh", timestamp: now }] }), false);
+  assert.equal(check({ amr: undefined, user_metadata: { reauthenticated: true, last_sign_in_at: now } }), false);
+  assert.equal(verifiedTokenHasFreshSocialAuthentication("not.a.jwt", "social-user", ["google"], now), false);
+});
+
+test("deletion accepts no client-supplied OAuth proof marker", async () => {
+  await assert.rejects(
+    parseAccountDeletionRequest(deletionRequest({
+      confirmation: ACCOUNT_DELETION_CONFIRMATION,
+      socialReauthenticated: true,
+    })),
+    (error) => error instanceof RequestValidationError && error.code === "unexpected_field",
+  );
+  assert.deepEqual(await parseAccountDeletionRequest(deletionRequest({
+    confirmation: ACCOUNT_DELETION_CONFIRMATION,
+  })), { confirmation: ACCOUNT_DELETION_CONFIRMATION, password: null, reason: null });
 });
 
 test("always cleans up the ephemeral password session", async () => {

@@ -8,6 +8,7 @@ import {
   CURRENT_LEGAL_DOCUMENTS,
   FROZEN_COMMUNITY_DOCUMENT_2026_08_27,
   FROZEN_PRIVACY_DOCUMENT_2026_08_27,
+  HISTORICAL_LEGAL_DOCUMENTS,
   LEGAL_DOCUMENT_SHA256_BY_KEY_VERSION,
   PRIVACY_DOCUMENT,
   canonicalLegalDocumentText,
@@ -16,7 +17,7 @@ import {
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const migrationDirectory = path.join(repositoryRoot, "supabase/migrations");
 const migrationFiles = readdirSync(migrationDirectory, { withFileTypes: true })
-  .filter((entry) => entry.isFile() && /^\d{12}_[a-z0-9_]+\.sql$/.test(entry.name))
+  .filter((entry) => entry.isFile() && /^\d{12,14}_[a-z0-9_]+\.sql$/.test(entry.name))
   .map((entry) => ({
     name: entry.name,
     sql: readFileSync(path.join(migrationDirectory, entry.name), "utf8")
@@ -27,6 +28,13 @@ const migrationFiles = readdirSync(migrationDirectory, { withFileTypes: true })
 
 const canonicalRows = [
   ...CURRENT_LEGAL_DOCUMENTS.map((document) => ({
+    document,
+    migration: "20261014052233_google_auth_consent_rollout.sql",
+    databaseTitle: document.title,
+    localeColumnPresent: true,
+    documentUrl: `/legal/${document.key === "privacy_policy" ? "privacy" : document.key === "sensitive_information" ? "sensitive" : document.key === "overseas_transfer" ? "overseas" : document.key === "terms_of_service" ? "terms" : "community"}/${document.version}`,
+  })),
+  ...HISTORICAL_LEGAL_DOCUMENTS.filter((document) => document.version === "2026-08-30").map((document) => ({
     document,
     migration: "202608300015_launch_legal_disclosures.sql",
     databaseTitle: document.title,

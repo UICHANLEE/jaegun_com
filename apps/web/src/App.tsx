@@ -11,8 +11,8 @@ import { isSupportContactConfigured } from "./data/runtimeConfig";
 import { NativeConnectivityBanner } from "./native/NativeConnectivityBanner";
 
 const LoginPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.LoginPage })));
-const ForgotPasswordPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.ForgotPasswordPage })));
-const ResetPasswordPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.ResetPasswordPage })));
+const ForgotPasswordPage = lazy(() => import("./pages/EmailAuthPages").then((module) => ({ default: module.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("./pages/EmailAuthPages").then((module) => ({ default: module.ResetPasswordPage })));
 const OnboardingPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.OnboardingPage })));
 const PendingPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.PendingPage })));
 const ManagerShell = lazy(() => import("./components/ManagerShell").then((module) => ({ default: module.ManagerShell })));
@@ -40,6 +40,7 @@ const OrganizationAdministrationPage = lazy(() => import("./pages/OrganizationAd
 const DepartmentOfficerManagementPage = lazy(() => import("./pages/DepartmentOfficerManagementPage").then((module) => ({ default: module.DepartmentOfficerManagementPage })));
 const SafetyPrivacyGate = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.SafetyPrivacyGate })));
 const MfaChallengeGate = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.MfaChallengeGate })));
+const SensitiveActionGate = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.SensitiveActionGate })));
 const MfaChallengePage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.MfaChallengePage })));
 const PrivacyConsentPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.PrivacyConsentPage })));
 const SecurityCenterPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.SecurityCenterPage })));
@@ -152,10 +153,8 @@ function SignedOutRoutes() {
     <Routes>
       <Route index element={<Navigate to="/auth" replace />} />
       <Route path="/auth" element={<LoginPage />} />
+      <Route path="/auth/callback/social" element={<LoginPage />} />
       <Route path="/auth/callback/signup" element={<LoginPage />} />
-      <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
       <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
       <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
@@ -184,9 +183,8 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route index element={accountStatePage} />
       <Route path="/onboarding" element={accountStatePage} />
       <Route path="/pending" element={accountStatePage} />
+      <Route path="/auth/callback/social" element={accountStatePage} />
       <Route path="/auth/callback/signup" element={accountStatePage} />
-      <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
       <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
       <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
@@ -200,7 +198,6 @@ function AccountSetupRoutes({ pending }: { pending: boolean }) {
       <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
       <Route path="/support" element={<PublicSupportPage />} />
       <Route path="/auth" element={<Navigate to="/" replace />} />
-      <Route path="/forgot-password" element={<Navigate to="/" replace />} />
       <Route path="/app/*" element={accountStatePage} />
       <Route path="/manage/*" element={accountStatePage} />
       <Route path="*" element={<NotFoundPage homePath="/" />} />
@@ -224,8 +221,8 @@ function ConsentRequiredRoutes() {
         <Route path="/legal/community/:version" element={<CommunityPolicyPage />} />
         <Route path="/account-deletion" element={<PublicAccountDeletionPage />} />
         <Route path="/support" element={<PublicSupportPage />} />
+        <Route path="/auth/callback/social" element={<Navigate to="/app/privacy" replace />} />
         <Route path="/auth/callback/signup" element={<Navigate to="/app/privacy" replace />} />
-        <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
         <Route path="/app/privacy" element={<PrivacyConsentPage />} />
         <Route path="/app/account" element={<AccountDeletionPage />} />
         <Route path="*" element={<Navigate to="/app/privacy" replace state={{ consentRequired: true }} />} />
@@ -241,10 +238,8 @@ function AuthenticatedRoutes() {
         <Routes>
           <Route index element={<RoleLandingRedirect />} />
           <Route path="/auth" element={<RoleLandingRedirect />} />
-          <Route path="/forgot-password" element={<RoleLandingRedirect />} />
+          <Route path="/auth/callback/social" element={<RoleLandingRedirect />} />
           <Route path="/auth/callback/signup" element={<RoleLandingRedirect />} />
-          <Route path="/auth/callback/recovery" element={<ResetPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/legal/privacy" element={<LegalPrivacyPage />} />
           <Route path="/legal/privacy/:version" element={<LegalPrivacyPage />} />
           <Route path="/legal/sensitive" element={<SensitiveInformationPage />} />
@@ -281,16 +276,16 @@ function AuthenticatedRoutes() {
             <Route path="/app/blocked-users" element={<BlockedUsersPage />} />
             <Route path="/app/report/:targetType/:targetId" element={<ReportContentPage />} />
           </Route>
-          <Route path="/manage/events/new" element={<EventEditorPage />} />
-          <Route path="/manage/events/:occurrenceId/edit" element={<EventEditorPage />} />
+          <Route path="/manage/events/new" element={<SensitiveActionGate><EventEditorPage /></SensitiveActionGate>} />
+          <Route path="/manage/events/:occurrenceId/edit" element={<SensitiveActionGate><EventEditorPage /></SensitiveActionGate>} />
           <Route path="/manage" element={<ManagerOnly><ManagerShell /></ManagerOnly>}>
             <Route index element={<Navigate to="/manage/home" replace />} />
             <Route path="home" element={<ManagementHomeRoute />} />
-            <Route path="approvals" element={<OperationsManagerOnly><ApprovalsPage /></OperationsManagerOnly>} />
+            <Route path="approvals" element={<OperationsManagerOnly><SensitiveActionGate><ApprovalsPage /></SensitiveActionGate></OperationsManagerOnly>} />
             <Route path="members" element={<OperationsManagerOnly><MembersPage /></OperationsManagerOnly>} />
-            <Route path="organization" element={<OrganizationAdministrationPage />} />
-            <Route path="departments" element={<DepartmentOfficersOnly><DepartmentOfficerManagementPage /></DepartmentOfficersOnly>} />
-            <Route path="moderation" element={<ModerationOnly><ModerationQueuePage /></ModerationOnly>} />
+            <Route path="organization" element={<SensitiveActionGate><OrganizationAdministrationPage /></SensitiveActionGate>} />
+            <Route path="departments" element={<DepartmentOfficersOnly><SensitiveActionGate><DepartmentOfficerManagementPage /></SensitiveActionGate></DepartmentOfficersOnly>} />
+            <Route path="moderation" element={<ModerationOnly><SensitiveActionGate><ModerationQueuePage /></SensitiveActionGate></ModerationOnly>} />
             <Route path="posts" element={<OperationsManagerOnly><FeedPage /></OperationsManagerOnly>} />
             <Route path="minutes" element={<ExecutiveOnly><MeetingMinutesPage /></ExecutiveOnly>} />
             <Route path="ledger" element={<ExecutiveOnly><AccountingLedgerPage /></ExecutiveOnly>} />
@@ -304,9 +299,13 @@ function AuthenticatedRoutes() {
 }
 
 function AppRoutes() {
-  const { viewer, loading, consentGateOpen } = useAppData();
+  const { viewer, loading, consentGateOpen, passwordRecoveryReady } = useAppData();
+  const { pathname } = useLocation();
 
   if (loading) return <LoadingScreen />;
+  if (passwordRecoveryReady && pathname !== "/reset-password") return <Navigate to="/reset-password" replace />;
+  if (pathname === "/forgot-password") return <ForgotPasswordPage />;
+  if (pathname === "/reset-password" || pathname === "/auth/callback/recovery") return <ResetPasswordPage />;
   if (!viewer) return <SignedOutRoutes />;
   if (consentGateOpen === false) return <ConsentRequiredRoutes />;
   if (!viewer.membership && viewer.profile.globalRole !== "platform_admin") {

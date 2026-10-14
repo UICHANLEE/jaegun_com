@@ -101,11 +101,10 @@ type BrowserAuthLocation = Pick<Location, "href">;
 type BrowserAuthHistory = Pick<History, "state" | "replaceState">;
 
 /**
- * Supabase checks implicit callbacks before PKCE callbacks. A functional
- * `detectSessionInUrl` that returns true for `?code=` would therefore classify
- * a valid PKCE link as an implicit grant and reject it. Keep the detector
- * false, and synchronously remove PKCE/token parameters from every URL except
- * the two exact production callback shapes before Auth initializes.
+ * Auth never exchanges callbacks during initialization. The application first
+ * validates callback purpose (and social intent) before explicit exchange.
+ * Preserve only exact email/social PKCE callbacks until that boundary runs; scrub
+ * every other URL's auth/error material before the client initializes.
  */
 export function sanitizeUntrustedBrowserAuthUrl(
   locationObject: BrowserAuthLocation,
@@ -118,10 +117,14 @@ export function sanitizeUntrustedBrowserAuthUrl(
     return false;
   }
 
-  const trustedPkceCallback = parseNativeAuthCallbackUrl(parsed.href) !== null;
+  const trustedPkceCallback = parseNativeAuthCallbackUrl(locationObject.href) !== null;
   let changed = false;
   if (!trustedPkceCallback) {
-    for (const parameter of ["code", "sb_flow_id"] as const) {
+    for (const parameter of [
+      "code", "sb_flow_id", "social_intent", "access_token", "refresh_token", "id_token",
+      "provider_token", "provider_refresh_token", "token", "token_hash",
+      "error", "error_code", "error_description", "error_uri",
+    ] as const) {
       if (parsed.searchParams.has(parameter)) {
         parsed.searchParams.delete(parameter);
         changed = true;
@@ -134,10 +137,17 @@ export function sanitizeUntrustedBrowserAuthUrl(
     const carriesAuthMaterial = [
       "access_token",
       "refresh_token",
+      "id_token",
       "provider_token",
       "provider_refresh_token",
       "error",
       "error_code",
+      "error_uri",
+      "code",
+      "sb_flow_id",
+      "social_intent",
+      "token",
+      "token_hash",
       "error_description",
     ].some((parameter) => fragment.has(parameter));
     if (carriesAuthMaterial) {
@@ -176,16 +186,15 @@ export const supabase = isSupabaseConfigured
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        // A false-returning function is intentionally truthy for Supabase's
-        // PKCE initialization gate while declining every legacy implicit grant.
-        // Exact callback-path enforcement happens synchronously above.
-        detectSessionInUrl: nativeRuntime ? false : () => false,
+        // Callback exchange belongs to the intent-bound application handler,
+        // never to automatic session detection (including browser PKCE).
+        detectSessionInUrl: false,
         // PKCE keeps the one-time verifier on the initiating device and avoids
-        // placing a reusable access token in password-recovery/deep-link URLs.
+        // placing a reusable access token in social OAuth callback URLs.
         // Native shells must replace the browser storage adapter with
         // Keychain/Keystore-backed storage before enabling persistent sessions.
         flowType: "pkce",
-        // Email confirmation and recovery can overlap. The returned flow id
+        // Social login and identity linking may overlap. The returned flow id
         // selects the exact Keychain-backed verifier slot for each callback.
         experimental: {
           appendPkceFlowIdToRedirects: true,

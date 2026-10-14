@@ -1,27 +1,25 @@
-import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import "./social-auth.css";
 import {
-  ArrowLeft,
   ArrowRight,
   Buildings,
   Check,
-  CheckCircle,
   Church,
   CircleNotch,
   Crown,
-  Envelope,
   HourglassMedium,
-  LockKey,
   MagnifyingGlass,
   ShieldCheck,
   SignOut,
   User,
   UsersThree,
 } from "@phosphor-icons/react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
+import { EmailAccountForm } from "./EmailAuthPages";
 import { ApplicationStatusBadge, ErrorBanner, ROLE_LABELS } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
-import { MAX_PASSWORD_LENGTH, MIN_NEW_PASSWORD_LENGTH, validateNewPassword } from "../data/authPolicy";
+import type { SocialAuthProvider } from "../data/socialAuth";
 import {
   assertAcceptedConsentVersions,
   consentSetFingerprint,
@@ -38,8 +36,6 @@ import {
   type MembershipRole,
 } from "../types/domain";
 
-type AuthView = "login" | "signup";
-
 const CONSENT_COPY: Readonly<Record<ConsentDocumentKey, { label: string; description: string }>> = {
   privacy_policy: {
     label: "개인정보 수집·이용 동의",
@@ -54,8 +50,8 @@ const CONSENT_COPY: Readonly<Record<ConsentDocumentKey, { label: string; descrip
     description: "Supabase·Vercel 등 국외 처리 제공자, 이전 항목·목적·보유기간을 확인합니다.",
   },
   terms_of_service: {
-    label: "이용약관 동의 및 만 14세 이상 확인",
-    description: "현재 만 14세 미만은 가입할 수 없습니다. 약관에 동의하며 만 14세 이상임을 확인합니다.",
+    label: "이용약관 동의",
+    description: "서비스 이용 조건과 회원의 권리·의무를 확인합니다.",
   },
   community_guidelines: {
     label: "공동체 운영정책 동의",
@@ -63,35 +59,15 @@ const CONSENT_COPY: Readonly<Record<ConsentDocumentKey, { label: string; descrip
   },
 };
 
-function authSubmitError(reason: unknown, view: AuthView) {
+function socialLoginError(reason: unknown) {
   const message = reason instanceof Error ? reason.message.toLowerCase() : "";
-  if (message.includes("invalid login") || message.includes("invalid credential") || message.includes("email or password")) {
-    return "이메일 또는 비밀번호가 올바르지 않습니다.";
-  }
-  if (message.includes("already registered") || message.includes("already exists") || message.includes("user already")) {
-    return "이미 가입된 이메일입니다. 로그인하거나 비밀번호를 재설정해 주세요.";
-  }
-  if (message.includes("email not confirmed") || message.includes("confirm your email") || message.includes("email confirmation")) {
-    return "이메일 확인이 필요합니다. 가입할 때 받은 확인 메일을 열어 주세요.";
-  }
-  if (message.includes("email address not authorized") || message.includes("confirmation email") || message.includes("smtp")) {
-    return "가입 확인 메일을 보낼 수 없습니다. 관리자에게 문의해 주세요.";
-  }
-  if (message.includes("rate") || message.includes("too many") || message.includes("너무 많")) {
-    return "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.";
+  if (message.includes("cancel") || message.includes("access_denied") || message.includes("취소")) {
+    return "로그인이 취소되었습니다. 원할 때 다시 시작할 수 있어요.";
   }
   if (message.includes("network") || message.includes("fetch") || message.includes("네트워크")) {
     return "네트워크에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
   }
-  if (message.includes("password") && (message.includes("weak") || message.includes("least") || message.includes("short"))) {
-    return `새 비밀번호는 ${MIN_NEW_PASSWORD_LENGTH}자 이상으로 입력해 주세요.`;
-  }
-  if (message.includes("invalid email") || message.includes("email address")) {
-    return "올바른 이메일 주소를 입력해 주세요.";
-  }
-  return view === "login"
-    ? "로그인하지 못했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요."
-    : "계정을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  return "Google 로그인을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 }
 
 function providerLoadError(message: string) {
@@ -105,24 +81,6 @@ function providerLoadError(message: string) {
   return normalized.includes("network") || normalized.includes("fetch") || normalized.includes("네트워크")
     ? "네트워크에 연결하지 못해 서비스 데이터를 불러오지 못했습니다."
     : "서비스 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
-}
-
-function AuthStory() {
-  return (
-    <section className="auth-story" aria-label="재건 공동체 소개">
-      <Brand inverse />
-      <div className="auth-story__copy">
-        <p className="eyebrow eyebrow--light">교회가 연결되면, 공동체가 가까워집니다</p>
-        <p className="auth-story__headline">우리 교회의 오늘을<br />한곳에서 함께해요.</p>
-        <p>소식과 나눔, 교회별 모임, 안전한 1:1 대화를 재건 공동체에서 이어가세요.</p>
-      </div>
-      <img src="/assets/church-retreat-landscape.png" alt="산 아래 자리한 교회 풍경" width="720" height="300" loading="lazy" decoding="async" fetchPriority="low" />
-      <div className="auth-story__proof">
-        <span><Buildings weight="fill" /> 36개 교회 조직 준비</span>
-        <span><ShieldCheck weight="fill" /> 역할별 안전한 승인</span>
-      </div>
-    </section>
-  );
 }
 
 const EXECUTIVE_OFFICE_DESCRIPTIONS: Readonly<Record<ExecutiveOfficeCode, string>> = {
@@ -160,118 +118,54 @@ function ExecutiveOfficeToggles({
 }
 
 export function LoginPage() {
-  const { signIn, signUp, enterDemo, error, refresh, mode, organizations, requiredConsentDocuments } = useAppData();
+  const { signInWithSocial, socialProviders, socialAuthWorking, enterDemo, error, refresh, mode, requiredConsentDocuments } = useAppData();
   const navigate = useNavigate();
-  const [view, setView] = useState<AuthView>("login");
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [presbytery, setPresbytery] = useState("");
-  const [organizationId, setOrganizationId] = useState("");
   const [acceptedConsents, setAcceptedConsents] = useState<AcceptedConsentVersions>({});
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   const submittingRef = useRef(false);
   const retryingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
+  const [emailWorking, setEmailWorking] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [localSuccess, setLocalSuccess] = useState<string | null>(null);
   const [executiveOfficeCodes, setExecutiveOfficeCodes] = useState<ExecutiveOfficeCode[]>([]);
-  const availableOrganizations = useMemo(
-    () => organizations.filter((organization) => organization.status !== "archived"),
-    [organizations],
-  );
-  const presbyteries = useMemo(
-    () => [...new Set(availableOrganizations.map((organization) => organization.presbytery))]
-      .sort((left, right) => left.localeCompare(right, "ko")),
-    [availableOrganizations],
-  );
-  const presbyteryOrganizations = useMemo(
-    () => availableOrganizations.filter((organization) => organization.presbytery === presbytery),
-    [availableOrganizations, presbytery],
-  );
-  const selectedSignupOrganization = presbyteryOrganizations.find((organization) => organization.id === organizationId);
   const consentFingerprint = consentSetFingerprint(requiredConsentDocuments);
+  const working = submitting || socialAuthWorking || emailWorking;
+  const consentDocumentsReady = requiredConsentDocuments.length === 5;
 
   useEffect(() => {
     setAcceptedConsents({});
+    setAgeConfirmed(false);
   }, [consentFingerprint]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submittingRef.current) return;
+  async function startSocialLogin(provider: SocialAuthProvider) {
+    if (submittingRef.current || socialAuthWorking || emailWorking) return;
     setLocalError(null);
-    setLocalSuccess(null);
-    if (view === "signup" && !displayName.trim()) {
-      setLocalError("이름을 입력해 주세요.");
+    if (!socialProviders[provider]) {
+      setLocalError("이 로그인 수단은 아직 준비 중입니다. 연결 설정이 완료된 후 이용할 수 있어요.");
       return;
     }
-    if (view === "signup" && password !== confirmPassword) {
-      setLocalError("비밀번호가 서로 일치하지 않습니다.");
+    try {
+      if (!consentDocumentsReady) throw new Error("consent documents unavailable");
+      assertAcceptedConsentVersions(requiredConsentDocuments, acceptedConsents);
+    } catch {
+      setLocalError("현재 필수 동의 문서 다섯 가지를 각각 확인하고 동의해 주세요.");
       return;
     }
-    if (view === "signup") {
-      const passwordError = validateNewPassword(password);
-      if (passwordError) {
-        setLocalError(passwordError);
-        return;
-      }
-    }
-    if (view === "signup" && !presbytery) {
-      setLocalError("소속 노회를 선택해 주세요.");
+    if (!ageConfirmed) {
+      setLocalError("만 14세 이상임을 확인해 주세요. 만 14세 미만은 가입할 수 없습니다.");
       return;
-    }
-    if (view === "signup") {
-      try {
-        assertAcceptedConsentVersions(requiredConsentDocuments, acceptedConsents);
-      } catch {
-        setLocalError("현재 필수 동의 문서를 각각 확인하고 동의해 주세요.");
-        return;
-      }
     }
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      if (view === "signup") {
-        if (!selectedSignupOrganization) {
-          setLocalError("선택한 노회에 속한 교회를 선택해 주세요.");
-          return;
-        }
-        await signUp({
-          displayName: displayName.trim(),
-          email: email.trim(),
-          password,
-          organizationId: selectedSignupOrganization.id,
-          acceptedConsents,
-        });
-        setLocalSuccess("가입 요청을 처리했습니다. 확인 메일의 링크를 연 뒤 로그인해 주세요. 메일이 도착하지 않으면 관리자에게 문의해 주세요.");
-      } else {
-        await signIn({ email: email.trim(), password });
-      }
+      await signInWithSocial(provider, acceptedConsents);
     } catch (reason) {
-      setLocalError(authSubmitError(reason, view));
+      setLocalError(socialLoginError(reason));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
     }
-  }
-
-  function changeView(nextView: AuthView) {
-    setView(nextView);
-    setLocalError(null);
-    setLocalSuccess(null);
-    setConfirmPassword("");
-    if (nextView === "login") {
-      setAcceptedConsents({});
-    }
-  }
-
-  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const nextView = view === "login" ? "signup" : "login";
-    changeView(nextView);
-    window.requestAnimationFrame(() => document.getElementById(`auth-tab-${nextView}`)?.focus());
   }
 
   async function retryLoading() {
@@ -296,128 +190,63 @@ export function LoginPage() {
 
   return (
     <main className="auth-page">
-      <AuthStory />
-
       <section className="auth-panel" aria-labelledby="auth-title">
         <div className="auth-panel__mobile-brand"><Brand /></div>
         <div className="auth-panel__inner">
-          <p className="eyebrow">재건 공동체에 오신 것을 환영합니다</p>
-          <h1 id="auth-title">{view === "login" ? "다시 만나 반가워요" : "공동체에 함께해요"}</h1>
-          <p className="auth-panel__lead">
-            {view === "login" ? "계정으로 로그인해 교회 소식을 확인하세요." : "계정을 만든 다음 소속 교회에 가입을 신청해요."}
-          </p>
-
-          <div className="auth-tabs" role="tablist" aria-label="계정 메뉴">
-            <button id="auth-tab-login" type="button" role="tab" aria-selected={view === "login"} aria-controls="auth-tabpanel" tabIndex={view === "login" ? 0 : -1} onKeyDown={handleTabKeyDown} onClick={() => changeView("login")}>로그인</button>
-            <button id="auth-tab-signup" type="button" role="tab" aria-selected={view === "signup"} aria-controls="auth-tabpanel" tabIndex={view === "signup" ? 0 : -1} onKeyDown={handleTabKeyDown} onClick={() => changeView("signup")}>회원가입</button>
-          </div>
-
-          <div id="auth-tabpanel" role="tabpanel" aria-labelledby={`auth-tab-${view}`}>
-            {error ? (
-              <div className="provider-error-state">
-                <ErrorBanner message={providerLoadError(error)} />
-                <button className="button button--secondary button--full" type="button" disabled={retrying} onClick={() => void retryLoading()}>
-                  {retrying ? <CircleNotch className="spin" /> : null} 데이터 다시 불러오기
-                </button>
-              </div>
-            ) : null}
-            {localError ? <ErrorBanner message={localError} /> : null}
-            {localSuccess ? <div className="success-banner" role="status"><CheckCircle weight="fill" /><span>{localSuccess}</span></div> : null}
-
-            <form className="auth-form" aria-busy={submitting} onSubmit={handleSubmit}>
-              {view === "signup" ? (
-                <>
-                  <label className="field">
-                    <span>이름</span>
-                    <span className="field__control"><User /><input required maxLength={50} autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="예: 이재건" /></span>
-                  </label>
-                  <div className="auth-organization-fields" role="group" aria-label="소속 공동체 선택">
-                    <label className="field">
-                      <span>소속 노회</span>
-                      <select
-                        aria-label="소속 노회"
-                        aria-required="true"
-                        value={presbytery}
-                        onChange={(event) => {
-                          setPresbytery(event.target.value);
-                          setOrganizationId("");
-                        }}
-                      >
-                        <option value="">노회를 선택하세요</option>
-                        {presbyteries.map((name) => <option key={name} value={name}>{name}</option>)}
-                      </select>
-                    </label>
-                    <label className="field">
-                      <span>소속 교회</span>
-                      <select
-                        aria-label="소속 교회"
-                        aria-required="true"
-                        disabled={!presbytery}
-                        value={organizationId}
-                        onChange={(event) => setOrganizationId(event.target.value)}
-                      >
-                        <option value="">{presbytery ? "교회를 선택하세요" : "노회를 먼저 선택하세요"}</option>
-                        {presbyteryOrganizations.map((organization) => (
-                          <option key={organization.id} value={organization.id}>{organization.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <p>가입 후에도 최종 가입 승인 요청 전 소속 교회를 다시 확인할 수 있습니다.</p>
-                  </div>
-                </>
-              ) : null}
-              <label className="field">
-                <span>이메일</span>
-                <span className="field__control"><Envelope /><input required type="email" inputMode="email" autoCapitalize="none" spellCheck={false} autoComplete="email" value={email} onBlur={() => setEmail((value) => value.trim())} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" /></span>
-              </label>
-              <label className="field">
-                <span>비밀번호</span>
-                <span className="field__control"><LockKey /><input required minLength={view === "login" ? 1 : MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete={view === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={view === "login" ? "비밀번호 입력" : `${MIN_NEW_PASSWORD_LENGTH}자 이상 입력`} /></span>
-              </label>
-              {view === "signup" ? (
-                <>
-                  <label className="field">
-                    <span>비밀번호 확인</span>
-                    <span className="field__control"><LockKey /><input required minLength={MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="비밀번호 다시 입력" /></span>
-                  </label>
-                  <fieldset className="auth-consent" aria-describedby="auth-consent-help">
-                    <legend>필수 동의</legend>
-                    {requiredConsentDocuments.map((document) => {
-                      const copy = CONSENT_COPY[document.key];
-                      const checked = acceptedConsents[document.key] === document.version;
-                      return (
-                        <div className="auth-consent__item" key={`${document.key}@${document.version}`}>
-                          <label>
-                            <input
-                              required
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(event) => setAcceptedConsents((current) => {
-                                const next = { ...current };
-                                if (event.target.checked) next[document.key] = document.version;
-                                else delete next[document.key];
-                                return next;
-                              })}
-                            />
-                            <span>
-                              <strong>[필수] {copy.label}</strong>
-                              <small>{copy.description}</small>
-                            </span>
-                          </label>
-                          <Link target="_blank" rel="noopener noreferrer" to={document.documentUrl}>{document.title} 전문 보기</Link>
-                        </div>
-                      );
-                    })}
-                    <p id="auth-consent-help">선택 동의나 마케팅 수신 동의는 계정 생성 조건이 아닙니다.</p>
-                  </fieldset>
-                </>
-              ) : null}
-              {view === "login" ? <Link className="auth-form__link" to="/forgot-password">비밀번호를 잊으셨나요?</Link> : null}
-              <button className="button button--primary button--full" disabled={submitting || (view === "signup" && requiredConsentDocuments.length === 0)} type="submit">
-                {submitting ? <CircleNotch className="spin" /> : null}
-                {view === "login" ? "로그인" : "계정 만들기"}
+          <h1 id="auth-title">공동체와 함께 시작해요</h1>
+          <p className="auth-panel__lead">Google 계정으로 가입·로그인하거나 기존 이메일 계정을 이용하세요.</p>
+          {error ? (
+            <div className="provider-error-state">
+              <ErrorBanner message={providerLoadError(error)} />
+              <button className="button button--secondary button--full" type="button" disabled={retrying || working} onClick={() => void retryLoading()}>
+                {retrying ? <CircleNotch className="spin" /> : null} 데이터 다시 불러오기
               </button>
-            </form>
+            </div>
+          ) : null}
+          {localError ? <ErrorBanner message={localError} /> : null}
+
+          <EmailAccountForm acceptedConsents={acceptedConsents} ageConfirmed={ageConfirmed} onWorkingChange={setEmailWorking} />
+          <div className="auth-form" aria-busy={working}>
+            <fieldset className="auth-consent" disabled={working} aria-describedby="auth-consent-help">
+              <legend>처음 이용하기 전 필수 확인</legend>
+              {requiredConsentDocuments.map((document) => {
+                const copy = CONSENT_COPY[document.key];
+                return (
+                  <div className="auth-consent__item" key={`${document.key}@${document.version}`}>
+                    <label>
+                      <input
+                        required
+                        type="checkbox"
+                        checked={acceptedConsents[document.key] === document.version}
+                        onChange={(event) => setAcceptedConsents((current) => {
+                          const next = { ...current };
+                          if (event.target.checked) next[document.key] = document.version;
+                          else delete next[document.key];
+                          return next;
+                        })}
+                      />
+                      <span><strong>[필수] {copy.label}</strong><small>{copy.description}</small><small>문서 버전: {document.version}</small></span>
+                    </label>
+                    <Link target="_blank" rel="noopener noreferrer" to={document.documentUrl}>{document.title} 전문 보기</Link>
+                  </div>
+                );
+              })}
+              <div className="auth-consent__item">
+                <label>
+                  <input required type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} />
+                  <span><strong>[필수] 만 14세 이상입니다</strong><small>만 14세 미만은 현재 가입할 수 없습니다.</small></span>
+                </label>
+              </div>
+              <p id="auth-consent-help">동의한 문서의 버전을 로그인 완료 후 안전하게 기록합니다. 소속 교회와 역할은 로그인과 동의 확인 후 직접 선택하며, 별도 승인 전에는 권한이 부여되지 않습니다.</p>
+            </fieldset>
+            {!consentDocumentsReady ? <p className="auth-setup-notice" role="status">필수 동의 문서를 확인하지 못해 로그인을 시작할 수 없습니다. 데이터를 다시 불러오거나 고객지원에 문의해 주세요.</p> : null}
+            {!socialProviders.google ? <p className="auth-setup-notice" role="status">Google 로그인 연결 설정이 아직 완료되지 않았습니다. 설정이 완료된 후 이용할 수 있어요.</p> : null}
+            <div className="social-auth-buttons" aria-label="소셜 로그인">
+              <button className="social-auth-button social-auth-button--google" type="button" disabled={working || !socialProviders.google || !consentDocumentsReady} onClick={() => void startSocialLogin("google")}><span aria-hidden="true" className="social-auth-button__mark">G</span> Google로 계속하기</button>
+            </div>
+            {working ? <p className="auth-setup-notice" role="status"><CircleNotch className="spin" /> 로그인 제공자의 확인을 기다리고 있어요.</p> : null}
+            <p className="auth-provider-help">Google 계정의 비밀번호는 Google에서 복구하세요. 이메일 계정은 이메일 로그인 메뉴에서 비밀번호를 재설정할 수 있습니다.</p>
+            <Link className="auth-support-link" to="/support">로그인에 도움이 필요하신가요?</Link>
           </div>
 
           {import.meta.env.DEV && mode === "demo" ? <div className="demo-access">
@@ -446,183 +275,6 @@ export function LoginPage() {
   );
 }
 
-function AuthRecoveryLayout({
-  titleId,
-  children,
-}: {
-  titleId: string;
-  children: ReactNode;
-}) {
-  return (
-    <main className="auth-page auth-page--recovery">
-      <AuthStory />
-      <section className="auth-panel auth-panel--recovery" aria-labelledby={titleId}>
-        <div className="auth-panel__mobile-brand"><Brand /></div>
-        <div className="auth-panel__inner">{children}</div>
-      </section>
-    </main>
-  );
-}
-
-function authRecoveryError(reason: unknown, fallback: string) {
-  const message = reason instanceof Error ? reason.message.toLowerCase() : "";
-  if (message.includes("expired") || message.includes("session") || message.includes("otp") || message.includes("jwt") || message.includes("만료") || message.includes("세션")) {
-    return "비밀번호 재설정 링크가 만료되었거나 이미 사용되었습니다. 새 링크를 요청해 주세요.";
-  }
-  if (message.includes("rate") || message.includes("too many") || message.includes("너무 많")) {
-    return "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.";
-  }
-  if (message.includes("network") || message.includes("fetch") || message.includes("네트워크")) {
-    return "네트워크에 연결하지 못했습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.";
-  }
-  return fallback;
-}
-
-export function ForgotPasswordPage() {
-  const { requestPasswordReset } = useAppData();
-  const [email, setEmail] = useState("");
-  const submittingRef = useRef(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submittingRef.current) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-    setLocalError(null);
-    try {
-      await requestPasswordReset(email.trim());
-      setSent(true);
-    } catch (reason) {
-      setLocalError(authRecoveryError(reason, "재설정 메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요."));
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <AuthRecoveryLayout titleId="forgot-password-title">
-      <p className="eyebrow">계정 복구</p>
-      <h1 id="forgot-password-title">비밀번호를 잊으셨나요?</h1>
-      <p className="auth-panel__lead">가입한 이메일을 입력하면 새 비밀번호를 설정할 수 있는 링크를 보내드려요.</p>
-
-      {sent ? (
-        <div className="recovery-result" role="status">
-          <span className="recovery-result__icon" aria-hidden="true"><CheckCircle weight="fill" /></span>
-          <h2>이메일을 확인해 주세요</h2>
-          <p>입력한 주소로 가입된 계정이 있다면 재설정 링크가 전송됩니다. 메일이 보이지 않으면 스팸함도 확인해 주세요.</p>
-          <Link className="button button--primary button--full" to="/auth">로그인으로 돌아가기</Link>
-        </div>
-      ) : (
-        <>
-          {localError ? <ErrorBanner message={localError} /> : null}
-          <form className="auth-form auth-form--recovery" aria-busy={submitting} onSubmit={handleSubmit}>
-            <label className="field">
-              <span>이메일</span>
-              <span className="field__control"><Envelope /><input required type="email" inputMode="email" autoCapitalize="none" spellCheck={false} autoComplete="email" value={email} onBlur={() => setEmail((value) => value.trim())} onChange={(event) => setEmail(event.target.value)} placeholder="name@example.com" /></span>
-            </label>
-            <button className="button button--primary button--full" disabled={submitting} type="submit">
-              {submitting ? <CircleNotch className="spin" /> : null} 재설정 링크 받기
-            </button>
-          </form>
-          <Link className="auth-back-link" to="/auth"><ArrowLeft /> 로그인으로 돌아가기</Link>
-        </>
-      )}
-    </AuthRecoveryLayout>
-  );
-}
-
-function recoveryLinkProblem(search: string, hash: string, passwordRecoveryReady: boolean) {
-  const query = new URLSearchParams(search);
-  const fragment = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
-  const errorCode = query.get("error_code") ?? fragment.get("error_code");
-  const error = query.get("error") ?? fragment.get("error");
-  if (error || errorCode) {
-    return "비밀번호 재설정 링크가 만료되었거나 이미 사용되었습니다. 새 링크를 요청해 주세요.";
-  }
-  return passwordRecoveryReady
-    ? null
-    : "유효한 비밀번호 재설정 정보가 없습니다. 이메일로 받은 링크를 다시 열어 주세요.";
-}
-
-export function ResetPasswordPage() {
-  const { passwordRecoveryReady, updatePassword } = useAppData();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const submittingRef = useRef(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [updatedLocally, setUpdatedLocally] = useState(false);
-  const updated = updatedLocally || new URLSearchParams(location.search).get("status") === "updated";
-  const linkProblem = recoveryLinkProblem(location.search, location.hash, passwordRecoveryReady);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submittingRef.current) return;
-    if (password !== confirmPassword) {
-      setLocalError("새 비밀번호가 서로 일치하지 않습니다.");
-      return;
-    }
-    submittingRef.current = true;
-    setSubmitting(true);
-    setLocalError(null);
-    try {
-      await updatePassword(password);
-      setUpdatedLocally(true);
-      navigate("/reset-password?status=updated", { replace: true });
-    } catch (reason) {
-      setLocalError(authRecoveryError(reason, "비밀번호를 변경하지 못했습니다. 재설정 링크를 다시 확인해 주세요."));
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <AuthRecoveryLayout titleId="reset-password-title">
-      <p className="eyebrow">계정 복구</p>
-      <h1 id="reset-password-title">새 비밀번호 설정</h1>
-      <p className="auth-panel__lead">다른 서비스에서 사용하지 않는 {MIN_NEW_PASSWORD_LENGTH}자 이상의 새 비밀번호를 입력해 주세요.</p>
-
-      {updated ? (
-        <div className="recovery-result" role="status">
-          <span className="recovery-result__icon" aria-hidden="true"><CheckCircle weight="fill" /></span>
-          <h2>비밀번호가 변경되었습니다</h2>
-          <p>새 비밀번호가 안전하게 저장되었습니다. 계정 보호를 위해 새 비밀번호로 다시 로그인해 주세요.</p>
-          <button className="button button--primary button--full" type="button" onClick={() => navigate("/auth", { replace: true })}>새 비밀번호로 로그인</button>
-        </div>
-      ) : linkProblem ? (
-        <div className="recovery-invalid">
-          <ErrorBanner message={linkProblem} />
-          <Link className="button button--primary button--full" to="/forgot-password">새 재설정 링크 요청</Link>
-          <Link className="auth-back-link" to="/auth"><ArrowLeft /> 로그인으로 돌아가기</Link>
-        </div>
-      ) : (
-        <>
-          {localError ? <ErrorBanner message={localError} /> : null}
-          <form className="auth-form auth-form--recovery" aria-busy={submitting} onSubmit={handleSubmit}>
-            <label className="field">
-              <span>새 비밀번호</span>
-              <span className="field__control"><LockKey /><input required minLength={MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={`${MIN_NEW_PASSWORD_LENGTH}자 이상 입력`} /></span>
-            </label>
-            <label className="field">
-              <span>새 비밀번호 확인</span>
-              <span className="field__control"><LockKey /><input required minLength={MIN_NEW_PASSWORD_LENGTH} maxLength={MAX_PASSWORD_LENGTH} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="새 비밀번호 다시 입력" /></span>
-            </label>
-            <button className="button button--primary button--full" disabled={submitting} type="submit">
-              {submitting ? <CircleNotch className="spin" /> : null} 비밀번호 변경
-            </button>
-          </form>
-        </>
-      )}
-    </AuthRecoveryLayout>
-  );
-}
 
 const ROLE_OPTIONS: Array<{
   value: MembershipRole;
@@ -642,10 +294,12 @@ const DEFAULT_TITLE_BY_ROLE: Record<MembershipRole, ChurchTitleCode> = {
 };
 
 export function OnboardingPage() {
-  const { viewer, organizations, requestMembership, signOut, mode, serviceYear } = useAppData();
+  const { viewer, organizations, requestMembership, updateOwnDisplayName, signOut, mode, serviceYear } = useAppData();
   const rejectedApplication = viewer?.application?.status === "rejected" ? viewer.application : undefined;
   const preferredOrganizationId = rejectedApplication?.organizationId ?? viewer?.signupOrganizationId ?? "";
   const preferredOrganization = organizations.find((item) => item.id === preferredOrganizationId);
+  const [displayName, setDisplayName] = useState(viewer?.profile.displayName ?? "");
+  const submittingRef = useRef(false);
   const [query, setQuery] = useState("");
   const [presbytery, setPresbytery] = useState(preferredOrganization?.presbytery ?? "");
   const [organizationId, setOrganizationId] = useState(preferredOrganization?.id ?? "");
@@ -685,6 +339,12 @@ export function OnboardingPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) return;
+    const ownName = displayName.trim();
+    if (!viewer || !ownName || ownName.length > 50) {
+      setLocalError("공동체에서 확인할 수 있는 본인 이름을 50자 이내로 입력해 주세요.");
+      return;
+    }
     if (!presbytery) {
       setLocalError("소속 노회를 먼저 선택해 주세요.");
       return;
@@ -697,9 +357,11 @@ export function OnboardingPage() {
       setLocalError("임원 직책을 하나 이상 선택해 주세요.");
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     setLocalError(null);
     try {
+      if (ownName !== viewer.profile.displayName) await updateOwnDisplayName(ownName);
       await requestMembership({
         organizationId,
         requestedRole: role,
@@ -711,6 +373,7 @@ export function OnboardingPage() {
     } catch (reason) {
       setLocalError(reason instanceof Error ? reason.message : "가입 신청을 보내지 못했습니다.");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -734,6 +397,11 @@ export function OnboardingPage() {
             <ErrorBanner message={`이전 가입 신청이 반려되었습니다. 사유: ${rejectedApplication.reviewNote ?? "담당자에게 문의해 주세요."} 교회와 역할을 확인한 뒤 다시 신청할 수 있습니다.`} />
           ) : null}
           {localError ? <ErrorBanner message={localError} /> : null}
+          <label className="field">
+            <span>본인 이름</span>
+            <span className="field__control"><User /><input aria-label="본인 이름" required maxLength={50} autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} aria-describedby="onboarding-name-help" /></span>
+            <small id="onboarding-name-help" className="field-hint">소셜 계정의 별명이 아닌, 교회 담당자가 본인을 확인할 수 있는 이름으로 수정해 주세요. 이름으로 다른 계정을 합치거나 역할을 부여하지 않습니다.</small>
+          </label>
           <fieldset>
             <legend><span>1</span> 소속 노회를 선택해 주세요</legend>
             <label className="field onboarding-presbytery-field">

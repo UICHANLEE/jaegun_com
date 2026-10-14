@@ -22,12 +22,14 @@ final class JaegunSecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private static let authStorageKey = "sb-opwzujhfsxqaivtbjewg-auth-token"
     private static let passwordRecoveryIntentKey = "com.uichanlee.jaegun.password-recovery-intent.v1"
+    private static let socialAuthIntentKey = "com.uichanlee.jaegun.social-auth-intent.v1"
     private static let fixedAllowedKeys: Set<String> = [
         authStorageKey,
         "\(authStorageKey)-user",
         "\(authStorageKey)-code-verifier",
         "\(authStorageKey)-flows-code-verifier",
-        passwordRecoveryIntentKey
+        passwordRecoveryIntentKey,
+        socialAuthIntentKey
     ]
     private static let flowKeyPrefix = "\(authStorageKey)-flow-"
     private static let flowKeySuffix = "-code-verifier"
