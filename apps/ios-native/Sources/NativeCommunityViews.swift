@@ -6,21 +6,38 @@ func nativeText(_ row: [String: Any], _ key: String, fallback: String = "") -> S
 
 struct NativeCommunityTabs: View {
     @EnvironmentObject private var session: NativeSession
-    @State private var selectedTab = "feed"
+    @State private var selectedTab = "home"
     private var membership: [String: Any] { session.context["membership"] as? [String: Any] ?? [:] }
     private var isManager: Bool {
         session.context["is_platform_admin"] as? Bool == true || ["minister", "executive"].contains(nativeText(membership, "role"))
     }
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack { NativeFeedView() }.tabItem { Label("소식", systemImage: "list.bullet.rectangle") }.tag("feed")
-            NavigationStack { NativeChannelListView() }.tabItem { Label("채널", systemImage: "bubble.left.and.bubble.right") }.tag("channels")
-            NavigationStack { NativeEventsView() }.tabItem { Label("일정", systemImage: "calendar") }.tag("events")
-            if isManager {
-                NavigationStack { NativeManagementView() }.tabItem { Label("관리", systemImage: "person.badge.shield.checkmark") }.tag("management")
+        NavigationStack {
+            Group {
+                switch selectedTab {
+                case "home": NativeMemberHomeView()
+                case "posts": NativeFeedView()
+                case "chats": NativeChannelListView()
+                case "churches": NativeChurchSummaryView()
+                case "ai": NativeAILandingView()
+                case "management": if isManager { NativeApprovalOperationsView() } else { NativeMemberHomeView() }
+                default: NativeProfileView()
+                }
             }
-            NavigationStack { NativeProfileView() }.tabItem { Label("내 정보", systemImage: "person.crop.circle") }.tag("profile")
-        }.onAppear { if isManager { selectedTab = "management" } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { NativeBrandHeader(compact: true) }
+                if isManager {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(selectedTab == "management" ? "공동체 홈" : "관리 화면") {
+                            selectedTab = selectedTab == "management" ? "home" : "management"
+                        }.font(.caption.weight(.semibold)).frame(minHeight: 44)
+                    }
+                }
+            }
+        }.safeAreaInset(edge: .bottom, spacing: 0) {
+            NativeCommunityNavigation(selection: $selectedTab)
+        }.tint(NativePalette.blue)
+            .onAppear { if isManager { selectedTab = "management" } }
     }
 }
 
@@ -46,7 +63,16 @@ struct NativeFeedView: View {
             else if let error { NativeFailureView(message: error) { Task { await load() } } }
             else if posts.isEmpty { ContentUnavailableView("아직 등록된 소식이 없습니다", systemImage: "text.bubble") }
             else {
-                List(posts.indices, id: \.self) { index in
+                List {
+                    VStack(alignment: .leading, spacing: 18) {
+                        NativeBrandHeader()
+                        HStack {
+                            Text("공동체 소식").font(.title2.bold())
+                            Spacer()
+                            Text("최근 \(posts.count)개").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.padding(.vertical, 12).listRowSeparator(.hidden)
+                    ForEach(posts.indices, id: \.self) { index in
                     let post = posts[index]
                     NavigationLink {
                         ScrollView {
@@ -57,16 +83,12 @@ struct NativeFeedView: View {
                             }.frame(maxWidth: .infinity, alignment: .leading).padding()
                         }.navigationTitle("게시글").navigationBarTitleDisplayMode(.inline)
                     } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if post["is_pinned"] as? Bool == true { Label("공지", systemImage: "pin.fill").font(.caption).foregroundStyle(.secondary) }
-                            Text(nativeText(post, "title", fallback: "제목 없음")).font(.headline).lineLimit(3)
-                            Text(nativeText(post, "body")).foregroundStyle(.secondary).lineLimit(2)
-                            Text(nativeText(post, "author_label")).font(.caption).foregroundStyle(.secondary)
-                        }.padding(.vertical, 6)
+                        NativePostSummary(post: post)
                     }
-                }.refreshable { await load() }
+                    }
+                }.listStyle(.plain).refreshable { await load() }
             }
-        }.navigationTitle("공동체 소식").task { await load() }
+        }.navigationTitle("게시판").nativePageStyle().task { await load() }
     }
     private func load() async {
         loading = true; error = nil
@@ -92,13 +114,18 @@ struct NativeChannelListView: View {
                     let channel = channels[index]
                     NavigationLink { NativeChannelMessagesView(channel: channel, organizationID: organizationID) } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label(nativeText(channel, "name"), systemImage: nativeText(channel, "visibility") == "private" ? "lock" : "number")
+                            HStack(spacing: 12) {
+                                Image(systemName: nativeText(channel, "visibility") == "private" ? "lock" : "number")
+                                    .frame(width: 40, height: 40).foregroundStyle(NativePalette.blue)
+                                    .background(NativePalette.blue.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+                                Text(nativeText(channel, "name")).font(.headline)
+                            }
                             Text(nativeText(channel, "description")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                         }.padding(.vertical, 6)
                     }.disabled(nativeText(channel, "status") != "active")
                 }.refreshable { await load() }
             }
-        }.navigationTitle("채널").task { await load() }
+        }.navigationTitle("채널").nativePageStyle().task { await load() }
     }
     private func load() async {
         loading = true; error = nil
@@ -191,7 +218,7 @@ struct NativeEventsView: View {
                     }.padding(.vertical, 6)
                 }.refreshable { await load() }
             }
-        }.navigationTitle("공동체 일정").task { await load() }
+        }.navigationTitle("공동체 일정").nativePageStyle().task { await load() }
     }
     private func load() async {
         loading = true; error = nil
@@ -215,7 +242,15 @@ struct NativeManagementView: View {
     var body: some View {
         List {
             Section {
-                Text("가입 승인 대기 현황").font(.headline)
+                HStack(spacing: 14) {
+                    Image(systemName: role == "minister" ? "person.2" : "person.badge.shield.checkmark")
+                        .font(.title2).foregroundStyle(NativePalette.forest)
+                        .frame(width: 48, height: 48).background(NativePalette.forest.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title).font(.title3.bold())
+                        Text("가입 승인 대기 현황").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }.padding(.vertical, 8)
                 Text("권한은 서버에서 확인합니다. 네이티브 승인·임명 기능은 아직 제공하지 않으며 이 화면에서는 조회만 가능합니다.").font(.footnote).foregroundStyle(.secondary)
             }
             if loading { ProgressView("신청을 확인하고 있습니다") }
@@ -229,7 +264,7 @@ struct NativeManagementView: View {
                     Text(nativeText(application, "created_at")).font(.caption).foregroundStyle(.secondary)
                 }
             }
-        }.navigationTitle(title).task { await load() }.refreshable { await load() }
+        }.navigationTitle(title).nativePageStyle().task { await load() }.refreshable { await load() }
     }
     private func load() async {
         loading = true; error = nil
@@ -256,6 +291,6 @@ struct NativeProfileView: View {
                 Button("계정 다시 확인") { Task { await session.restore() } }
                 Button("로그아웃", role: .destructive) { Task { await session.signOut() } }
             }
-        }.navigationTitle("내 정보")
+        }.navigationTitle("내 정보").nativePageStyle()
     }
 }

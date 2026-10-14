@@ -17,6 +17,8 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
 import { EmailAccountForm } from "./EmailAuthPages";
+import { SignupScopedOfficePicker } from "./SignupScopedOfficePicker";
+import { validateSignupOfficeRequests, type ScopedMembershipRequestInput, type SignupOfficeOptions, type SignupOfficeRequest } from "../data/signupOfficeRequests";
 import { ApplicationStatusBadge, ErrorBanner, ROLE_LABELS } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 import type { SocialAuthProvider } from "../data/socialAuth";
@@ -315,6 +317,17 @@ export function OnboardingPage() {
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [officeRequests, setOfficeRequests] = useState<SignupOfficeRequest[]>([]);
+  const [officeOptions, setOfficeOptions] = useState<SignupOfficeOptions | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const draftID = useRef<string>(crypto.randomUUID());
+  const submittedDraft = useRef<ScopedMembershipRequestInput | null>(null);
+  const actorID = viewer?.profile.id ?? "";
+  useEffect(() => {
+    setOfficeRequests([]); setOfficeOptions(null); setUncertain(false);
+    draftID.current = crypto.randomUUID();
+    submittedDraft.current = null;
+  }, [organizationId, actorID]);
 
   const availableOrganizations = useMemo(
     () => organizations.filter((organization) => organization.status !== "archived"),
@@ -337,6 +350,11 @@ export function OnboardingPage() {
 
   const selectedOrganization = presbyteryOrganizations.find((item) => item.id === organizationId);
 
+  function clearScopedDraft() {
+    setOfficeRequests([]); setOfficeOptions(null); setUncertain(false);
+    draftID.current = crypto.randomUUID(); submittedDraft.current = null;
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submittingRef.current) return;
@@ -357,21 +375,33 @@ export function OnboardingPage() {
       setLocalError("임원 직책을 하나 이상 선택해 주세요.");
       return;
     }
+    if (mode === "supabase") {
+      try {
+        if (!officeOptions) throw new Error("가입 직책 목록을 확인한 뒤 신청해 주세요.");
+        validateSignupOfficeRequests(officeRequests, officeOptions);
+      } catch (reason) { setLocalError(reason instanceof Error ? reason.message : "직책 선택을 확인해 주세요."); return; }
+    }
     submittingRef.current = true;
     setSubmitting(true);
     setLocalError(null);
+    let requestStarted = false;
     try {
       if (ownName !== viewer.profile.displayName) await updateOwnDisplayName(ownName);
-      await requestMembership({
+      requestStarted = true;
+      const input = submittedDraft.current ?? {
         organizationId,
         requestedRole: role,
         churchTitleCode,
         executiveOfficeCodes: role === "executive" ? executiveOfficeCodes : undefined,
         serviceYear: role === "executive" ? serviceYear : undefined,
         note: note.trim() || undefined,
-      });
+        ...(mode === "supabase" ? { clientRequestId: draftID.current, officeRequests } : {}),
+      };
+      submittedDraft.current = input;
+      await requestMembership(input);
     } catch (reason) {
-      setLocalError(reason instanceof Error ? reason.message : "가입 신청을 보내지 못했습니다.");
+      if (mode === "supabase" && requestStarted) setUncertain(true);
+      setLocalError(`${reason instanceof Error ? reason.message : "가입 신청을 보내지 못했습니다."}${mode === "supabase" && requestStarted ? " 신청 내용은 유지됩니다. ‘같은 신청 결과 확인’을 누르면 같은 식별자로 서버 결과를 확인하여 중복을 방지합니다." : ""}`);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -397,6 +427,7 @@ export function OnboardingPage() {
             <ErrorBanner message={`이전 가입 신청이 반려되었습니다. 사유: ${rejectedApplication.reviewNote ?? "담당자에게 문의해 주세요."} 교회와 역할을 확인한 뒤 다시 신청할 수 있습니다.`} />
           ) : null}
           {localError ? <ErrorBanner message={localError} /> : null}
+          <fieldset disabled={submitting || uncertain} style={{ display: "contents" }}>
           <label className="field">
             <span>본인 이름</span>
             <span className="field__control"><User /><input aria-label="본인 이름" required maxLength={50} autoComplete="name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} aria-describedby="onboarding-name-help" /></span>
@@ -413,6 +444,7 @@ export function OnboardingPage() {
                 onChange={(event) => {
                   setPresbytery(event.target.value);
                   setOrganizationId("");
+                  clearScopedDraft();
                   setQuery("");
                   setLocalError(null);
                 }}
@@ -433,7 +465,7 @@ export function OnboardingPage() {
             <div className="organization-picker" role="radiogroup" aria-label="소속 교회">
               {filteredOrganizations.slice(0, 12).map((organization) => (
                 <label key={organization.id} className={organization.id === organizationId ? "is-selected" : ""}>
-                  <input type="radio" name="organization" value={organization.id} checked={organization.id === organizationId} onChange={() => { setOrganizationId(organization.id); setLocalError(null); }} />
+                  <input type="radio" name="organization" value={organization.id} checked={organization.id === organizationId} onChange={() => { clearScopedDraft(); setOrganizationId(organization.id); setLocalError(null); }} />
                   <span className="organization-picker__icon"><Church weight="fill" /></span>
                   <span><strong>{organization.name}</strong><small>{organization.presbytery} · {organization.status === "active" ? "운영 중" : "조직 준비됨"}</small></span>
                   <span className="organization-picker__check"><Check weight="bold" /></span>
@@ -493,6 +525,8 @@ export function OnboardingPage() {
             <textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={300} placeholder="담당자가 확인할 수 있도록 간단히 소개해 주세요." />
             <small className="field__count">{note.length}/300</small>
           </label>
+          <SignupScopedOfficePicker organizationId={organizationId} actorId={actorID} demo={mode === "demo"} disabled={submitting || uncertain} value={officeRequests} onChange={setOfficeRequests} onOptions={setOfficeOptions} />
+          </fieldset>
 
           <div className="onboarding-submit">
             <div>
@@ -502,8 +536,8 @@ export function OnboardingPage() {
                 {role === "executive" && executiveOfficeCodes.length ? ` · ${executiveOfficeCodes.map((code) => EXECUTIVE_OFFICE_LABELS[code]).join("·")}` : ""}
               </strong>
             </div>
-            <button className="button button--primary" type="submit" disabled={!selectedOrganization || submitting}>
-              {submitting ? <CircleNotch className="spin" /> : null} 가입 승인 요청
+            <button className="button button--primary" type="submit" disabled={!selectedOrganization || submitting || (mode === "supabase" && !officeOptions)}>
+              {submitting ? <CircleNotch className="spin" /> : null} {uncertain ? "같은 신청 결과 확인" : "가입 승인 요청"}
             </button>
           </div>
         </form>

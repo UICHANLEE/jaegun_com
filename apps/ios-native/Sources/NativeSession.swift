@@ -85,19 +85,37 @@ private enum NativeKeychain {
     }
 
     func googleSignIn() async {
-        guard !loading else { return }
+        _ = await googleAuthentication(reauthenticate: false)
+    }
+
+    // Explicit step-up only: return to the same native screen without retrying a mutation.
+    func reauthenticateGoogle() async -> Bool {
+        await googleAuthentication(reauthenticate: true)
+    }
+
+    private func googleAuthentication(reauthenticate: Bool) async -> Bool {
+        guard !loading, !reauthenticate || (signedIn && !consentRequired) else { return false }
+        let generation = epoch
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
             .filter({ $0.activationState == .foregroundActive })
             .flatMap(\.windows).first(where: { $0.isKeyWindow && !$0.isHidden }) else {
             error = "로그인 창을 표시할 앱 화면을 찾지 못했습니다. 앱을 다시 열어 주세요. (AUTH-WINDOW)"
-            return
+            return false
         }
         loading = true; error = nil
         let presentation = NativeAuthPresentationContext(window: window)
         let startedAt = ProcessInfo.processInfo.systemUptime
+        var adoptedSession = false
         authPresentationContext = presentation
         defer { loading = false; authSession = nil; authPresentationContext = nil }
         do {
+            var expectedActor: String?
+            if reauthenticate {
+                try await api.refresh()
+                let identity = try await api.authenticatedIdentity()
+                guard identity.google else { throw NativeAPIError.security("현재 계정에 연결된 Google 계정으로 인증해야 합니다. 계정 연결은 웹의 보안 설정에서 진행해 주세요.") }
+                expectedActor = identity.id
+            }
             let verifier = try randomString()
             let intent = UUID().uuidString.lowercased()
             let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URLEncoded()
@@ -143,17 +161,37 @@ private enum NativeKeychain {
                 if !didStart { complete(.failure(NativeAPIError.security("Google 인증 창을 시작하지 못했습니다. (AUTH-START)"))) }
             }
             let code = try NativeOAuthCallback.authorizationCode(result, expectedIntent: intent)
-            let tokens = try await api.authenticate(grant: "pkce", body: ["auth_code": code, "code_verifier": verifier])
+            let candidate = NativeAPI()
+            let tokens = try await candidate.authenticate(grant: "pkce", body: ["auth_code": code, "code_verifier": verifier])
+            candidate.tokens = tokens
+            let identity = try await candidate.authenticatedIdentity()
+            guard generation == epoch, identity.google, expectedActor == nil || identity.id == expectedActor else {
+                try? await candidate.logout()
+                throw NativeAPIError.security("Google 계정이 현재 로그인한 계정과 일치하지 않습니다. 기존 계정은 유지됩니다.")
+            }
+            if reauthenticate {
+                let status = try await candidate.rpc("get_sensitive_action_auth_status")
+                guard NativeSensitiveAuthStatus.isVerified(status) else {
+                    try? await candidate.logout()
+                    throw NativeAPIError.security("서버가 최근 Google 인증을 확인하지 못했습니다. 기존 계정은 유지됩니다.")
+                }
+            }
             try NativeKeychain.save(tokens)
-            epoch = UUID(); context = [:]; privacy = [:]; consentRequired = true; api.tokens = tokens; signedIn = true
+            adoptedSession = true
+            epoch = UUID()
+            if !reauthenticate { context = [:]; privacy = [:]; consentRequired = true }
+            api.tokens = tokens; signedIn = true
             try await loadState()
+            return !reauthenticate || (signedIn && !consentRequired)
         } catch {
+            if adoptedSession { context = [:]; privacy = [:]; consentRequired = true }
             let failure = error as NSError
             if failure.domain == ASWebAuthenticationSessionErrorDomain {
                 self.error = failure.code == 1
                     ? "iOS에서 Google 인증 세션이 종료되었습니다. 직접 취소하지 않았다면 아래 진단 코드를 알려주세요. 선택한 동의는 유지됩니다. (AUTH-CANCEL-\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms)"
                     : "iOS에서 Google 인증 창을 열지 못했습니다. (AUTH-\(failure.code))"
             } else { self.error = error.localizedDescription }
+            return false
         }
     }
 
@@ -228,6 +266,24 @@ private enum NativeKeychain {
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw NativeAPIError.security("안전한 로그인 요청을 생성하지 못했습니다.") }
         return Data(bytes).base64URLEncoded()
+    }
+}
+
+enum NativeSensitiveAuthStatus {
+    static func isVerified(_ value: Any) -> Bool {
+        struct Status: Decodable {
+            let verified: Bool
+            let expires_at: String?
+            let server_now: String
+        }
+        guard JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value),
+              let status = try? JSONDecoder().decode(Status.self, from: data), status.verified,
+              let expiry = status.expires_at else { return false }
+        let format = ISO8601DateFormatter()
+        format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        func parse(_ value: String) -> Date? { format.date(from: value) ?? ISO8601DateFormatter().date(from: value) }
+        guard let end = parse(expiry), let now = parse(status.server_now) else { return false }
+        return end > now
     }
 }
 

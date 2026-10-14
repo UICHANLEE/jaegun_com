@@ -700,9 +700,9 @@ describe("AppDataProvider password recovery trust boundary", () => {
       );
     });
     await waitFor(() => expect(remote.signOut).toHaveBeenCalledWith({ scope: "local" }));
-    expect(screen.getByTestId("provider-error")).toHaveTextContent(
+    await waitFor(() => expect(screen.getByTestId("provider-error")).toHaveTextContent(
       "확인 링크의 용도를 확인하지 못했습니다",
-    );
+    ));
   });
 
   it("uses public production callbacks for signup confirmation and password recovery", async () => {

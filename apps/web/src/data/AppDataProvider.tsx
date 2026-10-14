@@ -25,7 +25,6 @@ import type {
   MeetingMinute,
   MeetingMinuteInput,
   MembershipApplication,
-  MembershipRequestInput,
   MembershipRole,
   Message,
   Notification,
@@ -37,6 +36,7 @@ import type {
   ViewerContext,
 } from "../types/domain";
 import { createDemoState, DEMO_VIEWER } from "./seed";
+import { buildScopedMembershipPayload, type ScopedMembershipRequestInput } from "./signupOfficeRequests";
 import {
   canPersistSensitiveClientState,
   isNativeAppRuntime,
@@ -151,7 +151,7 @@ export interface AppDataContextValue extends AppDataState {
   linkSocialIdentity: (provider: SocialAuthProvider) => Promise<void>;
   reauthenticateWithSocial: (provider: SocialAuthProvider, returnTo?: string) => Promise<void>;
   signOut: () => Promise<void>;
-  requestMembership: (input: MembershipRequestInput) => Promise<void>;
+  requestMembership: (input: ScopedMembershipRequestInput) => Promise<void>;
   createPost: (draft: PostDraft, onProgress?: (progress: number) => void) => Promise<Post>;
   addComment: (postId: string, body: string) => Promise<void>;
   startConversation: (otherUserId: string) => Promise<string>;
@@ -2741,12 +2741,15 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     return trackedOperation;
   }, [invalidateRemoteWork, replaceState]);
 
-  const requestMembership = useCallback(async (input: MembershipRequestInput) => {
+  const requestMembership = useCallback(async (input: ScopedMembershipRequestInput) => {
     const current = stateRef.current;
     const viewer = current.viewer;
     if (!viewer || current.consentGateOpen !== true) throw new Error("로그인과 필수 동의가 필요합니다.");
     const requestSessionEpoch = remoteSessionEpochRef.current;
     const requestUserId = viewer.profile.id;
+    if (input.officeRequests !== undefined && input.clientRequestId === undefined) {
+      throw new Error("직책 신청에는 같은 요청을 확인할 수 있는 가입 신청 식별자가 필요합니다.");
+    }
     const requestedExecutiveOfficeCodes = normalizeExecutiveOfficeCodes(input.executiveOfficeCodes);
     if (input.requestedRole !== "executive" && (requestedExecutiveOfficeCodes.length || input.serviceYear !== undefined)) {
       throw new Error("임원 직책과 임기는 임원 역할을 신청할 때만 선택할 수 있습니다.");
@@ -2758,7 +2761,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       ? input.serviceYear ?? serviceYear
       : undefined;
     if (supabase && current.mode === "supabase") {
-      const { error: rpcError } = await supabase.rpc("submit_membership_application", {
+      const scoped = input.clientRequestId !== undefined;
+      const { data: applicationId, error: rpcError } = await supabase.rpc(scoped ? "submit_membership_with_office_requests" : "submit_membership_application", scoped
+        ? buildScopedMembershipPayload(input, requestedExecutiveOfficeCodes, requestedServiceYear) : {
         p_organization_id: input.organizationId,
         p_requested_role: input.requestedRole,
         p_applicant_note: input.note ?? null,
@@ -2767,9 +2772,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         p_requested_service_year: requestedServiceYear ?? null,
       });
       if (rpcError) throw rpcError;
-      if (!isRemoteActorCurrent(requestSessionEpoch, requestUserId)) return;
+      if (!isRemoteActorCurrent(requestSessionEpoch, requestUserId)) throw new Error("가입 신청 중 로그인 계정이 변경되었습니다. 현재 계정에서 신청 현황을 다시 확인해 주세요.");
       const application: MembershipApplication = {
-        id: `pending-${crypto.randomUUID()}`,
+        id: typeof applicationId === "string" ? applicationId : `pending-${crypto.randomUUID()}`,
         organizationId: input.organizationId,
         userId: viewer.profile.id,
         applicantName: viewer.profile.displayName,

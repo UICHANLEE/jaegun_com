@@ -2,6 +2,49 @@ import XCTest
 @testable import JaegunNative
 
 final class NativeSecurityTests: XCTestCase {
+    func testSensitiveProofUsesServerTimeAndFailsClosed() {
+        XCTAssertTrue(NativeSensitiveAuthStatus.isVerified(["verified": true, "expires_at": "2026-10-14T10:05:00Z", "server_now": "2026-10-14T10:00:00Z"]))
+        XCTAssertFalse(NativeSensitiveAuthStatus.isVerified(["verified": true, "expires_at": "2026-10-14T10:00:00Z", "server_now": "2026-10-14T10:00:00Z"]))
+        XCTAssertFalse(NativeSensitiveAuthStatus.isVerified(["verified": false, "expires_at": "2026-10-14T10:05:00Z", "server_now": "2026-10-14T10:00:00Z"]))
+        XCTAssertFalse(NativeSensitiveAuthStatus.isVerified(["verified": 1, "expires_at": "2026-10-14T10:05:00Z", "server_now": "2026-10-14T10:00:00Z"]))
+        XCTAssertFalse(NativeSensitiveAuthStatus.isVerified(["verified": true, "server_now": "invalid"]))
+    }
+    func testPhoneApprovalPolicyDoesNotExpandScopeOrAllowSelfReview() {
+        let context: [String: Any] = ["profile": ["id": "actor"], "membership": ["status": "active", "role": "minister", "organization_id": "church-a"]]
+        let valid: [String: Any] = ["status": "pending", "user_id": "applicant", "organization_id": "church-a", "requested_role": "member"]
+        XCTAssertTrue(NativeApprovalPolicy.reviewable(valid, context: context))
+        var other = valid; other["organization_id"] = "church-b"; XCTAssertFalse(NativeApprovalPolicy.reviewable(other, context: context))
+        other = valid; other["requested_role"] = "executive"; XCTAssertFalse(NativeApprovalPolicy.reviewable(other, context: context))
+        other = valid; other["user_id"] = "actor"; XCTAssertFalse(NativeApprovalPolicy.reviewable(other, context: context))
+        XCTAssertFalse(NativeApprovalPolicy.validReason("  ", rejecting: true))
+    }
+    func testEventDraftRequiresHostAndPreservesOperationIdentifier() {
+        var draft = NativeEventDraft(scopeId: UUID().uuidString)
+        let id = draft.id
+        draft.title = "청년부 모임"
+        XCTAssertNotNil(draft.validation)
+        draft.host = "청년부"
+        XCTAssertNil(draft.validation)
+        XCTAssertEqual(draft.body["p_id"] as? String, id.uuidString)
+        draft.endsAt = draft.startsAt
+        XCTAssertNotNil(draft.validation)
+        draft.endsAt = draft.startsAt.addingTimeInterval(3600)
+        draft.frequency = "weekly"; draft.recurrenceCount = 12
+        XCTAssertNotNil(draft.validation)
+        draft.weekdays = [1]
+        XCTAssertNil(draft.validation)
+        draft.capacity = "0"
+        XCTAssertNotNil(draft.validation)
+    }
+    func testCommunityNavigationMatchesWebDestinations() {
+        XCTAssertEqual(NativeCommunityNavigation.items.map { $0.1 }, ["홈", "게시판", "채팅", "교회", "AI", "내 정보"])
+        XCTAssertEqual(Set(NativeCommunityNavigation.items.map { $0.0 }).count, 6)
+    }
+    func testConsentDisplayOrderMatchesWeb() {
+        let keys = ["community_guidelines", "terms_of_service", "sensitive_information", "privacy_policy", "overseas_transfer"]
+        let documents = keys.compactMap { NativeLegalDocument(["key": $0, "version": "2026-10-14"]) }.sorted { $0.displayOrder < $1.displayOrder }
+        XCTAssertEqual(documents.map { $0.type }, ["privacy_policy", "sensitive_information", "overseas_transfer", "terms_of_service", "community_guidelines"])
+    }
     func testLoginRouteSurvivesGoogleBusyState() {
         for busy in [false, true, false] {
             XCTAssertEqual(NativeRootRoute.resolve(loading: busy, signedIn: false, consentRequired: true, administrator: false, activeMember: false), .login)

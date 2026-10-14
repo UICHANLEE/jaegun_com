@@ -45,7 +45,9 @@ struct NativeTokens: Codable {
 
     func rpc(_ name: String, body: [String: Any] = [:]) async throws -> Any {
         try validateIdentifier(name)
-        return try await request(path: "/rest/v1/rpc/\(name)", method: "POST", body: body)
+        // Mutations are never replayed after authentication failure. UI must reconcile
+        // uncertain results before an explicit retry; table reads remain retryable.
+        return try await request(path: "/rest/v1/rpc/\(name)", method: "POST", body: body, retry: false)
     }
 
     func authenticate(grant: String, body: [String: Any]) async throws -> NativeTokens {
@@ -70,9 +72,15 @@ struct NativeTokens: Codable {
     }
 
     func verifyUser() async throws {
+        _ = try await authenticatedIdentity()
+    }
+
+    func authenticatedIdentity() async throws -> (id: String, google: Bool) {
         let value = try await request(path: "/auth/v1/user")
-        guard let user = value as? [String: Any], user["id"] is String,
+        guard let user = value as? [String: Any], let id = user["id"] as? String, UUID(uuidString: id) != nil,
               user["is_anonymous"] as? Bool != true else { throw NativeAPIError.sessionExpired }
+        let identities = user["identities"] as? [[String: Any]] ?? []
+        return (id, identities.contains { $0["provider"] as? String == "google" })
     }
 
     func request(path: String, query: String = "", method: String = "GET", body: [String: Any]? = nil, authenticated: Bool = true, retry: Bool = true) async throws -> Any {
