@@ -69,7 +69,7 @@ select is((select count(*) from public.user_consents where user_id in
   'OAuth and invalid metadata record no consent, not partial evidence');
 select ok(not private.has_current_required_consents(user_id),case_name||' has no protected consent access')
 from consent_signup_fixtures where case_name<>'valid-email';
-select is((select count(*) from public.memberships where user_id in (select user_id from consent_signup_fixtures)),0::bigint,
+select is((select count(*) from public.organization_memberships where user_id in (select user_id from consent_signup_fixtures)),0::bigint,
   'metadata cannot create memberships or roles');
 select ok(not pg_catalog.has_function_privilege('anon','public.save_my_privacy_preferences_v2(jsonb,boolean,boolean,boolean,boolean)','execute'),
   'anonymous callers cannot record acceptance');
