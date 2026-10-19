@@ -2,15 +2,15 @@ import { beforeEach,describe,expect,it,vi } from 'vitest';
 import { fireEvent,render,screen,waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type * as ScopedRecordsModule from '../data/scopedRecords';
-const mock=vi.hoisted(()=>({actor:'actor-1',gate:true,write:true,rpc:vi.fn(),reauth:vi.fn(),auth:vi.fn(()=>({data:{subscription:{unsubscribe:vi.fn()}}}))}));
+const mock=vi.hoisted(()=>({actor:'actor-1',gate:true,write:true,rpc:vi.fn(),download:vi.fn(),reauth:vi.fn(),auth:vi.fn(()=>({data:{subscription:{unsubscribe:vi.fn()}}}))}));
 vi.mock('../data/AppDataProvider',()=>({useAppData:()=>({viewer:{profile:{id:mock.actor}},consentGateOpen:mock.gate,serviceYear:2026,reauthenticateWithSocial:mock.reauth})}));
 vi.mock('../data/supabase',()=>({supabase:{auth:{getUser:async()=>({data:{user:{id:mock.actor}}}),onAuthStateChange:mock.auth}}}));
-vi.mock('../data/scopedRecords',async()=>{const actual=await vi.importActual<typeof ScopedRecordsModule>('../data/scopedRecords');return {...actual,recordsRPC:mock.rpc,scopesForRecordsActor:async()=>mock.rpc('list_scoped_record_scopes')};});
+vi.mock('../data/scopedRecords',async()=>{const actual=await vi.importActual<typeof ScopedRecordsModule>('../data/scopedRecords');return {...actual,recordsRPC:mock.rpc,downloadAllRecords:mock.download,scopesForRecordsActor:async()=>mock.rpc('list_scoped_record_scopes')};});
 import { ScopedRecordsPage } from './ScopedRecordsPages';
 const record={id:'record-1',kind:'finance',scope_id:'scope-1',event_id:null,record_date:'2026-10-15',service_year:2026,title:'실제 회계 전표',body:'검토 메모',status:'published',entry_type:'income',category:'회비',amount:15000,currency:'KRW',revision:2,source_operation_id:null,reversal_of:null,receipts:[]};
 function view(){return <MemoryRouter><ScopedRecordsPage kind="finance"/></MemoryRouter>;}
 beforeEach(()=>{
- mock.actor='actor-1';mock.gate=true;mock.write=true;mock.rpc.mockReset();mock.reauth.mockReset();mock.reauth.mockResolvedValue(undefined);
+ mock.actor='actor-1';mock.gate=true;mock.write=true;mock.rpc.mockReset();mock.download.mockReset();mock.download.mockResolvedValue(undefined);mock.reauth.mockReset();mock.reauth.mockResolvedValue(undefined);
  mock.rpc.mockImplementation(async(name,params)=>{
   if(name==='list_scoped_record_scopes')return [{scope_id:'scope-1',organization_id:'church-1',event_id:null,label:'교회 장부',can_minutes:true,can_finance:true},{scope_id:'scope-1',organization_id:'church-1',event_id:'event-1',label:'행사 독립 장부',can_minutes:true,can_finance:true}];
   if(name==='get_scoped_records')return {can_write:mock.write&&params.p_year===2026,rows:params.p_event_id?[]:[record]};
@@ -20,6 +20,16 @@ beforeEach(()=>{
  });
 });
 describe('scoped executive records UI',()=>{
+ it('downloads all authorized records instead of only the currently displayed period',async()=>{
+  render(view());fireEvent.click(await screen.findByRole('button',{name:'전체 회계 장부 다운로드'}));
+  await waitFor(()=>expect(mock.download).toHaveBeenCalledWith('finance','actor-1',expect.any(Function)));
+ });
+ it('blocks the record screen when the server grants no executive scope',async()=>{
+  mock.rpc.mockResolvedValue([]);render(view());
+  expect(await screen.findByRole('heading',{name:'임원 전용 기록'})).toBeVisible();
+  expect(screen.queryByRole('button',{name:/전체.*다운로드/})).not.toBeInTheDocument();
+  expect(screen.queryByRole('combobox',{name:'기록 범위'})).not.toBeInTheDocument();
+ });
  it('creates minutes manually with an exact scope and no AI controls',async()=>{
   const base=mock.rpc.getMockImplementation();
   mock.rpc.mockImplementation(async(name,params)=>name==='get_scoped_records'?{can_write:true,rows:[]}:base?.(name,params));

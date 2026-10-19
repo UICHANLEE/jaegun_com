@@ -45,4 +45,11 @@ final class NativeEventFieldTests: XCTestCase {
         XCTAssertThrowsError(try NativeXLSX.write(sheets: [(name: "동일", rows: []), (name: "동일", rows: [])]))
         XCTAssertThrowsError(try NativeXLSX.write(sheets: [(name: "../잘못", rows: [])]))
     }
+    func testRecordArchiveSplitsBodiesWithoutLosingUnicode() {
+        let body = String(repeating: "긴 본문😀", count: 10000)
+        let parts = NativeRecordArchiveWorkbook.parts(body)
+        XCTAssertEqual(parts.joined(), body)
+        XCTAssertTrue(parts.allSatisfy { $0.utf16.count <= 30000 })
+        XCTAssertEqual(NativeRecordArchiveWorkbook.parts(""), [""])
+    }
 }

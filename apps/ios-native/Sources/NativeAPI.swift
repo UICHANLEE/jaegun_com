@@ -165,6 +165,16 @@ struct NativeTokens: Codable {
             return try await self.request(path: path, query: query, method: method, body: body, authenticated: true, retry: false)
         }
         guard (200..<300).contains(response.statusCode) else {
+            if path == "/rest/v1/rpc/set_event_staff",
+               let failure = try? JSONSerialization.jsonObject(with: data) as? [String: Any], failure["message"] as? String == "fees_requires_executive" {
+                throw NativeAPIError.service("회비 담당 권한은 해당 조직의 활성 임원에게만 부여할 수 있습니다.")
+            }
+            if path == "/rest/v1/rpc/export_executive_records",
+               let failure = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let message = failure["message"] as? String {
+                if message == "full_export_too_large_no_partial_file" { throw NativeAPIError.service("전체 기록이 다운로드 한도를 초과해 일부 파일을 만들지 않았습니다. 관리자에게 대용량 내보내기를 요청해 주세요.") }
+                if message.hasPrefix("recent_google_authentication_required:") { throw NativeAPIError.service("최근 5분 이내 Google 본인 확인 후 다운로드 버튼을 직접 다시 눌러 주세요.") }
+                if message == "record_scope_forbidden" { throw NativeAPIError.service("회의록·회계는 해당 범위의 활성 임원만 내려받을 수 있습니다.") }
+            }
             if path == "/functions/v1/ai-assistant",
                let failure = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let code = failure["error"] as? String, let message = NativeAIErrorMessages.messages[code] {

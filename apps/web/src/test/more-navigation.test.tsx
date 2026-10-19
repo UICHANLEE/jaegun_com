@@ -16,8 +16,8 @@ describe('five destination navigation and More', () => {
     expect(screen.getByRole('link', { name: 'AI 도우미' })).toHaveAttribute('href','/app/ai');
     expect(screen.getByRole('link', { name: '계정 삭제' })).toHaveAttribute('href','/app/account');
     expect(screen.getByRole('link', { name: '임원실·조직도' })).toHaveAttribute('href','/app/organizations');
-    expect(screen.getByRole('link', { name: '회의록 작성·조회' })).toHaveAttribute('href','/app/records/minutes');
-    expect(screen.getByRole('link', { name: '회계 장부·영수증·결산' })).toHaveAttribute('href','/app/records/finance');
+    expect(screen.queryByRole('link', { name: /회의록·변경 이력/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /독립 장부·영수증·결산/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '관리 화면 열기' })).not.toBeInTheDocument();
   });
   it('keeps the minister entry distinct from platform administration', () => {

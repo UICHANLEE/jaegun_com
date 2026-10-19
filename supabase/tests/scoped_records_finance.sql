@@ -150,6 +150,74 @@ set local role authenticated;
 select is(public.abandon_unattached_finance_receipt('99000000-0000-4000-8000-000000000001',auth.uid())->>'abandoned','true','failed uncommitted reservation cleanup remains possible without changing closed evidence');
 select is(public.abandon_unattached_finance_receipt('99000000-0000-4000-8000-000000000002',auth.uid())->>'abandoned','false','cleanup cannot revoke attached evidence after period close');
 reset role;
+-- Full archives retain all years and events without exposing other scopes.
+insert into private.event_staff(occurrence_id,user_id,capabilities,expires_at,granted_by)
+values('97000000-0000-4000-8000-000000000002','94000000-0000-4000-8000-000000000003',array['fees','checkin'],statement_timestamp()+interval '1 hour','94000000-0000-4000-8000-000000000001');
+select is(private.can_manage_event_fees('97000000-0000-4000-8000-000000000002','94000000-0000-4000-8000-000000000003'),false,'delegated member cannot gain financial access');
+select is(private.can_event_field('97000000-0000-4000-8000-000000000002','94000000-0000-4000-8000-000000000003','checkin'),true,'nonfinancial volunteer delegation is preserved');
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000003');
+set local role authenticated;
+select throws_ok($$select public.get_event_fee_status('97000000-0000-4000-8000-000000000002')$$,'42501','event_fee_forbidden','direct fee API rejects non-executive volunteer');
+reset role;
+select ok(not has_function_privilege('anon','public.export_executive_records(text,uuid)','execute'),'anonymous full archive is denied');
+insert into public.platform_admins(user_id,note) values('94000000-0000-4000-8000-000000000004','rollback-only admin without executive role');
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000004');
+set local role authenticated;
+select throws_ok($$select public.set_event_staff('97000000-0000-4000-8000-000000000002','94000000-0000-4000-8000-000000000003',array['fees'],statement_timestamp()+interval '1 hour')$$,'42501','fees_requires_executive','ordinary member cannot receive a new financial delegation');
+select lives_ok($$select public.set_event_staff('97000000-0000-4000-8000-000000000002','94000000-0000-4000-8000-000000000002',array['fees'],statement_timestamp()+interval '1 hour')$$,'eligible executive can receive bounded fee delegation');
+reset role;
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000003');
+set local role authenticated;
+select throws_ok($$select public.export_executive_records('minutes',auth.uid())$$,'42501','record_scope_forbidden','ordinary member cannot export');
+reset role;
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000004');
+set local role authenticated;
+select throws_ok($$select public.export_executive_records('finance',auth.uid())$$,'42501','record_scope_forbidden','platform admin or pastor is not implicitly executive');
+reset role;
+insert into private.scoped_records(id,kind,scope_id,service_year,record_date,title,body,status,entry_type,category,amount)
+values('95000000-0000-4000-8000-000000000099','finance',current_setting('finance.scope')::uuid,2025,'2025-03-01','prior year entry','preserved prior year memo','published','income','회비',50);
+insert into private.scoped_record_history(record_id,revision,snapshot,action)
+select id,revision,to_jsonb(r),'fixture.prior_year' from private.scoped_records r where id='95000000-0000-4000-8000-000000000099';
+create temporary table full_archive(kind text primary key,payload jsonb);
+grant all on full_archive to authenticated;
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000001');
+set local role authenticated;
+select throws_ok($$select public.export_executive_records('finance','94000000-0000-4000-8000-000000000003')$$,'42501','actor_changed','archive is bound to verified actor');
+select throws_ok($$select public.export_executive_records(null,auth.uid())$$,'P0001','invalid_record_kind','null kind fails closed');
+insert into full_archive values('finance',public.export_executive_records('finance',auth.uid()));
+select ok((select exists(select 1 from jsonb_array_elements(payload->'entries') x where x->>'id'='95000000-0000-4000-8000-000000000099') from full_archive where kind='finance'),'full archive includes previous years');
+select ok((select exists(select 1 from jsonb_array_elements(payload->'entries') x where x->>'event_id'='97000000-0000-4000-8000-000000000001') from full_archive where kind='finance'),'full archive includes event-specific ledger');
+select ok((select exists(select 1 from jsonb_array_elements(payload->'entries') x where nullif(x->>'reversal_of','') is not null) from full_archive where kind='finance'),'reversal entries are preserved');
+select is((select (payload->>'record_count')::integer=jsonb_array_length(payload->'entries') from full_archive where kind='finance'),true,'record count never silently truncates');
+select is((select (payload->>'history_count')::integer=jsonb_array_length(payload->'history') from full_archive where kind='finance'),true,'history count is complete');
+reset role;
+select is((select (payload->>'record_count')::bigint from full_archive where kind='finance'),(select count(*) from private.scoped_records where scope_id=current_setting('finance.scope')::uuid and kind='finance'),'all organization and event finance rows are included');
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000001',false);
+set local role authenticated;
+select throws_ok($$select public.export_executive_records('finance',auth.uid())$$,'42501',null,'fresh Google proof required for full archive');
+reset role;
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000005');
+set local role authenticated;
+insert into full_archive values('foreign',public.export_executive_records('finance',auth.uid()));
+select ok((select not exists(select 1 from jsonb_array_elements(payload->'entries') x where x->>'scope_id'=current_setting('finance.scope')) from full_archive where kind='foreign'),'foreign executive cannot export this church');
+reset role;
+insert into private.scoped_records(id,kind,scope_id,service_year,record_date,title,body,status,deleted_at)
+values('95000000-0000-4000-8000-000000000098','minutes',current_setting('finance.scope')::uuid,2025,'2025-03-01','preserved meeting',repeat('긴',50000),'published',clock_timestamp());
+select pg_temp.finance_actor('94000000-0000-4000-8000-000000000002');
+set local role authenticated;
+insert into full_archive values('minutes',public.export_executive_records('minutes',auth.uid()));
+select ok((select exists(select 1 from jsonb_array_elements(payload->'entries') x where x->>'id'='95000000-0000-4000-8000-000000000098' and length(x->>'body')=50000 and x->>'deleted_at' is not null) from full_archive where kind='minutes'),'full minutes preserve long body and soft-deletion markers');
+reset role;
+update auth.sessions set not_after=statement_timestamp()-interval '1 minute' where id='94000000-0000-4000-8000-000000000002';
+set local role authenticated;
+select throws_ok($$select public.export_executive_records('minutes',auth.uid())$$,'42501','live_session_required','revoked or expired session cannot download');
+reset role;
+update auth.sessions set not_after=null where id='94000000-0000-4000-8000-000000000002';
+insert into private.scoped_records(id,kind,scope_id,service_year,record_date,title,body,status)
+select gen_random_uuid(),'minutes',current_setting('finance.scope')::uuid,2025,'2025-01-01','rollback-only limit fixture','','draft' from generate_series(1,10001);
+set local role authenticated;
+select throws_ok($$select public.export_executive_records('minutes',auth.uid())$$,'P0001','full_export_too_large_no_partial_file','oversized archive rejects rather than returning a partial file');
+reset role;
 do $tap_gate$
 declare lines text[];
 begin

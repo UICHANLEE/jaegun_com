@@ -7,10 +7,20 @@ export interface RecordScope { scope_id: string; organization_id: string | null;
 export interface ScopedRecord { id: string; kind: RecordKind; scope_id: string; event_id: string | null; record_date: string; service_year: number; title: string; body: string; status: 'draft'|'published'; entry_type: 'income'|'expense'|null; category: string|null; amount: number|null; currency: 'KRW'; revision: number; source_operation_id: string|null; reversal_of: string|null; deleted_at?:string|null; fee_user_id?:string|null; fee_occurrence_id?:string|null; receipts?: {id:string;provider:'supabase'|'r2'}[] }
 export interface RecordHistory { revision:number; action:string; reason:string|null; occurred_at:string; actor_id?:string|null; snapshot:ScopedRecord & {receipt_id?:string} }
 export interface FinanceReport { scope_id:string; event_id:string|null; starts_on:string; ends_on:string; generated_at:string; currency:string; entries:ScopedRecord[]; history:RecordHistory[]; income:number; expense:number; closed:boolean }
+export interface FullRecordsExport { format:'jaegun-records-v1';kind:RecordKind;generated_at:string;scope_count:number;record_count:number;history_count:number;entries:(ScopedRecord & {scope_label:string;event_title:string|null})[];history:RecordHistory[] }
+export async function downloadAllRecords(kind:RecordKind,actorID:string,isCurrent:()=>boolean) {
+ const report=await recordsRPC<FullRecordsExport>('export_executive_records',{p_kind:kind,p_expected_actor_id:actorID});
+ if(!isCurrent())return;
+ const {downloadFullRecordsWorkbook}=await import('./recordArchiveSpreadsheet');
+ if(isCurrent())downloadFullRecordsWorkbook(report);
+}
 export async function recordsRPC<T>(name:string, params:Record<string,unknown> = {}):Promise<T> {
  if (!supabase) throw new Error('서버 연결을 사용할 수 없습니다.');
  const {data,error} = await supabase.rpc(name,params);
- if (error) throw new Error(error.message.includes('reauth') || error.message.includes('aal2') ? '최근 5분 이내 Google 본인 확인 후 저장을 직접 다시 눌러 주세요.' : error.message);
+ if (error) {
+  if(error.message.includes('full_export_too_large_no_partial_file'))throw new Error('전체 기록이 다운로드 한도를 초과해 일부 파일을 만들지 않았습니다. 관리자에게 대용량 내보내기를 요청해 주세요.');
+  throw new Error(error.message.includes('reauth') || error.message.includes('aal2') || error.message.includes('recent_google_authentication_required') ? '최근 5분 이내 Google 본인 확인 후 작업 버튼을 직접 다시 눌러 주세요.' : error.message);
+ }
  return data as T;
 }
 export async function scopesForRecordsActor(actorID:string) {

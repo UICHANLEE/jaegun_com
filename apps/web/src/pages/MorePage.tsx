@@ -3,6 +3,7 @@ import { useAppData } from "../data/AppDataProvider";
 import { canManageChurch, resolveAppBranch } from "../components/access";
 import { PageIntro } from "../components/ui";
 import { AppearancePicker } from '../components/AppearancePicker';
+import { RecordAccessLinks } from './ScopedRecordsAccessLinks';
 
 export function MorePage() {
   const { viewer } = useAppData();
@@ -14,10 +15,7 @@ export function MorePage() {
       <PageIntro eyebrow="공동체 도구" title="더보기" description="조직·임원 업무와 내 계정 설정을 확인하세요." />
       <section className="appearance-panel"><h2>화면 설정</h2><p>시스템 설정을 따르거나 편한 화면 모드를 선택하세요. 이 기기에만 저장됩니다.</p><AppearancePicker /></section>
       {manager ? <section className="card"><h2>{managementLabel}</h2><Link className="button button--secondary" to="/manage/home">관리 화면 열기</Link></section> : null}
-      <section className="card"><h2>회의록·회계</h2><nav className="community-shortcuts" aria-label="임원 기록">
-        <Link to="/app/records/minutes">회의록 작성·조회</Link>
-        <Link to="/app/records/finance">회계 장부·영수증·결산</Link>
-      </nav><p>총회·노회·교회·행사별 권한과 연도별 직책을 서버에서 확인합니다. 메뉴가 보이는 것만으로 열람·작성 권한이 부여되지 않습니다.</p></section>
+      <RecordAccessLinks />
       <section className="card"><h2>공동체</h2><nav className="community-shortcuts" aria-label="공동체 도구">
         <Link to="/app/churches">우리 교회</Link>
         <Link to="/app/organizations">임원실·조직도</Link>

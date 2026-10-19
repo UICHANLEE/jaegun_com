@@ -52,7 +52,7 @@ export async function eventFieldRPC<T>(name: string, args: Record<string, unknow
  const {data,error} = await (signal ? request.abortSignal(signal) : request);
  const {data:current}=await supabase.auth.getSession();
  if(signal?.aborted||current.session?.access_token!==token)throw Object.assign(new Error('세션이 변경되어 이전 응답을 폐기했습니다. 다시 불러와 주세요.'),{code:'SESSION_CHANGED'});
- if(error) throw Object.assign(new Error(error.message),{code:error.code});
+ if(error) throw Object.assign(new Error(error.message==='fees_requires_executive'?'회비 담당 권한은 해당 조직의 활성 임원에게만 부여할 수 있습니다.':error.message),{code:error.code});
  validateFieldResponse(name,data);
  return data as T;
 }

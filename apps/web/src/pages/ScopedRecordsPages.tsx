@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useAppData } from '../data/AppDataProvider';
 import { supabase } from '../data/supabase';
-import { downloadFinanceReport, encodeReceipt, recordsRPC, receiptURL, removeReceipt, scopeKey, scopesForRecordsActor, type FinanceReport, type RecordHistory, type RecordKind, type RecordScope, type ScopedRecord } from '../data/scopedRecords';
+import { downloadAllRecords, downloadFinanceReport, encodeReceipt, recordsRPC, receiptURL, removeReceipt, scopeKey, scopesForRecordsActor, type FinanceReport, type RecordHistory, type RecordKind, type RecordScope, type ScopedRecord } from '../data/scopedRecords';
 import { getServiceDateValue } from '../serviceTime';
 import { Link } from 'react-router-dom';
 import { ReceiptUploadReview } from './ScopedRecordsReceiptReview';
@@ -50,6 +50,7 @@ export function ScopedRecordsPage({kind,scopeId,eventId}:{kind:RecordKind;scopeI
  await act(async()=>{await recordsRPC('save_scoped_record', { p_id:d.id,p_scope_id:d.scope_id,p_event_id:d.event_id,p_kind:kind,p_expected_revision:d.revision,p_record_date:d.record_date,p_title:d.title,p_body:d.body,p_status:d.status,p_entry_type:d.entry_type,p_category:d.category,p_amount:d.amount,p_currency:d.currency,p_operation_id:operationID, p_expected_actor_id: actor });if(current(generation))setDraft(null);await load();});}
  async function cancel(row:ScopedRecord){if(!canWrite||!reason.trim())return;await act(async()=>{await recordsRPC('delete_scoped_record', { p_id:row.id,p_expected_revision:row.revision,p_operation_id:operationID,p_reason:reason, p_expected_actor_id: actor });setOperationID(crypto.randomUUID());setReason('');await load();});}
  async function exportReport(close:boolean){if(!scope)return;if(close&&!window.confirm('선택 기간을 마감하면 해당 기간 전표를 수정할 수 없습니다. 마감하시겠습니까?'))return;const generation=epoch.current;await act(async()=>{const result=await recordsRPC<FinanceReport>('export_finance_report',{p_scope_id:scope.scope_id,p_event_id:scope.event_id,p_starts_on:reportStart,p_ends_on:reportEnd,p_close:close,p_expected_actor_id:actor});if(current(generation))await downloadFinanceReport(result);});}
+ if(!scopesLoading&&!error&&!scopes.length&&gate)return <section className="page"><h1>임원 전용 기록</h1><p>회의록과 회계 장부는 서버에서 확인된 활성 임원만 이용할 수 있습니다.</p><Link to="/app/more">더보기로 돌아가기</Link></section>;
  if(!gate)return <section className="page"><h1>임원 기록</h1><p>현재 동의와 활성 임원 권한이 필요합니다.</p></section>;
  return <section className="page executive-ops"><header><Link to="/">공동체로</Link><h1>{kind==='minutes'?'회의록':'회계 장부'}</h1><p>조직·행사·연도별 독립 기록 · 일반 성도와 사역자에게 공개되지 않습니다.</p></header>
  {error&&<div role="alert" className="error-banner">{error}<button onClick={()=>{if(scope)void load();else setSessionRevision(value=>value+1);}} disabled={busy}>처리 결과 다시 확인</button></div>}
@@ -60,6 +61,8 @@ export function ScopedRecordsPage({kind,scopeId,eventId}:{kind:RecordKind;scopeI
  {scope&&!recordsLoading&&!error&&rows.length===0&&<p role="status">선택한 범위·연도에 등록된 {kind==='minutes'?'회의록':'회계 전표'}가 없습니다.</p>}
  {kind==='minutes'&&<label><input type="checkbox" checked={includeDeleted} onChange={e=>setIncludeDeleted(e.target.checked)}/>삭제된 회의록·보존 이력 포함</label>}
  {scope&&!canWrite&&<p role="note">읽기 전용: 현재 연도의 해당 직책만 작성할 수 있습니다.</p>}
+ {scopes.length>0&&<section><button className="button button--secondary" disabled={busy} onClick={()=>{const generation=epoch.current;void act(()=>downloadAllRecords(kind,actor,()=>current(generation)));}}>{kind==='minutes'?'전체 회의록 다운로드':'전체 회계 장부 다운로드'}</button><p>본인에게 허용된 모든 조직·모임의 전체 연도 및 변경 이력입니다. 영수증 사진 원본은 제외합니다. 최근 Google 본인 확인이 필요합니다.</p><Link to="/app/security">Google 본인 확인 화면</Link></section>}
+ <p>회의나 모임이 열릴 때마다 기록 범위에서 해당 모임을 선택하고 날짜별로 새 기록을 남기세요.</p>
  {canWrite&&<button className="button button--primary" onClick={()=>edit()} disabled={busy}>새 {kind==='minutes'?'회의록':'전표'}</button>}
  {canWrite&&<button onClick={()=>void reauthenticateWithSocial('google',kind==='minutes'?'/manage/minutes':'/manage/ledger')} disabled={busy}>Google 본인 확인</button>}
  {draft&&<form onSubmit={save} className="executive-ops__form"><fieldset disabled={busy} style={{border:0,padding:0,margin:0,minWidth:0}}><h2>{draft.revision?'수정':'새 기록'}</h2><label>날짜<input type="date" value={draft.record_date} onChange={e=>change({record_date:e.target.value})} required/></label><label>제목<input value={draft.title} maxLength={kind==='minutes'?200:500} onChange={e=>change({title:e.target.value})} required/></label><label>{kind==='minutes'?'회의 내용':'메모'}<textarea rows={8} value={draft.body} maxLength={50000} onChange={e=>change({body:e.target.value})} required={kind==='minutes'}/></label>

@@ -81,6 +81,7 @@ struct NativeMoreView: View {
                 NavigationLink { NativeAILandingView() } label: { Label("AI 도우미", systemImage: "sparkles") }
                 NavigationLink { NativeBibleReaderView() } label: { Label("성경 읽기", systemImage: "book") }
             }
+            NativeExecutiveRecordLinks()
             Section("내 계정") {
                 NavigationLink { NativeProfileView() } label: { Label("내 정보·설정", systemImage: "person.crop.circle") }
             }

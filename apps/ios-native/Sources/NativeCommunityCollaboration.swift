@@ -394,6 +394,9 @@ struct NativeGatheringRSVPView: View {
             Section {
                 NavigationLink("설문·배정·QR·현장 운영") { NativeEventFieldView(occurrenceID: occurrenceID) }
             }
+            if UUID(uuidString: nativeText(occurrence,"event_id")) != nil, UUID(uuidString: nativeText(occurrence,"scope_id")) != nil {
+                NativeExecutiveRecordLinks(eventID: nativeText(occurrence,"event_id"), scopeID: nativeText(occurrence,"scope_id"))
+            }
         }.navigationTitle("참석 응답").navigationBarTitleDisplayMode(.inline)
             .onAppear { waitlistPosition = (occurrence["waitlist_position"] as? NSNumber)?.intValue }
             .onChange(of: identity) { _, _ in response = nil; waitlistPosition = nil; pendingResponse = nil; operationID = UUID().uuidString; error = nil }

@@ -62,6 +62,14 @@ struct NativeExecutiveRecordsView: View {
             }
             if let error { Text(error).foregroundStyle(.red) }
             if busy { ProgressView() }
+            if !scopes.isEmpty {
+                Section("전체 기록 내려받기") {
+                    Button(kind == .minutes ? "전체 회의록 다운로드" : "전체 회계 장부 다운로드") { Task { await exportAll() } }.disabled(busy)
+                    Text("본인에게 허용된 모든 조직·모임의 전체 연도와 변경 이력입니다. 영수증 사진 원본은 제외합니다. 최근 Google 본인 확인이 필요합니다.").font(.footnote)
+                    if !canWrite { Button("Google 본인 확인") { Task { _ = await session.reauthenticateGoogle() } }.disabled(busy) }
+                    Text("회의·모임마다 기록 범위를 선택하고 해당 날짜로 새 기록을 남기세요.").font(.footnote)
+                }
+            }
             if draft != nil { editor }
             if kind == .minutes { Toggle("삭제된 회의록·보존 이력 포함", isOn: $includeDeleted) }
             ForEach(records.indices.filter { includeDeleted || nativeText(records[$0], "deleted_at").isEmpty }, id: \.self) { i in recordRow(records[i]) }
@@ -322,10 +330,60 @@ struct NativeExecutiveRecordsView: View {
             clearExport(); exportURL = url; share = NativeFinanceShare(url: url)
         }
     }
+    private func exportAll() async {
+        let generation = session.sessionGeneration; let actor = actorID
+        await perform {
+            guard let report = try await session.api.rpc("export_executive_records", body: ["p_kind": kind.rawValue, "p_expected_actor_id": actor]) as? [String: Any] else { throw NativeAPIError.invalidData }
+            guard allowed, generation == session.sessionGeneration else { return }
+            let input = try JSONSerialization.data(withJSONObject: report)
+            let data = try await Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                guard let snapshot = try JSONSerialization.jsonObject(with: input) as? [String: Any] else { throw NativeAPIError.invalidData }
+                return try NativeRecordArchiveWorkbook.data(snapshot)
+            }.value
+            guard allowed, generation == session.sessionGeneration else { return }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(kind == .minutes ? "전체회의록" : "전체회계장부")_\(UUID().uuidString).xlsx")
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            clearExport(); exportURL = url; share = NativeFinanceShare(url: url)
+        }
+    }
     private func clearExport() { if let exportURL { try? FileManager.default.removeItem(at: exportURL) }; exportURL = nil; share = nil }
     private func clearReceipt() { receiptRecord = nil; receiptImage = nil; receiptData = nil; readable = false; photo = nil; receiptApproved = false; receiptAttempted = false }
     private func resetEditor() { records = []; canWrite = false; draft = nil; history = []; preview = nil; clearReceipt() }
     private func clear() { resetEditor(); clearExport(); scopes = []; selection = ""; reason = ""; error = nil; operationID = UUID().uuidString; camera = false; photoPicker = false; closeConfirmation = false }
+}
+
+enum NativeRecordArchiveWorkbook {
+    static func parts(_ text: String) -> [String] {
+        var result: [String] = []; var chunk = ""; var count = 0
+        for scalar in text.unicodeScalars {
+            let length = scalar.value > 0xffff ? 2 : 1
+            if count + length > 30000 { result.append(chunk); chunk = ""; count = 0 }
+            chunk.unicodeScalars.append(scalar); count += length
+        }
+        if !chunk.isEmpty || result.isEmpty { result.append(chunk) }; return result
+    }
+    static func data(_ report: [String: Any]) throws -> Data {
+        guard nativeText(report,"format") == "jaegun-records-v1", ["minutes","finance"].contains(nativeText(report,"kind")),
+              let entries = report["entries"] as? [[String: Any]], let histories = report["history"] as? [[String: Any]],
+              (report["record_count"] as? NSNumber)?.intValue == entries.count,
+              (report["history_count"] as? NSNumber)?.intValue == histories.count else { throw NativeAPIError.invalidData }
+        let title = nativeText(report,"kind") == "minutes" ? "전체회의록" : "전체회계장부"
+        let rows = [["기록ID","조직","모임","연도","날짜","제목","상태","구분","분류","금액","역분개원본"]] + entries.map { r in
+            [nativeText(r,"id"),nativeText(r,"scope_label"),nativeText(r,"event_title"),String(describing:r["service_year"] ?? ""),nativeText(r,"record_date"),nativeText(r,"title"),nativeText(r,"deleted_at").isEmpty ? nativeText(r,"status") : "삭제·보존",nativeText(r,"entry_type"),nativeText(r,"category"),String(describing:r["amount"] ?? ""),nativeText(r,"reversal_of")]
+        }
+        let bodies = [["기록ID","분할번호","본문"]] + entries.flatMap { r in parts(nativeText(r,"body")).enumerated().map { i,text in [nativeText(r,"id"),String(i+1),text] } }
+        let history = [["기록ID","버전","행위","시각","사유","제목","금액"]] + histories.map { h in
+            let s = h["snapshot"] as? [String: Any] ?? [:]
+            return [nativeText(s,"id"),String(describing:h["revision"] ?? ""),nativeText(h,"action"),nativeText(h,"occurred_at"),nativeText(h,"reason"),nativeText(s,"title"),String(describing:s["amount"] ?? "")]
+        }
+        let historyBodies = [["기록ID","버전","분할번호","본문"]] + histories.flatMap { h in
+            let s = h["snapshot"] as? [String: Any] ?? [:]
+            return parts(nativeText(s,"body")).enumerated().map { i,text in [nativeText(s,"id"),String(describing:h["revision"] ?? ""),String(i+1),text] }
+        }
+        let info = [["범위","기록수","이력수","생성시각","주의"],["권한이 있는 모든 조직·모임 / 전체 연도",String(entries.count),String(histories.count),nativeText(report,"generated_at"),"삭제 보존·역분개 포함. 영수증 사진 제외. 본문 분할번호 순으로 연결."]]
+        return try NativeXLSX.write(sheets:[(name:title,rows:rows),(name:"본문",rows:bodies),(name:"변경이력",rows:history),(name:"변경본문",rows:historyBodies),(name:"내보내기안내",rows:info)])
+    }
 }
 
 @MainActor enum NativeFinanceStorage {

@@ -35,6 +35,7 @@ import type {
 } from "../data/events";
 import { confirmDiscardChanges, useUnsavedChangesWarning } from "../unsavedChanges";
 import { EventFieldPanel } from "./EventFieldPanel";
+import { RecordAccessLinks } from './ScopedRecordsAccessLinks';
 import { EventLogisticsPanel } from "./EventLogisticsPanel";
 import "./event-pages.css";
 import { calendarDays, countCalendarEvents, occursOnDay, seoulDay, shiftCalendarDay, shiftCalendarMonth } from "../eventCalendar";
@@ -358,6 +359,7 @@ export function EventDetailPage() {
                 {feedback ? <p className="event-rsvp__success" role="status">{feedback}</p> : null}
               </section>
             ) : null}
+            {viewer && mode !== "demo" ? <RecordAccessLinks eventId={occurrence.eventId} scopeId={occurrence.scopeId}/> : null}
             {viewer && mode !== "demo" ? (
               <EventFieldPanel key={`${actorKey}:${occurrence.ownResponse}`} occurrenceId={occurrence.occurrenceId}
                 startsAt={occurrence.startsAt} endsAt={occurrence.endsAt} closed={cancelled}
