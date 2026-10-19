@@ -54,6 +54,7 @@ struct NativeApprovalOperationsView: View {
             Section {
                 Text("가입 승인").font(.title2.bold()).foregroundStyle(NativePalette.ink)
                 NavigationLink("총회·노회·교회·부서 직책 신청") { NativeOfficeRequestReviewView() }
+                NavigationLink("조직 트리·명단·임원·위임 관리") { NativeGovernanceView() }
                 NavigationLink("일정·모임 운영") { NativeEventOperationsView() }
                 Text("관리자는 사역자·임원을, 교회 사역자와 임원은 소속 교회 회원을 승인합니다.").font(.subheadline).foregroundStyle(NativePalette.muted)
                 Picker("신청 역할", selection: $filter) {
@@ -122,6 +123,7 @@ struct NativeApprovalOperationsView: View {
                 }.interactiveDismissDisabled(working)
             }
             .onChange(of: actorID) { _, _ in clearPrivateState() }
+            .onChange(of: session.sessionGeneration) { _, _ in clearPrivateState() }
             .onChange(of: session.consentRequired) { _, required in if required { clearPrivateState() } }
             .onChange(of: session.signedIn) { _, signedIn in if !signedIn { clearPrivateState() } }
     }

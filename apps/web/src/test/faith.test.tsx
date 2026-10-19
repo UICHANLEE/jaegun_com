@@ -1,4 +1,3 @@
-// @ts-expect-error Node WebCrypto is provided by Vitest, not the browser type target.
 import { webcrypto } from "node:crypto";
 import { FAITH_CONSENT, parseFaithConsentStatus, verifyFaithConsentText } from "../data/faithConsent";
 import { FaithAcceptance, FaithWithdrawalPage } from "../pages/FaithConsentPages";
@@ -8,15 +7,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BIBLE_BOOKS, BIBLE_CHAPTERS, chapterID, chapterReference } from "../data/bibleCanon";
 import { parseFaithSnapshot, validateQT } from "../data/faith";
 import { FaithHomeWidget, FaithPage } from "../pages/FaithPages";
+import { faithTodayPlan } from "../data/faithPlan";
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), createPost: vi.fn(), app: { mode: "live", consentGateOpen: true as boolean | null, viewer: { profile: { id: "00000000-0000-0000-0000-000000000001" }, membership: { organizationId: "00000000-0000-0000-0000-000000000002", status: "active" } } } }));
 vi.mock("../data/AppDataProvider", () => ({ useAppData: () => ({ ...mocks.app, createPost: mocks.createPost }) }));
 vi.mock("../data/supabase", () => ({ supabase: { rpc: mocks.rpc } }));
+vi.mock("../pages/FaithBibleReader", () => ({ FaithBibleReader: () => null }));
+vi.mock("../pages/FaithCommunity", () => ({ FaithCommunitySection: () => null }));
 const snapshot = { server_today: "2026-10-14", service_year: 2026, completed_chapters: [], completed_count: 0, total_chapters: 1189, streak_days: 0, last_read_date: null, latest_private_qt: [] };
 function result(data: unknown, error: unknown = null) { const promise = Promise.resolve({ data, error }); return Object.assign(promise, { abortSignal: () => promise }); }
 beforeEach(() => { mocks.rpc.mockReset(); mocks.createPost.mockReset(); mocks.app.mode = "live"; mocks.app.consentGateOpen = true; Object.defineProperty(globalThis.crypto, "subtle", { configurable: true, value: webcrypto.subtle }); mocks.rpc.mockImplementation((name) => result(name === "get_faith_consent_status" ? { accepted: true, document: FAITH_CONSENT } : snapshot)); });
 describe("faith validation", () => {
-  it("maps exactly66books/1189 unique chapters without any Bible text", () => {
+  it("maps exactly66books/1189 unique chapter references independently of the text dataset", () => {
     expect(BIBLE_BOOKS).toHaveLength(66); expect(BIBLE_CHAPTERS).toHaveLength(1189);
     expect(chapterID(0, 1)).toBe(1); expect(chapterReference(1189)).toBe("요한계시록 22장");
     expect(chapterID(65, 23)).toBeNull(); expect(chapterReference(0)).toBe(""); expect(chapterReference(1.5)).toBe("");
@@ -37,6 +39,26 @@ describe("faith UI", () => {
     expect(await screen.findByText("2026년 내 통독")).toBeVisible();
     expect(screen.getByText(/본문은 사용하시는 성경에서/)).toBeVisible();
     expect(screen.getByText("아직 저장한 묵상이 없습니다.")).toBeVisible();
+  });
+  it("shows today's deterministic server-date targets with chapter reader links but no automatic completion", async () => {
+    render(<MemoryRouter><FaithHomeWidget /></MemoryRouter>);
+    await screen.findByText("오늘의 연간 통독 목표");
+    for (const target of faithTodayPlan(snapshot.server_today)) expect(screen.getByRole("link", { name: chapterReference(target) })).toHaveAttribute("href", `/bible?chapter=${target}`);
+    expect(mocks.rpc.mock.calls.every(([name]) => ["get_faith_consent_status", "get_faith_snapshot"].includes(name))).toBe(true);
+  });
+  it("checks only the deliberately selected daily target while retaining earlier completed chapters", async () => {
+    let stored = { ...snapshot, completed_chapters: [1], completed_count: 1, streak_days: 1, last_read_date: snapshot.server_today };
+    const target = faithTodayPlan(snapshot.server_today)[0];
+    mocks.rpc.mockImplementation((name, args) => {
+      if (name === "get_faith_consent_status") return result({ accepted: true, document: FAITH_CONSENT });
+      if (name === "set_my_reading_chapter") { stored = { ...stored, completed_chapters: [1, args.p_chapter_id], completed_count: 2 }; }
+      return result(stored);
+    });
+    render(<MemoryRouter><FaithPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: `${chapterReference(target)} · 읽음 표시` }));
+    await waitFor(() => expect(screen.getByRole("progressbar", { name: "통독 진도" })).toHaveAttribute("value", "2"));
+    expect(mocks.rpc).toHaveBeenCalledWith("set_my_reading_chapter", { p_organization_id: mocks.app.viewer.membership.organizationId, p_service_year: 2026, p_chapter_id: target, p_completed: true });
+    expect(stored.completed_chapters).toEqual([1, target]);
   });
   it("shows loadfailure and explicit retry without successstats", async () => {
     mocks.rpc.mockImplementation(() => result(null, { code: "offline" }));
@@ -83,6 +105,21 @@ describe("faith UI", () => {
     render(<MemoryRouter><FaithPage /></MemoryRouter>);
     fireEvent.click(await screen.findByRole("button", { name: "교회 게시판에 공유" }));
     expect(confirm).toHaveBeenCalled(); expect(mocks.createPost).not.toHaveBeenCalled(); confirm.mockRestore();
+    expect(mocks.rpc.mock.calls.some(([name]) => name === "share_my_qt")).toBe(false);
+  });
+  it("shares only the explicitly selected own QT via one stable server copy request", async () => {
+    const qt = { id: "00000000-0000-0000-0000-000000000003", reference: "창세기 1장", body: "선택한 묵상", created_at: "2026-10-14T01:00:00Z" };
+    mocks.rpc.mockImplementation((name) => name === "get_faith_consent_status" ? result({ accepted: true, document: FAITH_CONSENT }) : name === "share_my_qt" ? result(null, { code: "timeout" }) : result({ ...snapshot, latest_private_qt: [qt] }));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<MemoryRouter><FaithPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "교회 게시판에 공유" }));
+    await screen.findByText(/결과를 확인하지 못했습니다/);
+    fireEvent.click(screen.getByRole("button", { name: "보류된 게시판 공유 결과 확인" }));
+    await waitFor(() => expect(mocks.rpc.mock.calls.filter(([name]) => name === "share_my_qt")).toHaveLength(2));
+    const requests = mocks.rpc.mock.calls.filter(([name]) => name === "share_my_qt");
+    expect(requests[0][1]).toEqual(requests[1][1]); expect(requests[0][1].p_qt_id).toBe(qt.id);
+    expect(requests[0][1]).not.toHaveProperty("p_body"); expect(mocks.createPost).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledOnce(); confirm.mockRestore();
   });
   it("shows definitive quota refusal without trapping the user in uncertain retry", async () => {
     mocks.rpc.mockImplementation((name) => name === "get_faith_consent_status" ? result({ accepted: true, document: FAITH_CONSENT }) : name === "get_faith_snapshot" ? result(snapshot) : result(null, { message: "qt_daily_creation_limit" }));

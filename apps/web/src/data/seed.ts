@@ -1,8 +1,6 @@
 import type {
   AppDataState,
   Conversation,
-  LedgerEntry,
-  MeetingMinute,
   MembershipApplication,
   OrganizationMember,
   Organization,
@@ -235,105 +233,9 @@ export const DEMO_CONVERSATIONS: Conversation[] = demoProfiles.map((profile, ind
   unreadCount: index === 0 ? 2 : 0,
 }));
 
-export const DEMO_MEETING_MINUTES: MeetingMinute[] = [
-  {
-    id: "minute-current-1",
-    organizationId: "org-19",
-    meetingYear: DEMO_SERVICE_YEAR,
-    meetingDate: `${DEMO_SERVICE_YEAR}-08-02`,
-    title: "8월 정기 임원회",
-    body: "하반기 교회 일정과 새가족 환영 주일 준비 사항을 확인하고 담당자를 정했습니다.",
-    status: "published",
-    authorName: "최다니엘",
-    updatedAt: `${DEMO_SERVICE_YEAR}-08-02T12:30:00.000Z`,
-  },
-  {
-    id: "minute-current-2",
-    organizationId: "org-19",
-    meetingYear: DEMO_SERVICE_YEAR,
-    meetingDate: `${DEMO_SERVICE_YEAR}-07-05`,
-    title: "여름 사역 준비 회의",
-    body: "여름성경학교와 청년 연합 수련회 지원 계획, 차량 운영 및 안전 담당을 논의했습니다.",
-    status: "published",
-    authorName: "이재건",
-    updatedAt: `${DEMO_SERVICE_YEAR}-07-05T10:15:00.000Z`,
-  },
-  {
-    id: "minute-current-draft",
-    organizationId: "org-19",
-    meetingYear: DEMO_SERVICE_YEAR,
-    meetingDate: `${DEMO_SERVICE_YEAR}-08-30`,
-    title: "9월 사역 점검 회의",
-    body: "부서별 하반기 사역 진행 현황과 예산 집행 계획을 정리하고 있습니다.",
-    status: "draft",
-    authorName: "최다니엘",
-    updatedAt: `${DEMO_SERVICE_YEAR}-08-03T06:20:00.000Z`,
-  },
-  {
-    id: "minute-previous-1",
-    organizationId: "org-19",
-    meetingYear: DEMO_SERVICE_YEAR - 1,
-    meetingDate: `${DEMO_SERVICE_YEAR - 1}-12-07`,
-    title: "연말 정기 임원회",
-    body: "한 해 사역과 결산을 돌아보고 다음 연도 임원 인수인계 및 주요 일정을 확정했습니다.",
-    status: "published",
-    authorName: "이재건",
-    updatedAt: `${DEMO_SERVICE_YEAR - 1}-12-07T11:20:00.000Z`,
-  },
-];
 
-export const DEMO_LEDGER_ENTRIES: LedgerEntry[] = [
-  {
-    id: "ledger-current-1",
-    organizationId: "org-19",
-    fiscalYear: DEMO_SERVICE_YEAR,
-    entryDate: `${DEMO_SERVICE_YEAR}-08-02`,
-    entryType: "income",
-    category: "주일 헌금",
-    description: "8월 첫째 주 주일 헌금",
-    amount: 2350000,
-    authorName: "이재건",
-    updatedAt: `${DEMO_SERVICE_YEAR}-08-02T08:30:00.000Z`,
-  },
-  {
-    id: "ledger-current-2",
-    organizationId: "org-19",
-    fiscalYear: DEMO_SERVICE_YEAR,
-    entryDate: `${DEMO_SERVICE_YEAR}-08-03`,
-    entryType: "expense",
-    category: "교육부",
-    description: "여름성경학교 교재 및 준비물",
-    amount: 486000,
-    memo: "교육부 영수증 확인 완료",
-    authorName: "이재건",
-    updatedAt: `${DEMO_SERVICE_YEAR}-08-03T04:10:00.000Z`,
-  },
-  {
-    id: "ledger-current-3",
-    organizationId: "org-19",
-    fiscalYear: DEMO_SERVICE_YEAR,
-    entryDate: `${DEMO_SERVICE_YEAR}-07-28`,
-    entryType: "expense",
-    category: "시설 관리",
-    description: "예배당 냉방기 정기 점검",
-    amount: 180000,
-    authorName: "이재건",
-    updatedAt: `${DEMO_SERVICE_YEAR}-07-28T09:00:00.000Z`,
-  },
-  {
-    id: "ledger-previous-1",
-    organizationId: "org-19",
-    fiscalYear: DEMO_SERVICE_YEAR - 1,
-    entryDate: `${DEMO_SERVICE_YEAR - 1}-12-28`,
-    entryType: "expense",
-    category: "구제 사역",
-    description: "연말 지역 이웃 나눔 물품",
-    amount: 720000,
-    memo: "전년도 결산 반영 완료",
-    authorName: "이재건",
-    updatedAt: `${DEMO_SERVICE_YEAR - 1}-12-28T08:40:00.000Z`,
-  },
-];
+
+
 
 export function createDemoState(): AppDataState {
   return {
@@ -401,7 +303,5 @@ export function createDemoState(): AppDataState {
         href: "/app/posts/post-retreat",
       },
     ],
-    meetingMinutes: DEMO_MEETING_MINUTES,
-    ledgerEntries: DEMO_LEDGER_ENTRIES,
   };
 }

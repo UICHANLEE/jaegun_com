@@ -2,7 +2,7 @@ import { Fragment, FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAppData } from "../data/AppDataProvider";
 import { supabase } from "../data/supabase";
-import { channelCommand, channelError, clearChannelMediaCache, fetchChannels, fetchChannelThread, type ChannelMessage, type ChannelSnapshot, type ChannelThreadSnapshot } from "../data/channels";
+import { channelCommand, channelError, clearChannelMediaCache, fetchChannels, fetchChannelThread, updateCommunityChannel, type ChannelMessage, type ChannelSnapshot, type ChannelThreadSnapshot } from "../data/channels";
 import { ErrorBanner, PageIntro, formatRelativeKorean } from "../components/ui";
 import { BlockUserControl, ReportActionLink } from "../components/SafetyControls";
 import { ProtectedImage } from "../components/ProtectedImage";
@@ -63,6 +63,10 @@ function ChannelWorkspace({ actorId, organizationId, channelId }: { actorId: str
   const [sendUncertain, setSendUncertain] = useState(false);
   const [targetId, setTargetId] = useState("");
   const [confirmation, setConfirmation] = useState<{ action: string; userId?: string; label: string } | null>(null);
+  const [channelEdit, setChannelEdit] = useState<{ name: string; description: string; expectedName: string; expectedDescription: string } | null>(null);
+  const [channelEditUncertain, setChannelEditUncertain] = useState(false);
+  const channelEditRequest = useRef<typeof channelEdit>(null);
+  const leaveOperations = useRef(new Map<string, string>());
   const busy = useRef(false);
   const alive = useRef(true);
   const operation = useRef<{ signature: string; id: string } | null>(null);
@@ -180,9 +184,11 @@ function ChannelWorkspace({ actorId, organizationId, channelId }: { actorId: str
     if (busy.current || !alive.current) return false;
     busy.current = true; setPending(true); setError(null);
     try {
-      await channelCommand(actorId, action, id, payload);
+      if (action === "leave" && !leaveOperations.current.has(id)) leaveOperations.current.set(id, crypto.randomUUID());
+      await channelCommand(actorId, action, id, action === "leave" ? { ...payload, operationId: leaveOperations.current.get(id) } : payload);
       if (!alive.current) return false;
       setConfirmation(null); setRefresh((value) => value + 1);
+      if (action === "leave") leaveOperations.current.delete(id);
       if (destination) navigate(destination);
       return true;
     } catch (reason) {
@@ -192,6 +198,30 @@ function ChannelWorkspace({ actorId, organizationId, channelId }: { actorId: str
       busy.current = false;
       if (alive.current) setPending(false);
     }
+  }
+  async function saveChannelMetadata(event: FormEvent) {
+    event.preventDefault();
+    if (busy.current || !alive.current || !channelId || !channelEdit || !manager) return;
+    busy.current = true; setPending(true); setError(null);
+    const request = channelEditRequest.current ?? { ...channelEdit };
+    channelEditRequest.current = request; setChannelEditUncertain(true);
+    try {
+      await updateCommunityChannel(actorId, channelId, request);
+      if (!alive.current) return;
+      channelEditRequest.current = null; setChannelEditUncertain(false); setChannelEdit(null);
+      setRefresh((value) => value + 1);
+    } catch (reason) {
+      if (!alive.current) return;
+      const code = reason && typeof reason === "object" && "code" in reason ? String(reason.code) : "";
+      if (code === "40001") {
+        channelEditRequest.current = null; setChannelEditUncertain(false); setChannelEdit(null);
+        setRefresh((value) => value + 1);
+        setError("다른 참여자가 채널 정보를 변경했습니다. 최신 내용을 확인한 뒤 다시 수정해 주세요.");
+      } else {
+        if (["22023", "23514", "42501"].includes(code)) { channelEditRequest.current = null; setChannelEditUncertain(false); }
+        setError("채널 변경 결과를 확인하지 못했습니다. 불확실한 요청은 같은 내용으로 다시 확인해 주세요.");
+      }
+    } finally { busy.current = false; if (alive.current) setPending(false); }
   }
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -370,7 +400,15 @@ function ChannelWorkspace({ actorId, organizationId, channelId }: { actorId: str
     {channelId && channel && snapshot ? <>
       <section className="channel-panel"><p>{channel.description}</p><div className="channel-status-row"><p>{channel.visibility === "private" ? "초대 전용" : "우리 교회 공개"} · {channel.archived ? "보관된 채널 · 읽기 전용" : realtimeStatus==="live" ? "실시간 연결됨" : realtimeStatus==="connecting" ? "실시간 연결 중 · 30초 간격 안전 확인" : "실시간 연결 지연 · 30초 간격으로 확인 중"}</p>
         <label>채널 알림<select aria-label="채널 알림" value={channel.notificationMode} disabled={pending} onChange={(event)=>void setNotificationMode(event.target.value as "all"|"mentions"|"none")}><option value="all">모든 새 메시지</option><option value="mentions">태그·내 글의 답글만</option><option value="none">알림 끄기</option></select></label></div>
+        <Link className="button button--secondary" to={`/app/meetings?channel=${encodeURIComponent(channelId)}`}>채널 회의</Link>
         <details><summary>참여자와 채널 관리</summary><p>채널 관리자는 교회 회원 승인이나 회계 권한을 받지 않습니다.</p>
+          {manager && !channel.archived ? channelEdit ? <form className="channel-form" onSubmit={saveChannelMetadata}>
+            <label>채널 이름<input required minLength={2} maxLength={60} readOnly={channelEditUncertain} value={channelEdit.name} onChange={(event) => setChannelEdit({ ...channelEdit, name: event.target.value })} /></label>
+            <label>채널 소개<textarea maxLength={500} readOnly={channelEditUncertain} value={channelEdit.description} onChange={(event) => setChannelEdit({ ...channelEdit, description: event.target.value })} /></label>
+            {channelEditUncertain ? <p role="status">같은 변경 요청으로 결과를 확인합니다. 공개 범위·참여자 권한은 바꾸지 않습니다.</p> : null}
+            <button className="button button--primary" disabled={pending || channelEdit.name.trim().length < 2}>{channelEditUncertain ? "같은 변경 결과 확인" : "이름·소개 저장"}</button>
+            <button type="button" className="button button--quiet" disabled={pending || channelEditUncertain} onClick={() => setChannelEdit(null)}>취소</button>
+          </form> : <button className="button button--secondary" disabled={pending} onClick={() => setChannelEdit({ name: channel.name, description: channel.description, expectedName: channel.name, expectedDescription: channel.description })}>이름·소개 수정</button> : null}
           <ul className="channel-member-list">{snapshot?.members?.map((member) => <li key={member.userId}><span>{member.name} · {member.userId===channel.ownerId ? "소유자" : member.role==="manager" ? "채널 관리자" : "참여자"}{member.status==="invited" ? " (초대 대기)" : ""}</span>
             {manager && member.userId!==actorId && member.userId!==channel.ownerId && !channel.archived ? <div>
               {owner && member.status==="active" ? <><button className="button button--quiet" disabled={pending} onClick={() => void execute("manager",channelId,{userId:member.userId,role:member.role==="manager" ? "member" : "manager"})}>{member.role==="manager" ? "관리자 해제" : "관리자 지정"}</button><button className="button button--quiet" disabled={pending} onClick={() => setConfirmation({action:"transfer",userId:member.userId,label:`${member.name}님에게 채널 소유권을 넘길까요?`})}>소유권 이전</button></> : null}

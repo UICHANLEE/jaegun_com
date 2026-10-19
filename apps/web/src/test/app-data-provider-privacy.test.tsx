@@ -22,8 +22,6 @@ function ProviderProbe() {
           conversationIds: data.conversations.map((item) => item.id),
           messageConversationIds: Object.keys(data.messagesByConversation),
           notificationIds: data.notifications.map((item) => item.id),
-          minuteIds: data.meetingMinutes.map((item) => item.id),
-          ledgerIds: data.ledgerEntries.map((item) => item.id),
         })}
       </output>
     </>
@@ -54,8 +52,8 @@ describe("AppDataProvider private-state boundaries", () => {
         }],
       },
       notifications: [{ ...contaminated.notifications[0], id: "private-remote-notification" }],
-      meetingMinutes: [{ ...contaminated.meetingMinutes[0], id: "private-remote-minute" }],
-      ledgerEntries: [{ ...contaminated.ledgerEntries[0], id: "private-remote-ledger" }],
+      meetingMinutes: [{ id: "private-remote-minute" }],
+      ledgerEntries: [{ id: "private-remote-ledger" }],
     }));
 
     render(<AppDataProvider><ProviderProbe /></AppDataProvider>);
@@ -89,8 +87,6 @@ describe("AppDataProvider private-state boundaries", () => {
       "conversationIds",
       "messageConversationIds",
       "notificationIds",
-      "minuteIds",
-      "ledgerIds",
     ]) {
       expect(signedOut[key]).toEqual([]);
     }

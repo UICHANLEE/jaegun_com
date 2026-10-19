@@ -51,20 +51,16 @@ beforeEach(() => {
 });
 
 describe("event route integration", () => {
-  it("opens the signed-in event calendar with the shared AI tab and no extra calendar tab", async () => {
+  it("opens the signed-in calendar with the five primary mobile destinations", async () => {
     setOrdinaryMember();
     const { container } = renderApp("/app/events");
+    await screen.findByRole("button", { name: "다음 달" }, { timeout: LAZY_ROUTE_TIMEOUT_MS });
 
-    expect(await screen.findByRole(
-      "heading",
-      { name: "다가오는 일정" },
-      { timeout: LAZY_ROUTE_TIMEOUT_MS },
-    )).toBeInTheDocument();
-    expect(await screen.findByText("공동체 연합 기도회")).toBeInTheDocument();
     const bottomNavigation = container.querySelector(".bottom-nav");
     expect(bottomNavigation).not.toBeNull();
-    expect(within(bottomNavigation as HTMLElement).getAllByRole("link")).toHaveLength(6);
-    expect(within(bottomNavigation as HTMLElement).getByRole("link", { name: "AI" })).toHaveAttribute("href", "/app/ai");
+    expect(within(bottomNavigation as HTMLElement).getAllByRole("link")).toHaveLength(5);
+    expect(within(bottomNavigation as HTMLElement).getByRole("link", { name: "모임" })).toHaveAttribute("href", "/app/events");
+    expect(within(bottomNavigation as HTMLElement).getByRole("link", { name: "더보기" })).toHaveAttribute("href", "/app/more");
     expect(within(bottomNavigation as HTMLElement).queryByRole("link", { name: /일정/ })).not.toBeInTheDocument();
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 

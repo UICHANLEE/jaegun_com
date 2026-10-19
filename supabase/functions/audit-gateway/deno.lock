@@ -1,0 +1,16 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:ipaddr.js@2.2.0": "2.2.0"
+  },
+  "npm": {
+    "ipaddr.js@2.2.0": {
+      "integrity": "sha512-Ag3wB2o37wslZS19hZqorUnrnzSkpOVy+IiiDEiTqNubEYpYuHWIf6K4psgN2ZWKExS4xhVCrRVfb/wfW8fWJA=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:ipaddr.js@2.2.0"
+    ]
+  }
+}

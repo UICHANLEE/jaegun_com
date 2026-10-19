@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import App from "../App";
@@ -74,8 +74,10 @@ describe("department officer management", () => {
     fireEvent.click(screen.getByRole("button", { name: /저장/ }));
 
     expect(await screen.findByText("청소년부 회계 담당자를 저장했습니다.")).toBeInTheDocument();
-    const updatedTreasurerCard = screen.getByText("회계").closest("article")!;
-    expect(within(updatedTreasurerCard).getByText("박은찬")).toBeInTheDocument();
+    await waitFor(() => {
+      const updatedTreasurerCard = screen.getByText("회계").closest("article")!;
+      expect(within(updatedTreasurerCard).getByText("박은찬")).toBeInTheDocument();
+    });
 
     const yearSelector = screen.getByRole("combobox", { name: "적용 연도" });
     const nextYear = Number((yearSelector as HTMLSelectElement).value) + 1;

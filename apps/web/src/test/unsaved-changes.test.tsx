@@ -6,6 +6,15 @@ import { AppDataProvider } from "../data/AppDataProvider";
 import { createDemoState, DEMO_VIEWER } from "../data/seed";
 import { getServiceYear } from "../serviceTime";
 import { UNSAVED_CHANGES_MESSAGE, useUnsavedChangesWarning } from "../unsavedChanges";
+import type * as RecordService from '../data/scopedRecords';
+
+vi.mock('../data/scopedRecords', async () => {
+  const actual = await vi.importActual<typeof RecordService>('../data/scopedRecords');
+  return { ...actual,
+    scopesForRecordsActor: async () => [{ scope_id: 'record-scope', organization_id: 'org-19', event_id: null, label: '권한 확인된 테스트 교회', can_minutes: true, can_finance: true }],
+    recordsRPC: async (name: string, parameters: Record<string, unknown>) => name === 'get_scoped_records' ? { rows: [], can_write: parameters.p_year === getServiceYear() } : [],
+  };
+});
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
 const LAZY_ROUTE_TIMEOUT_MS = 5_000;
@@ -101,19 +110,19 @@ describe("unsaved form protection", () => {
 
     expect(await screen.findByRole(
       "heading",
-      { name: "임원 회의 기록" },
+      { name: "회의록" },
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     )).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "회의록 작성" }));
-    fireEvent.change(screen.getByLabelText(/회의 제목/), { target: { value: "작성 중인 회의록" } });
-    fireEvent.click(screen.getByRole("button", { name: "작성 폼 닫기" }));
+    fireEvent.click((await screen.findByRole("button", { name: "새 회의록" })));
+    fireEvent.change(screen.getByLabelText("제목"), { target: { value: "작성 중인 회의록" } });
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
 
     expect(confirm).toHaveBeenCalledWith(UNSAVED_CHANGES_MESSAGE);
-    expect(screen.getByText("새 회의록")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "새 기록" })).toBeInTheDocument();
 
     confirm.mockReturnValue(true);
-    fireEvent.click(screen.getByRole("button", { name: "작성 폼 닫기" }));
-    expect(screen.queryByText("새 회의록")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "취소" }));
+    expect(screen.queryByRole("heading", { name: "새 기록" })).not.toBeInTheDocument();
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("blocks ManagerShell navigation links until the dirty meeting form is confirmed", async () => {
@@ -123,15 +132,15 @@ describe("unsaved form protection", () => {
 
     expect(await screen.findByRole(
       "heading",
-      { name: "임원 회의 기록" },
+      { name: "회의록" },
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     )).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "회의록 작성" }));
-    fireEvent.change(screen.getByLabelText(/회의 제목/), { target: { value: "이동 전에 지켜야 할 회의록" } });
+    fireEvent.click((await screen.findByRole("button", { name: "새 회의록" })));
+    fireEvent.change(screen.getByLabelText("제목"), { target: { value: "이동 전에 지켜야 할 회의록" } });
     fireEvent.click(screen.getAllByRole("link", { name: "운영 홈" })[0]);
 
     expect(confirm).toHaveBeenCalledWith(UNSAVED_CHANGES_MESSAGE);
-    expect(screen.getByRole("heading", { name: "임원 회의 기록" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "회의록" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("이동 전에 지켜야 할 회의록")).toBeInTheDocument();
 
     confirm.mockReturnValue(true);
@@ -151,22 +160,22 @@ describe("unsaved form protection", () => {
 
     expect(await screen.findByRole(
       "heading",
-      { name: "교회 재정 기록" },
+      { name: "회계 장부" },
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     )).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "항목 등록" }).at(-1)!);
-    fireEvent.change(screen.getByLabelText(/적요/), { target: { value: "작성 중인 장부 항목" } });
+    fireEvent.click(await screen.findByRole("button", { name: "새 전표" }));
+    fireEvent.change(screen.getByLabelText("제목"), { target: { value: "작성 중인 장부 항목" } });
 
-    const yearSelector = screen.getByRole("combobox", { name: "회계 연도" });
+    const yearSelector = screen.getByRole("spinbutton", { name: "연도" });
     fireEvent.change(yearSelector, { target: { value: String(currentYear - 1) } });
     expect(confirm).toHaveBeenCalledWith(UNSAVED_CHANGES_MESSAGE);
-    expect(yearSelector).toHaveValue(String(currentYear));
-    expect(screen.getByText("새 장부 항목")).toBeInTheDocument();
+    expect(yearSelector).toHaveValue(currentYear);
+    expect(screen.getByText("새 기록")).toBeInTheDocument();
 
     confirm.mockReturnValue(true);
     fireEvent.change(yearSelector, { target: { value: String(currentYear - 1) } });
-    expect(yearSelector).toHaveValue(String(currentYear - 1));
-    expect(screen.queryByText("새 장부 항목")).not.toBeInTheDocument();
+    expect(yearSelector).toHaveValue(currentYear - 1);
+    expect(screen.queryByText("새 기록")).not.toBeInTheDocument();
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 });
 

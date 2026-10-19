@@ -47,6 +47,7 @@ import {
   PageIntro,
 } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
+import { BoardAnonymousBlocks } from "./BoardAnonymousBlocks";
 import {
   nativePushRegistrationAvailable,
   registerCurrentNativePushDevice,
@@ -1236,6 +1237,7 @@ export function BlockedUsersPage() {
           {actionError ? <ErrorBanner message={actionError} /> : null}
         </section>
       ) : <EmptyState icon={<UserMinus />} title="차단한 사용자가 없어요" description="사용자 프로필이나 채팅의 안전 메뉴에서 차단할 수 있습니다." />}
+      <BoardAnonymousBlocks />
     </div>
   );
 }

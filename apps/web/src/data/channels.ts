@@ -137,3 +137,18 @@ export async function channelCommand(actorId: string, action: string, channelId:
     return data;
   } finally { clearTimeout(timeout); }
 }
+
+export async function updateCommunityChannel(actorId: string, channelId: string, edit: { name: string; description: string; expectedName: string; expectedDescription: string }) {
+  if (!supabase) throw new Error("channel_unavailable");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const { data, error } = await supabase.rpc("update_community_channel", {
+      p_channel_id: channelId, p_expected_actor_id: actorId,
+      p_name: edit.name.trim(), p_description: edit.description,
+      p_expected_name: edit.expectedName, p_expected_description: edit.expectedDescription,
+    }).abortSignal(controller.signal);
+    if (error) throw error;
+    return data;
+  } finally { clearTimeout(timeout); }
+}

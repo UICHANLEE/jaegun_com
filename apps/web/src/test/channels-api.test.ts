@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const api=vi.hoisted(() => ({rpc:vi.fn(),abort:vi.fn(),signed:vi.fn()}));
 vi.mock("../data/supabase",() => ({supabase:{rpc:api.rpc,storage:{from:()=>({createSignedUrl:api.signed})}}}));
-import { channelCommand, channelError, channelRichCommand, clearChannelMediaCache, fetchChannels, fetchChannelThread } from "../data/channels";
+import { channelCommand, channelError, channelRichCommand, clearChannelMediaCache, fetchChannels, fetchChannelThread, updateCommunityChannel } from "../data/channels";
 beforeEach(() => {vi.resetAllMocks();clearChannelMediaCache();api.rpc.mockReturnValue({abortSignal:api.abort});api.abort.mockResolvedValue({data:{actorId:"a",channels:[],messages:[],members:[]},error:null});api.signed.mockResolvedValue({data:{signedUrl:"https://signed.test/channel"},error:null});});
 describe("channel API boundaries",()=>{
   it("binds a snapshot to the requesting actor",async()=>{
@@ -24,6 +24,17 @@ describe("channel API boundaries",()=>{
     api.abort.mockResolvedValueOnce({data:{id:"message"},error:null});
     await channelRichCommand("a","react","channel",{expectedActorId:"b",messageId:"message",emoji:"🙏"});
     expect(api.rpc).toHaveBeenCalledWith("channel_rich_command",expect.objectContaining({p_payload:expect.objectContaining({expectedActorId:"a"})}));
+  });
+  it("binds metadata edits to the actor and exact previous revision",async()=>{
+    await updateCommunityChannel("actor","channel",{name:"  새 이름  ",description:"소개",expectedName:"이전 이름",expectedDescription:"이전 소개"});
+    expect(api.rpc).toHaveBeenCalledWith("update_community_channel",{
+      p_channel_id:"channel",p_expected_actor_id:"actor",p_name:"새 이름",p_description:"소개",p_expected_name:"이전 이름",p_expected_description:"이전 소개",
+    });
+  });
+  it("propagates metadata conflicts instead of silently overwriting",async()=>{
+    const conflict={code:"40001",message:"channel_revision_conflict"};
+    api.abort.mockResolvedValueOnce({data:null,error:conflict});
+    await expect(updateCommunityChannel("actor","channel",{name:"수정",description:"",expectedName:"이전",expectedDescription:""})).rejects.toEqual(conflict);
   });
   it("signs only server-returned channel attachment paths for sixty seconds",async()=>{
     api.abort.mockResolvedValueOnce({data:{actorId:"a",channels:[],members:[],messages:[{id:"m",seq:1,body:"",senderId:"a",senderName:"가",createdAt:"now",attachments:[{id:"x",path:"00000000-0000-4000-8000-000000000001/channels/00000000-0000-4000-8000-000000000002/00000000-0000-4000-8000-000000000003.jpg",kind:"image",mimeType:"image/jpeg",byteSize:1,fileName:"a.jpg"}]}]},error:null});

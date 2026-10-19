@@ -1,4 +1,5 @@
 import "@fontsource-variable/noto-sans-kr";
+import './appearance';
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";

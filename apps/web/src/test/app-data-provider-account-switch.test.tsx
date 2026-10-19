@@ -352,13 +352,15 @@ const remote = vi.hoisted(() => {
     },
     rpc(name: string, args: Record<string, unknown> = {}) {
       calls.push({ name, args });
+      if (name === "list_community_posts") return resultBuilder(() => tableResult("posts"));
+      if (name === "list_community_comments") return resultBuilder(() => ({ data: [], error: null }));
       if (name === "send_message_batch") return sendHandler(args);
       if (name === "reconcile_message_batch") return reconcileMessageHandler(args);
       if (name === "publish_owned_post") return publishHandler(args);
       if (name === "reconcile_post_operation") return Promise.resolve({ data: { status: "draft" }, error: null });
       if (name === "prepare_post_media_cleanup") return prepareCleanupHandler(args);
       if (name === "abandon_direct_media_objects") return abandonDirectHandler(args);
-      if (name === "save_owned_post_draft") {
+      if (name === "save_community_post_draft") {
         if (saveHandler) return saveHandler(args);
         return Promise.resolve({
           data: {
@@ -449,6 +451,7 @@ function Probe() {
       <output data-testid="membership">{data.viewer?.membership?.id ?? "none"}</output>
       <output data-testid="consent-gate">{String(data.consentGateOpen)}</output>
       <output data-testid="protected-media-url">{protectedMediaUrl}</output>
+      <output data-testid="published-post">{JSON.stringify(data.posts.find((post) => post.id === "10000000-0000-4000-8000-000000000001") ?? null)}</output>
       <output data-testid="post-media-url">{
         data.posts.find((post) => post.id === "post-with-media")?.media[0]?.url ?? "none"
       }</output>
@@ -870,6 +873,7 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     await waitFor(() => expect(screen.getByTestId("viewer")).toHaveTextContent("user-b"));
     await act(async () => firstPublish.resolve({ data: null, error: new Error("response lost") }));
     await waitFor(() => expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0));
+    expect(screen.getByTestId("published-post")).toHaveTextContent("null");
 
     remote.publishHandler = async () => ({
       data: { status: "published", published_at: "2026-08-05T01:00:00.000Z" },
@@ -880,6 +884,11 @@ describe("AppDataProvider account-switch operation boundaries", () => {
     fireEvent.click(screen.getByRole("button", { name: "publish" }));
 
     await waitFor(() => expect(remote.calls.filter((call) => call.name === "publish_owned_post")).toHaveLength(2));
+    await waitFor(() => {
+      expect(screen.getByTestId("published-post")).toHaveTextContent("최신 제목");
+      expect(screen.getByTestId("published-post")).toHaveTextContent("최신 본문");
+      expect(screen.getByTestId("published-post")).toHaveTextContent("https://signed.test/file");
+    });
     expect(remote.upload).toHaveBeenCalledTimes(1);
     expect(remote.calls.filter((call) => call.name === "reconcile_post_operation")).toHaveLength(0);
     expect(remote.calls.filter((call) => call.name === "abandon_media_upload_intents")).toHaveLength(0);

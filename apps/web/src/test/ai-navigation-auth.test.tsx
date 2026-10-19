@@ -66,13 +66,13 @@ describe("AI route authentication and shared navigation", () => {
     expect(await screen.findByRole("heading", { name: "로그인" }, { timeout: LAZY_ROUTE_TIMEOUT_MS })).toBeInTheDocument();
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
-  it("shows the AI page and all six shared tabs to a consent-current member", async () => {
+  it("keeps the AI route reachable under More in five shared mobile tabs", async () => {
     setOrdinaryMember();
     const { container } = renderApp("/app/ai");
 
     expect(await screen.findByRole(
       "heading",
-      { name: "공동체 AI 생각 도우미" },
+      { name: "성경 도구" },
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     )).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /필수 동의/ })).not.toBeInTheDocument();
@@ -82,13 +82,17 @@ describe("AI route authentication and shared navigation", () => {
     const links = within(bottomNavigation as HTMLElement).getAllByRole("link");
     expect(links.map((link) => link.textContent?.trim())).toEqual([
       "홈",
+      "모임",
       "게시판",
       "채팅",
-      "교회",
-      "AI",
-      "내 정보",
+      "더보기",
     ]);
-    expect(within(bottomNavigation as HTMLElement).getByRole("link", { name: "AI" })).toHaveAttribute("href", "/app/ai");
+    expect(within(bottomNavigation as HTMLElement).getByRole("link", { name: "더보기" })).toHaveAttribute("href", "/app/more");
+    expect(within(bottomNavigation as HTMLElement).getByRole("link", { name: "더보기" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(within(bottomNavigation as HTMLElement).getByRole("link", { name: "더보기" }));
+    expect(await screen.findByRole("heading", { name: "더보기" })).toBeVisible();
+    fireEvent.click(screen.getByRole("link", { name: "AI 도우미" }));
+    expect(await screen.findByRole("heading", { name: "성경 도구" })).toBeVisible();
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
   it("lets a manager use shared AI and community links while retaining manager access", async () => {
@@ -102,33 +106,19 @@ describe("AI route authentication and shared navigation", () => {
 
     expect(await screen.findByRole(
       "heading",
-      { name: "공동체 AI 생각 도우미" },
+      { name: "성경 도구" },
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     )).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /관리 화면/ }).every((link) => link.getAttribute("href") === "/manage/home")).toBe(true);
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 
-  it("clears an in-memory AI draft when the authenticated actor changes on the same route", async () => {
+  it("has no private draft to retain when the account changes", async () => {
     setOrdinaryMember();
     renderApp("/app/ai", true);
-
-    expect(await screen.findByRole(
-      "heading",
-      { name: "공동체 AI 생각 도우미" },
-      { timeout: LAZY_ROUTE_TIMEOUT_MS },
-    )).toBeInTheDocument();
-    const prompt = screen.getByLabelText("AI에게 건넬 질문 초안");
-    fireEvent.change(prompt, { target: { value: "회원 계정에서 작성한 임시 초안" } });
-    expect(prompt).toHaveValue("회원 계정에서 작성한 임시 초안");
-
+    expect(await screen.findByRole("heading", { name: "성경 도구" }, { timeout: LAZY_ROUTE_TIMEOUT_MS })).toBeVisible();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "테스트 계정 전환" }));
-
-    expect(await screen.findByRole(
-      "heading",
-      { name: "공동체 AI 생각 도우미" },
-      { timeout: LAZY_ROUTE_TIMEOUT_MS },
-    )).toBeInTheDocument();
-    expect(screen.getByLabelText("AI에게 건넬 질문 초안")).toHaveValue("");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByTestId("test-actor")).toHaveTextContent("한주원 · minister");
   }, LAZY_ROUTE_TEST_TIMEOUT_MS);
 });

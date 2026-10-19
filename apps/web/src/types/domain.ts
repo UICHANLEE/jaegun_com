@@ -52,7 +52,7 @@ export function isExecutiveOfficeCode(value: unknown): value is ExecutiveOfficeC
 export type ExecutiveOfficesByYear = Record<number, ExecutiveOfficeCode[]>;
 export type MembershipStatus = "pending" | "active" | "rejected" | "suspended" | "left";
 export type ApplicationStatus = "pending" | "approved" | "rejected" | "cancelled";
-export type PostCategory = "notice" | "sharing" | "prayer" | "photo_video";
+export type PostCategory = "notice" | "sharing" | "prayer" | "photo_video" | "anonymous_qa" | "official_document" | "family_news";
 
 export const GOVERNANCE_SCOPE_CODES = ["general_assembly", "presbytery", "church"] as const;
 export type GovernanceScopeCode = (typeof GOVERNANCE_SCOPE_CODES)[number];
@@ -205,6 +205,7 @@ export interface Comment {
   postId: string;
   authorId: string;
   authorName: string;
+  isOwner?: boolean;
   body: string;
   createdAt: string;
 }
@@ -219,11 +220,21 @@ export interface Post {
   title: string;
   body: string;
   isOfficial?: boolean;
+  isSystem?: boolean;
   isPinned?: boolean;
   createdAt: string;
   media: MediaAsset[];
   comments: Comment[];
   reactionCount: number;
+  isAnonymous?: boolean;
+  isOwner?: boolean;
+  revision?: number;
+  amenCount?: number;
+  prayerCount?: number;
+  receiptCount?: number;
+  reactedAmen?: boolean;
+  reactedPrayer?: boolean;
+  acknowledged?: boolean;
 }
 
 export interface Conversation {
@@ -254,41 +265,6 @@ export interface Notification {
   href?: string;
 }
 
-export interface MeetingMinute {
-  id: string;
-  organizationId: string;
-  meetingYear: number;
-  meetingDate: string;
-  title: string;
-  body: string;
-  status: "draft" | "published";
-  authorName: string;
-  updatedAt: string;
-}
-
-export type MeetingMinuteInput = Omit<
-  MeetingMinute,
-  "id" | "organizationId" | "authorName" | "updatedAt"
-> & { id?: string; clientOperationId?: string };
-
-export interface LedgerEntry {
-  id: string;
-  organizationId: string;
-  fiscalYear: number;
-  entryDate: string;
-  entryType: "income" | "expense";
-  category: string;
-  description: string;
-  amount: number;
-  memo?: string;
-  authorName: string;
-  updatedAt: string;
-}
-
-export type LedgerEntryInput = Omit<
-  LedgerEntry,
-  "id" | "organizationId" | "authorName" | "updatedAt"
-> & { id?: string; clientOperationId?: string };
 
 export interface ViewerContext {
   profile: Profile;
@@ -299,7 +275,7 @@ export interface ViewerContext {
 }
 
 export interface PostDraft {
-  clientOperationId?: string;
+  clientOperationId: string;
   category: PostCategory;
   title: string;
   body: string;
@@ -337,6 +313,4 @@ export interface AppDataState {
   conversations: Conversation[];
   messagesByConversation: Record<string, Message[]>;
   notifications: Notification[];
-  meetingMinutes: MeetingMinute[];
-  ledgerEntries: LedgerEntry[];
 }

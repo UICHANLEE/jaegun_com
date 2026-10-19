@@ -1,10 +1,12 @@
 import SwiftUI
 
 enum NativeRootRoute: Equatable {
-    case login, consent, community, onboarding
-    static func resolve(loading _: Bool, signedIn: Bool, consentRequired: Bool, administrator: Bool, activeMember: Bool) -> Self {
+    case login, entry, mfa, consent, community, onboarding
+    static func resolve(loading _: Bool, signedIn: Bool, consentRequired: Bool, administrator: Bool, activeMember: Bool, mfaRequired: Bool = false, resolvingEntry: Bool = false) -> Self {
         // Busy state must never remove forms or their in-memory consent choices.
         guard signedIn else { return .login }
+        if resolvingEntry { return .entry }
+        if mfaRequired { return .mfa }
         guard !consentRequired else { return .consent }
         return administrator || activeMember ? .community : .onboarding
     }
@@ -20,17 +22,24 @@ struct NativeRootView: View {
                 signedIn: session.signedIn,
                 consentRequired: session.consentRequired,
                 administrator: session.context["is_platform_admin"] as? Bool == true,
-                activeMember: (session.context["membership"] as? [String: Any])?["status"] as? String == "active"
+                activeMember: (session.context["membership"] as? [String: Any])?["status"] as? String == "active",
+                mfaRequired: session.mfaChallengeRequired,
+                resolvingEntry: session.resolvingEntry
             ) {
             case .login: NativeLoginView()
+            case .entry:
+                VStack(spacing: 24) {
+                    HStack { NativeBrandHeader(); Spacer(minLength: 8); NativeAppearancePicker(compact: true) }
+                    ProgressView("계정과 이용 권한을 확인하고 있습니다")
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).background(NativePalette.canvas)
+            case .mfa: NativeLoginMFAView()
             case .consent: NativeConsentView()
             case .community: NativeCommunityTabs()
             case .onboarding: NativeOnboardingView()
             }
         }
-        .disabled(session.loading)
         .overlay(alignment: .top) {
-            if session.loading {
+            if session.loading && !session.resolvingEntry {
                 ProgressView("처리 중입니다")
                     .padding().background(.regularMaterial, in: Capsule())
                     .padding(.top, 12).accessibilityAddTraits(.updatesFrequently)
@@ -94,7 +103,7 @@ struct NativeLoginView: View {
                     }
                     Button { run { await session.googleSignIn() } } label: {
                         Label("Google로 계속하기", systemImage: "person.crop.circle")
-                    }.buttonStyle(NativeGoogleButtonStyle()).disabled(submitting)
+                    }.buttonStyle(NativeGoogleButtonStyle()).disabled(submitting || session.loading)
                     Text("처음 이용하는 Google 계정은 인증 후 회원가입 동의 화면으로 이어집니다.")
                         .font(.caption).foregroundStyle(NativePalette.muted)
                     HStack { Rectangle().frame(height: 1); Text("또는 이메일로 로그인").font(.caption).fixedSize(); Rectangle().frame(height: 1) }
@@ -111,7 +120,11 @@ struct NativeLoginView: View {
                                     run { await session.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password) }
                                 }.buttonStyle(NativePrimaryButtonStyle())
                                     .disabled(submitting || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
-                    }
+                    }.disabled(session.loading)
+                    NavigationLink("비밀번호를 잊으셨나요?") { NativeEmailRecoveryView() }
+                        .font(.subheadline).frame(minHeight: 44).disabled(submitting)
+                    NavigationLink("성경 본문 · 오프라인 읽기") { NativeBibleReaderView() }
+                        .font(.subheadline).frame(minHeight: 44).disabled(submitting)
                     NavigationLink { NativeSignupEntryView() } label: {
                         HStack { Text("아직 계정이 없으신가요?").foregroundStyle(NativePalette.muted); Text("회원가입").fontWeight(.semibold) }
                             .font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
@@ -137,7 +150,7 @@ struct NativeLoginView: View {
         }
     }
     private func run(_ operation: @escaping @MainActor () async -> Void) {
-        guard !submitting else { return }
+        guard !submitting, !session.loading else { return }
         submitting = true
         Task { await operation(); password = ""; submitting = false }
     }
@@ -214,6 +227,9 @@ private struct NativeConsentView: View {
                     Button("다시 불러오기") { Task { await session.restore() } }.disabled(submitting)
                     Button("로그아웃", role: .destructive) { Task { await session.signOut() } }.disabled(submitting)
                     NavigationLink("개인 통독·QT 동의 철회·삭제") { NativeFaithWithdrawalView() }
+                    NavigationLink("계정 삭제·예약 취소") { NativeAccountDeletionView() }
+                    NavigationLink("내 신고·조치·이의신청") { NativeMyReportsView() }
+                    NavigationLink("성경 본문 읽기") { NativeBibleReaderView() }
                 }
             }.navigationTitle("필수 동의").nativePageStyle()
                 .onChange(of: documents.map(\.id).sorted()) { _, _ in

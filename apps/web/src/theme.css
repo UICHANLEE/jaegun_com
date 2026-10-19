@@ -1,19 +1,19 @@
-/* Device appearance is the sole theme authority. Web surfaces follow CSS media
-   queries; UIKit owns adaptive native chrome without a stored preference. */
+/* System appearance is the default; an explicit device-only selection may
+   override it. Native and web use the same semantic brand palette. */
 :root {
   color-scheme: light;
-  --community-bg: #f5f6f7;
-  --community-surface: #ffffff;
-  --community-elevated: #f0f2f4;
-  --community-ink: #20252b;
-  --community-muted: #626a74;
-  --community-line: #dce1e6;
+  --community-bg: #f7f5ef;
+  --community-surface: #fffefa;
+  --community-elevated: #edf2e9;
+  --community-ink: #20372f;
+  --community-muted: #5f6d65;
+  --community-line: #dce4da;
   --community-orange: #fc8401;
-  --community-orange-soft: #fff0df;
-  --community-orange-ink: #995000;
+  --community-orange-soft: #fff1e3;
+  --community-orange-ink: #96500b;
   --community-green: #67b42a;
   --community-green-soft: #edf6e7;
-  --community-green-ink: #356b17;
+  --community-green-ink: #286044;
   --community-blue: #0498e1;
   --community-blue-soft: #e8f5fc;
   --community-blue-ink: #09668e;
@@ -25,7 +25,7 @@
   --community-focus-soft: #0876b233;
   --community-line-strong: #b8c1ca;
   /* Solid backgrounds with white foregrounds are deliberately not text tokens. */
-  --community-solid-green: #28634c;
+  --community-solid-green: #245c46;
   --community-solid-green-hover: #153f32;
   --community-solid-orange: #a65313;
   --community-official: #153f32;
@@ -40,8 +40,8 @@
   --white: var(--community-surface);
   --forest-950: #18332a;
   --forest-900: #224e3c;
-  --forest-800: #28634c;
-  --forest-700: #356b17;
+  --forest-800: #245c46;
+  --forest-700: #286044;
   --forest-100: var(--community-green-soft);
   --forest-50: var(--community-green-soft);
   --orange-600: var(--community-orange-ink);
@@ -63,20 +63,20 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --community-bg: #111418;
-    --community-surface: #1b2026;
-    --community-elevated: #252c34;
-    --community-ink: #edf1f5;
-    --community-muted: #b0bac5;
-    --community-line: #3b4652;
-    --community-line-strong: #687686;
-    --community-orange-soft: #382a1b;
+    --community-bg: #101814;
+    --community-surface: #19241f;
+    --community-elevated: #23332b;
+    --community-ink: #f0f5f0;
+    --community-muted: #b5c5ba;
+    --community-line: #3b5043;
+    --community-line-strong: #6e8877;
+    --community-orange-soft: #382b1f;
     --community-orange-ink: #ffba70;
-    --community-green-soft: #203121;
+    --community-green-soft: #233629;
     --community-green-ink: #a6d889;
-    --community-blue-soft: #1c3040;
+    --community-blue-soft: #1c3240;
     --community-blue-ink: #7ed0fa;
     --community-on-blue: #062436;
     --community-purple-ink: #d6b4f3;
@@ -84,7 +84,7 @@
     --community-danger-line: #915552;
     --community-focus: #7ed0fa;
     --community-focus-soft: #7ed0fa40;
-    --forest-950: #edf1f5;
+    --forest-950: #f0f5f0;
     --forest-900: #cde4d5;
     --forest-800: #afd5be;
     --forest-700: var(--community-green-ink);
@@ -93,6 +93,38 @@
     --shadow-sm: 0 6px 18px #00000026;
     --shadow-md: 0 16px 44px #00000040;
   }
+}
+
+/* Explicit dark uses the same tokens as automatic dark above. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --community-bg: #101814;
+  --community-surface: #19241f;
+  --community-elevated: #23332b;
+  --community-ink: #f0f5f0;
+  --community-muted: #b5c5ba;
+  --community-line: #3b5043;
+  --community-line-strong: #6e8877;
+  --community-orange-soft: #382b1f;
+  --community-orange-ink: #ffba70;
+  --community-green-soft: #233629;
+  --community-green-ink: #a6d889;
+  --community-blue-soft: #1c3240;
+  --community-blue-ink: #7ed0fa;
+  --community-on-blue: #062436;
+  --community-purple-ink: #d6b4f3;
+  --community-purple-soft: #34283f;
+  --community-danger-line: #915552;
+  --community-focus: #7ed0fa;
+  --community-focus-soft: #7ed0fa40;
+  --forest-950: #f0f5f0;
+  --forest-900: #cde4d5;
+  --forest-800: #afd5be;
+  --forest-700: var(--community-green-ink);
+  --danger: #ffaaa3;
+  --danger-soft: #3b2526;
+  --shadow-sm: 0 6px 18px #00000026;
+  --shadow-md: 0 16px 44px #00000040;
 }
 
 /* Specific named surfaces replace legacy white/cream values. :root gives these
@@ -755,3 +787,39 @@
 
 :root .notification-row.is-unread { background: var(--forest-50); }
 :root .pending-summary__note p { color: var(--muted); }
+
+/* Shared resilience: long Korean labels wrap without shrinking tap targets. */
+:root .button { min-height:44px; text-align:center; overflow-wrap:anywhere; }
+:root :is(.page-toolbar__title, .page-toolbar h1, .home-widget__heading h2) { min-width:0; overflow-wrap:anywhere; }
+:root .app-shell--community .bottom-nav a.active { background:var(--community-blue-soft); }
+:root .home-widget__link { font-size:.8125rem; }
+:root .home-notice__author { flex-wrap:wrap; font-size:.75rem; }
+/* Logo colors remain accents, never low-contrast body text. */
+:root .brand { position:relative; padding-block:6px; }
+:root .brand::after {
+  content:""; position:absolute; left:0; bottom:0; width:58px; height:3px; border-radius:3px;
+  background:linear-gradient(to right,var(--community-orange) 0 31%,transparent 31% 34%,var(--community-green) 34% 65%,transparent 65% 68%,var(--community-blue) 68% 100%);
+}
+:root .brand--compact::after { width:44px; }
+:root .appearance-picker { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 14px; color:var(--ink); font-size:.875rem; }
+:root .appearance-picker select { min-height:44px; max-width:100%; border:1px solid var(--line-strong); border-radius:10px; padding:8px 32px 8px 12px; color:var(--ink); background:var(--paper); font:inherit; cursor:pointer; }
+:root .appearance-picker--compact { justify-content:flex-start; margin-top:16px; }
+:root .appearance-panel { border:1px solid var(--line); border-radius:12px; padding:18px; background:var(--paper); }
+:root .appearance-panel h2 { margin:0 0 8px; font-size:1rem; }
+:root .appearance-panel p { color:var(--muted); font-size:.875rem; line-height:1.6; }
+:root .auth-appearance { position:absolute; top:max(12px,env(safe-area-inset-top)); right:max(16px,env(safe-area-inset-right)); z-index:2; }
+:root .auth-appearance .appearance-picker { margin:0; }
+:root .auth-appearance .appearance-picker>span { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+:root .auth-page { position:relative; padding-top:76px; }
+:root .auth-page { display:block; }
+:root .auth-panel { min-height:calc(100dvh - 76px); justify-content:flex-start; padding:24px 20px calc(44px + env(safe-area-inset-bottom)); }
+:root .auth-panel__mobile-brand { display:block; }
+:root .app-shell--community .bottom-nav a.active { color:var(--community-green-ink); background:var(--community-green-soft); }
+:root .app-shell--community .bottom-nav a.active[href="/app/posts"] { color:var(--community-orange-ink); background:var(--community-orange-soft); }
+:root .app-shell--community .bottom-nav a.active:is([href="/app/events"],[href="/app/chats"]) { color:var(--community-blue-ink); background:var(--community-blue-soft); }
+:root .executive-ops :is(input:not([type="checkbox"]),textarea,select) { border:1px solid var(--line-strong); background:var(--paper); border-radius:8px; padding:10px; min-height:44px; max-width:100%; font:inherit; }
+:root .executive-ops__record { border-bottom:1px solid var(--line); padding-block:20px; overflow-wrap:anywhere; }
+:root .executive-ops__form { background:var(--paper); border-radius:12px; padding:20px; }
+@media (max-width:640px) {
+  :root :is(.field__control input, .field textarea, .field select, .search-field input) { font-size:1rem; }
+}

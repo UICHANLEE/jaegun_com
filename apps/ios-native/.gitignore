@@ -1,6 +1,9 @@
 NativePublicConfig.xcconfig
 .build/
 .build-simulator/
+.stability-qa/
 *.xcodeproj/xcuserdata/
 *.xcarchive/
 *.ipa
+Pods/
+*.xcworkspace/xcuserdata/

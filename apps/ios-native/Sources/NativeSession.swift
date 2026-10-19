@@ -36,10 +36,14 @@ private enum NativeKeychain {
 @MainActor final class NativeSession: NSObject, ObservableObject {
     @Published var signedIn = false
     @Published var loading = false
+    @Published private(set) var resolvingEntry = false
     @Published var error: String?
     @Published var consentRequired = true
     @Published var context: [String: Any] = [:]
     @Published var requiredDocuments: [[String: Any]] = []
+    @Published var mfaChallengeRequired = false
+    @Published var enrolledLoginFactors: [[String: Any]] = []
+    private var verifiedActorID: String?
     let api = NativeAPI()
     private var authSession: ASWebAuthenticationSession?
     private var authPresentationContext: NativeAuthPresentationContext?
@@ -59,11 +63,16 @@ private enum NativeKeychain {
         do {
             api.tokens = try NativeKeychain.read()
             if api.tokens != nil {
-                try await api.refresh()
-                try await api.verifyUser()
+                // A foreground transition still verifies identity and consent on the
+                // server, but must not rotate an otherwise valid token every time.
+                if let token = api.tokens, token.expiresAt.timeIntervalSinceNow < 60 {
+                    try await api.refresh()
+                }
                 signedIn = true
             }
-            try await loadState()
+            // Login does not display legal documents. Fetch them after identity is
+            // established, not on the unauthenticated launch critical path.
+            if signedIn { try await loadState() }
         } catch {
             self.error = error.localizedDescription
             // A network failure is not logout. Never erase refresh credentials on timeout.
@@ -94,8 +103,12 @@ private enum NativeKeychain {
         await googleAuthentication(reauthenticate: true)
     }
 
-    private func googleAuthentication(reauthenticate: Bool) async -> Bool {
-        guard !loading, !reauthenticate || (signedIn && !consentRequired) else { return false }
+    func reauthenticateForAccountDeletion() async -> Bool {
+        await googleAuthentication(reauthenticate: true, accountDeletion: true)
+    }
+
+    private func googleAuthentication(reauthenticate: Bool, accountDeletion: Bool = false) async -> Bool {
+        guard !loading, !reauthenticate || (signedIn && (!consentRequired || accountDeletion)) else { return false }
         let generation = epoch
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
             .filter({ $0.activationState == .foregroundActive })
@@ -170,7 +183,7 @@ private enum NativeKeychain {
                 try? await candidate.logout()
                 throw NativeAPIError.security("Google 계정이 현재 로그인한 계정과 일치하지 않습니다. 기존 계정은 유지됩니다.")
             }
-            if reauthenticate {
+            if reauthenticate && !accountDeletion {
                 let status = try await candidate.rpc("get_sensitive_action_auth_status")
                 guard NativeSensitiveAuthStatus.isVerified(status) else {
                     try? await candidate.logout()
@@ -182,8 +195,10 @@ private enum NativeKeychain {
             epoch = UUID()
             if !reauthenticate { context = [:]; privacy = [:]; consentRequired = true }
             api.tokens = tokens; signedIn = true
-            try await loadState()
-            return !reauthenticate || (signedIn && !consentRequired)
+            // This user response was just verified by the server with the exact
+            // candidate tokens adopted above. Do not repeat /auth/v1/user.
+            try await loadState(verifiedUser: identity.user)
+            return !reauthenticate || (signedIn && (!consentRequired || accountDeletion))
         } catch {
             if adoptedSession { context = [:]; privacy = [:]; consentRequired = true }
             let failure = error as NSError
@@ -205,6 +220,7 @@ private enum NativeKeychain {
         do {
             try NativeKeychain.delete()
             epoch = UUID(); api.tokens = nil; signedIn = false; context = [:]; privacy = [:]; consentRequired = true
+            mfaChallengeRequired = false; enrolledLoginFactors = []; verifiedActorID = nil
             if serverFailed { error = "이 기기에서는 로그아웃했습니다. 네트워크 문제로 서버 세션 종료는 확인하지 못했습니다." }
         } catch { self.error = error.localizedDescription }
     }
@@ -239,22 +255,79 @@ private enum NativeKeychain {
         } catch { self.error = error.localizedDescription }
     }
 
-    private func loadState() async throws {
+    func verifyLoginFactor(id: String, code: String) async {
+        guard !loading, signedIn, mfaChallengeRequired, NativeLoginAssurance.validCode(code),
+              enrolledLoginFactors.contains(where: { nativeText($0, "id") == id && nativeText($0, "factor_type") == "totp" }),
+              let actor = verifiedActorID else { return }
         let generation = epoch
-        let documents = try await validatedDocuments()
+        var resultGeneration = generation
+        loading = true; error = nil
+        defer { loading = false }
+        do {
+            let tokens = try await api.verifyEnrolledFactor(id: id, code: code)
+            let candidate = NativeAPI(); candidate.tokens = tokens
+            let identity = try await candidate.authenticatedIdentity()
+            guard generation == epoch, identity.id == actor, NativeLoginAssurance.hasAAL2(tokens.accessToken) else {
+                throw NativeAPIError.sessionExpired
+            }
+            try NativeKeychain.save(tokens)
+            api.tokens = tokens; epoch = UUID(); context = [:]; privacy = [:]
+            resultGeneration = epoch
+            mfaChallengeRequired = false
+            try await loadState()
+        } catch {
+            if resultGeneration == epoch {
+                context = [:]; consentRequired = true
+                self.error = "MFA 인증 또는 이후 계정 상태를 확인하지 못했습니다. 인증번호와 연결을 확인하고 다시 불러와 주세요."
+            }
+        }
+    }
+
+    private func loadState(verifiedUser: [String: Any]? = nil) async throws {
+        let generation = epoch
+        guard signedIn else {
+            let documents = try await validatedDocuments()
+            guard generation == epoch else { return }
+            requiredDocuments = documents
+            return
+        }
+        resolvingEntry = context.isEmpty
+        defer { resolvingEntry = false }
+        // Only minimal self-service/legal reads run concurrently. Protected
+        // context still waits for verified identity, MFA and exact consent checks.
+        async let documentsRequest = validatedDocuments()
+        async let privacyRequest = api.rpc("get_my_safety_privacy_state")
+        let value = try await verifiedUserResponse(verifiedUser)
+        guard let user = value as? [String: Any],
+              let actor = user["id"] as? String, UUID(uuidString: actor) != nil, user["is_anonymous"] as? Bool != true else { throw NativeAPIError.sessionExpired }
+        guard generation == epoch else { return }
+        verifiedActorID = actor
+        enrolledLoginFactors = NativeLoginAssurance.verifiedFactors(user)
+        mfaChallengeRequired = !enrolledLoginFactors.isEmpty && !NativeLoginAssurance.hasAAL2(api.tokens?.accessToken ?? "")
+        if mfaChallengeRequired { context = [:]; privacy = [:]; return }
+        // Both endpoints are deliberately minimal self-service reads, available
+        // before consent. Protected context remains strictly after both checks.
+        let (documents, state) = try await (documentsRequest, privacyRequest)
         guard generation == epoch else { return }
         requiredDocuments = documents
-        guard signedIn else { return }
-        let state = try await api.rpc("get_my_safety_privacy_state")
         guard generation == epoch, let state = state as? [String: Any] else { throw NativeAPIError.invalidData }
         privacy = state
-        consentRequired = state["consent_gate_open"] as? Bool != true
-        guard !consentRequired else { context = [:]; return }
-        let value = try await api.rpc("get_my_context")
+        guard state["consent_gate_open"] as? Bool == true else {
+            context = [:]; consentRequired = true; return
+        }
+        let contextValue = try await api.rpc("get_my_native_context")
         guard generation == epoch else { return }
-        if let row = value as? [String: Any] { context = row }
-        else if let rows = value as? [[String: Any]], let row = rows.first { context = row }
-        else { throw NativeAPIError.invalidData }
+        guard let row = contextValue as? [String: Any] ?? (contextValue as? [[String: Any]])?.first,
+              nativeText(row["profile"] as? [String: Any] ?? [:], "id").lowercased() == actor.lowercased() else { throw NativeAPIError.invalidData }
+        // Publish the destination atomically: no transient onboarding screen
+        // between an open consent gate and the protected context response.
+        context = row
+        consentRequired = false
+    }
+
+    private func verifiedUserResponse(_ user: [String: Any]?) async throws -> Any {
+        if let user { return user }
+        return try await api.request(path: "/auth/v1/user")
     }
 
     private func validatedDocuments() async throws -> [[String: Any]] {

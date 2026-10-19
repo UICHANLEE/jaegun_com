@@ -4,40 +4,103 @@ func nativeText(_ row: [String: Any], _ key: String, fallback: String = "") -> S
     row[key] as? String ?? fallback
 }
 
+private struct NativeTabActiveKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    var nativeTabActive: Bool {
+        get { self[NativeTabActiveKey.self] }
+        set { self[NativeTabActiveKey.self] = newValue }
+    }
+}
+
 struct NativeCommunityTabs: View {
     @EnvironmentObject private var session: NativeSession
-    @State private var selectedTab = "home"
     private var membership: [String: Any] { session.context["membership"] as? [String: Any] ?? [:] }
+    private var isPlatformAdmin: Bool { session.context["is_platform_admin"] as? Bool == true }
     private var isManager: Bool {
-        session.context["is_platform_admin"] as? Bool == true || ["minister", "executive"].contains(nativeText(membership, "role"))
+        isPlatformAdmin || ["minister", "executive"].contains(nativeText(membership, "role"))
     }
     var body: some View {
+        NativeCommunityTabWorkspace(isManager: isManager)
+            // Retained screens never cross an actor, church or authorization-role
+            // boundary. Core-consent closure removes this entire subtree at root.
+            .id("\(session.sessionGeneration):\(nativeText(session.context["profile"] as? [String: Any] ?? [:], "id")):\(nativeText(membership, "organization_id")):\(nativeText(membership, "status")):\(nativeText(membership, "role")):\(isPlatformAdmin)")
+    }
+}
+
+private struct NativeCommunityTabWorkspace: View {
+    let isManager: Bool
+    @State private var selectedTab: String
+    init(isManager: Bool) {
+        self.isManager = isManager
+        _selectedTab = State(initialValue: isManager ? "more" : "home")
+    }
+    var body: some View {
+        // A selected-tab switch destroys @State/@StateObject on every hop.
+        // System tab containers retain each screen and its own navigation stack,
+        // while disappearance still cancels tasks and stops realtime subscriptions.
+        TabView(selection: $selectedTab) {
+            Tab("홈", systemImage: "house", value: "home") { tabRoot("home") { NativeMemberHomeView() } }
+            Tab("모임", systemImage: "calendar", value: "events") { tabRoot("events") { NativeEventOperationsView() } }
+            Tab("게시판", systemImage: "doc.text", value: "posts") { tabRoot("posts") { NativeFeedView() } }
+            Tab("채팅", systemImage: "bubble.left", value: "chats") { tabRoot("chats") { NativeCommunityChatHubView() } }
+            Tab("더보기", systemImage: "ellipsis", value: "more") { tabRoot("more") { NativeMoreView(isManager: isManager) } }
+        }.toolbar(.hidden, for: .tabBar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                NativeCommunityNavigation(selection: $selectedTab)
+            }.tint(NativePalette.blue)
+    }
+    private func tabRoot<Content: View>(_ id: String, @ViewBuilder content: () -> Content) -> some View {
         NavigationStack {
-            Group {
-                switch selectedTab {
-                case "home": NativeMemberHomeView()
-                case "posts": NativeFeedView()
-                case "chats": NativeCommunityChatHubView()
-                case "churches": NativeChurchSummaryView()
-                case "ai": NativeAILandingView()
-                case "management": if isManager { NativeApprovalOperationsView() } else { NativeMemberHomeView() }
-                default: NativeProfileView()
-                }
-            }
+            content().environment(\.nativeTabActive, selectedTab == id)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { NativeBrandHeader(compact: true) }
                 if isManager {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button(selectedTab == "management" ? "공동체 홈" : "관리 화면") {
-                            selectedTab = selectedTab == "management" ? "home" : "management"
-                        }.font(.caption.weight(.semibold)).frame(minHeight: 44)
+                        NavigationLink { NativeManagementHubView() } label: {
+                            Text("관리 화면").font(.caption.weight(.semibold)).frame(minHeight: 44)
+                        }
                     }
                 }
             }
-        }.safeAreaInset(edge: .bottom, spacing: 0) {
-            NativeCommunityNavigation(selection: $selectedTab)
-        }.tint(NativePalette.blue)
-            .onAppear { if isManager { selectedTab = "management" } }
+        }.toolbar(.hidden, for: .tabBar)
+    }
+}
+
+struct NativeMoreView: View {
+    let isManager: Bool
+    var body: some View {
+        List {
+            if isManager {
+                Section("내 역할의 관리 도구") {
+                    NavigationLink { NativeManagementHubView() } label: { Label("관리 화면", systemImage: "person.badge.shield.checkmark") }
+                }
+            }
+            Section("공동체") {
+                NavigationLink { NativeChurchSummaryView() } label: { Label("우리 교회", systemImage: "building.2") }
+                NavigationLink { NativeOfficeHomeView() } label: { Label("임원실·조직도", systemImage: "person.3") }
+                NavigationLink { NativeAILandingView() } label: { Label("AI 도우미", systemImage: "sparkles") }
+                NavigationLink { NativeBibleReaderView() } label: { Label("성경 읽기", systemImage: "book") }
+            }
+            Section("내 계정") {
+                NavigationLink { NativeProfileView() } label: { Label("내 정보·설정", systemImage: "person.crop.circle") }
+            }
+            Section("화면 설정") {
+                NativeAppearancePicker()
+                Text("선택한 화면 모드는 이 기기에만 저장됩니다.").font(.footnote).foregroundStyle(NativePalette.muted)
+            }
+        }.listStyle(.insetGrouped).navigationTitle("더보기").nativePageStyle()
+    }
+}
+
+struct NativeOfficeHomeView: View {
+    var body: some View {
+        List {
+            Section("조직·임원") {
+                NavigationLink("조직도·명단·직책 이력") { NativeGovernanceView() }
+                Text("직책과 기록 접근 권한은 조직·연도·업무 범위별로 서버에서 확인합니다.").font(.footnote).foregroundStyle(.secondary)
+            }
+            NativeExecutiveRecordLinks()
+        }.navigationTitle("임원실").nativePageStyle()
     }
 }
 
@@ -53,225 +116,7 @@ struct NativeFailureView: View {
 }
 
 struct NativeFeedView: View {
-    @EnvironmentObject private var session: NativeSession
-    @State private var posts: [[String: Any]] = []
-    @State private var loading = true
-    @State private var error: String?
-    var body: some View {
-        Group {
-            if loading { ProgressView("소식을 불러오고 있습니다") }
-            else if let error { NativeFailureView(message: error) { Task { await load() } } }
-            else if posts.isEmpty { ContentUnavailableView("아직 등록된 소식이 없습니다", systemImage: "text.bubble") }
-            else {
-                List {
-                    VStack(alignment: .leading, spacing: 18) {
-                        NativeBrandHeader()
-                        HStack {
-                            Text("공동체 소식").font(.title2.bold())
-                            Spacer()
-                            Text("최근 \(posts.count)개").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }.padding(.vertical, 12).listRowSeparator(.hidden)
-                    ForEach(posts.indices, id: \.self) { index in
-                    let post = posts[index]
-                    NavigationLink {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text(nativeText(post, "title")).font(.title2.bold())
-                                Text(nativeText(post, "author_label")).font(.subheadline).foregroundStyle(.secondary)
-                                Text(nativeText(post, "body")).textSelection(.enabled)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding()
-                        }.navigationTitle("게시글").navigationBarTitleDisplayMode(.inline)
-                    } label: {
-                        NativePostSummary(post: post)
-                    }
-                    }
-                }.listStyle(.plain).refreshable { await load() }
-            }
-        }.navigationTitle("게시판").nativePageStyle().task { await load() }
-    }
-    private func load() async {
-        loading = true; error = nil
-        do { posts = try await session.api.rows("posts", query: "select=id,title,body,author_label,is_pinned,published_at&status=eq.published&order=is_pinned.desc,published_at.desc&limit=50") }
-        catch { posts = []; self.error = "네트워크 연결이나 접근 권한을 확인해 주세요." }
-        loading = false
-    }
-}
-
-struct NativeChannelListView: View {
-    @EnvironmentObject private var session: NativeSession
-    @State private var channels: [[String: Any]] = []
-    @State private var loading = true
-    @State private var error: String?
-    private var organizationID: String { nativeText(session.context["membership"] as? [String: Any] ?? [:], "organization_id") }
-    var body: some View {
-        Group {
-            if loading { ProgressView("채널을 불러오고 있습니다") }
-            else if let error { NativeFailureView(message: error) { Task { await load() } } }
-            else if channels.isEmpty { ContentUnavailableView("참여할 채널이 없습니다", systemImage: "bubble.left.and.bubble.right", description: Text("교회 가입 승인 후 교회 채널을 확인할 수 있습니다.")) }
-            else {
-                List(channels.indices, id: \.self) { index in
-                    let channel = channels[index]
-                    NavigationLink { NativeChannelMessagesView(channel: channel, organizationID: organizationID) } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 12) {
-                                Image(systemName: nativeText(channel, "visibility") == "private" ? "lock" : "number")
-                                    .frame(width: 40, height: 40).foregroundStyle(NativePalette.blue)
-                                    .background(NativePalette.blue.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
-                                Text(nativeText(channel, "name")).font(.headline)
-                            }
-                            Text(nativeText(channel, "description")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                        }.padding(.vertical, 6)
-                    }.disabled(nativeText(channel, "status") != "active")
-                }.refreshable { await load() }
-            }
-        }.navigationTitle("채널").nativePageStyle().task { await load() }
-    }
-    private func load() async {
-        loading = true; error = nil
-        guard !organizationID.isEmpty else { channels = []; loading = false; return }
-        do {
-            guard let snapshot = try await session.api.rpc("channel_snapshot", body: ["p_organization_id": organizationID]) as? [String: Any],
-                  let channels = snapshot["channels"] as? [[String: Any]] else { throw NativeAPIError.invalidData }
-            self.channels = channels
-        } catch { channels = []; self.error = "교회 채널 조회에 실패했습니다. 권한과 네트워크를 확인해 주세요." }
-        loading = false
-    }
-}
-
-struct NativeChannelMessagesView: View {
-    @EnvironmentObject private var session: NativeSession
-    let channel: [String: Any]
-    let organizationID: String
-    @State private var messages: [[String: Any]] = []
-    @State private var draft = ""
-    @State private var error: String?
-    @State private var loading = true
-    @State private var sending = false
-    @State private var operationID = UUID().uuidString
-    private var channelID: String { nativeText(channel, "id") }
-    var body: some View {
-        VStack(spacing: 0) {
-            if loading { ProgressView("대화를 불러오고 있습니다").padding() }
-            if let error { Text(error).foregroundStyle(.red).padding().accessibilityAddTraits(.isStaticText) }
-            List {
-                if !loading && messages.isEmpty { Text("아직 대화가 없습니다.").foregroundStyle(.secondary) }
-                ForEach(messages.indices, id: \.self) { index in
-                    let message = messages[index]
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(nativeText(message, "senderName", fallback: "교회 회원")).font(.subheadline.bold())
-                        Text(nativeText(message, "body")).textSelection(.enabled)
-                    }.padding(.vertical, 6)
-                }
-            }.refreshable { await load() }
-        }.safeAreaInset(edge: .bottom) {
-            HStack(alignment: .bottom) {
-                TextField("메시지", text: $draft, axis: .vertical).lineLimit(1...5).textFieldStyle(.roundedBorder).disabled(sending)
-                Button { Task { await send() } } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }
-                    .accessibilityLabel("메시지 보내기").frame(minWidth: 44, minHeight: 44)
-                    .disabled(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 4000 || channel["archived"] as? Bool == true)
-            }.padding().background(.bar)
-        }.navigationTitle(nativeText(channel, "name", fallback: "채널"))
-            .navigationBarTitleDisplayMode(.inline).task { await load() }
-            .onChange(of: draft) { _, _ in if !sending { operationID = UUID().uuidString } }
-    }
-    private func load() async {
-        loading = true
-        do {
-            guard let snapshot = try await session.api.rpc("channel_snapshot", body: ["p_organization_id": organizationID, "p_channel_id": channelID]) as? [String: Any],
-                  let messages = snapshot["messages"] as? [[String: Any]] else { throw NativeAPIError.invalidData }
-            self.messages = messages; error = nil
-        } catch { messages = []; self.error = "대화를 불러오지 못했습니다. 아래로 당겨 다시 시도해 주세요." }
-        loading = false
-    }
-    private func send() async {
-        guard !sending else { return }
-        let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty, body.count <= 4000 else { return }
-        sending = true
-        do {
-            _ = try await session.api.rpc("channel_command", body: ["p_action": "send", "p_channel_id": channelID, "p_payload": ["messageId": operationID, "body": body]])
-            draft = ""; operationID = UUID().uuidString; await load()
-        } catch { self.error = "전송 결과를 확인하지 못했습니다. 같은 내용으로 재시도하면 중복 전송을 방지합니다." }
-        sending = false
-    }
-}
-
-struct NativeEventsView: View {
-    @EnvironmentObject private var session: NativeSession
-    @State private var events: [[String: Any]] = []
-    @State private var loading = true
-    @State private var error: String?
-    var body: some View {
-        Group {
-            if loading { ProgressView("일정을 불러오고 있습니다") }
-            else if let error { NativeFailureView(message: error) { Task { await load() } } }
-            else if events.isEmpty { ContentUnavailableView("예정된 일정이 없습니다", systemImage: "calendar") }
-            else {
-                List(events.indices, id: \.self) { index in
-                    let event = events[index]
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(nativeText(event, "title")).font(.headline)
-                        Text(nativeText(event, "starts_at")).font(.subheadline).foregroundStyle(.secondary)
-                        Text(nativeText(event, "location_text")).foregroundStyle(.secondary)
-                        Text(nativeText(event, "description")).lineLimit(5)
-                    }.padding(.vertical, 6)
-                }.refreshable { await load() }
-            }
-        }.navigationTitle("공동체 일정").nativePageStyle().task { await load() }
-    }
-    private func load() async {
-        loading = true; error = nil
-        let formatter = ISO8601DateFormatter()
-        do {
-            guard let events = try await session.api.rpc("list_event_occurrences", body: ["p_from": formatter.string(from: Date()), "p_to": formatter.string(from: Date().addingTimeInterval(90 * 86400)), "p_limit": 100]) as? [[String: Any]] else { throw NativeAPIError.invalidData }
-            self.events = events
-        }
-        catch { events = []; self.error = "일정 조회에 실패했습니다. 다시 시도해 주세요." }
-        loading = false
-    }
-}
-
-struct NativeManagementView: View {
-    @EnvironmentObject private var session: NativeSession
-    @State private var applications: [[String: Any]] = []
-    @State private var error: String?
-    @State private var loading = true
-    private var role: String { nativeText(session.context["membership"] as? [String: Any] ?? [:], "role") }
-    private var title: String { session.context["is_platform_admin"] as? Bool == true ? "플랫폼 관리" : role == "minister" ? "사역자 관리" : "임원 운영" }
-    var body: some View {
-        List {
-            Section {
-                HStack(spacing: 14) {
-                    Image(systemName: role == "minister" ? "person.2" : "person.badge.shield.checkmark")
-                        .font(.title2).foregroundStyle(NativePalette.forest)
-                        .frame(width: 48, height: 48).background(NativePalette.forest.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(title).font(.title3.bold())
-                        Text("가입 승인 대기 현황").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }.padding(.vertical, 8)
-                Text("권한은 서버에서 확인합니다. 네이티브 승인·임명 기능은 아직 제공하지 않으며 이 화면에서는 조회만 가능합니다.").font(.footnote).foregroundStyle(.secondary)
-            }
-            if loading { ProgressView("신청을 확인하고 있습니다") }
-            if let error { Text(error).foregroundStyle(.red) }
-            if !loading && error == nil && applications.isEmpty { Text("대기 중인 신청이 없습니다.").foregroundStyle(.secondary) }
-            ForEach(applications.indices, id: \.self) { index in
-                let application = applications[index]
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(nativeText(application, "requested_role")).font(.headline)
-                    Text(nativeText(application, "applicant_note", fallback: "신청 메모 없음")).foregroundStyle(.secondary)
-                    Text(nativeText(application, "created_at")).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }.navigationTitle(title).nativePageStyle().task { await load() }.refreshable { await load() }
-    }
-    private func load() async {
-        loading = true; error = nil
-        do { applications = try await session.api.rows("membership_applications", query: "select=id,requested_role,applicant_note,created_at&status=eq.pending&order=created_at.desc&limit=100") }
-        catch { applications = []; self.error = "신청 조회 권한이나 네트워크를 확인해 주세요." }
-        loading = false
-    }
+    var body: some View { NativeBoardFeedView() }
 }
 
 struct NativeProfileView: View {
@@ -283,9 +128,19 @@ struct NativeProfileView: View {
                 LabeledContent("이름", value: nativeText(profile, "display_name", fallback: "이름 미설정"))
                 LabeledContent("접속 상태", value: "로그인됨")
             }
-            Section("앱 기능 안내") {
-                Text("소식·채널 대화·일정·관리 현황은 실제 서버 데이터로 표시됩니다.")
-                Text("사진·동영상 업로드, 고급 채널 기능, 계정 삭제 및 임원 기록 편집은 네이티브 전환 작업 중입니다.").font(.footnote).foregroundStyle(.secondary)
+            Section("공동체") {
+                NavigationLink("성경 본문 · 오프라인 읽기") { NativeBibleReaderView() }
+                NavigationLink("조직·명단·직책 이력") { NativeGovernanceView() }
+                NavigationLink("예배·행사·현장 운영") { NativeEventOperationsView() }
+                NavigationLink("화상회의") { NativeMeetingsView() }
+                NavigationLink("교회 라이브·주보") { NativeChurchLiveView() }
+            }
+            NativeExecutiveRecordLinks()
+            Section("계정·안전") {
+                NavigationLink("개인정보·알림·차단") { NativeAccountSettingsView() }
+                NavigationLink("내 신고·조치·이의신청") { NativeMyReportsView() }
+                NavigationLink("개인 통독·QT 동의 철회·삭제") { NativeFaithWithdrawalView() }
+                NavigationLink("계정 삭제·예약 취소") { NativeAccountDeletionView() }
             }
             Section {
                 Button("계정 다시 확인") { Task { await session.restore() } }

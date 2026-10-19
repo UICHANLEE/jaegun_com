@@ -6,7 +6,9 @@ const appData = vi.hoisted(() => ({
   current: {
     createPost: vi.fn(),
     posts: [],
-    viewer: { profile: { id: "native-media-test-user" } },
+    mode: "supabase",
+    consentGateOpen: true,
+    viewer: { profile: { id: "native-media-test-user" }, membership: { organizationId: "test-church", status: "active" } },
   },
 }));
 
@@ -33,35 +35,32 @@ vi.mock("../data/AppDataProvider", () => ({
 
 import { ComposerPage } from "../pages/FeedPages";
 
-describe("official iOS client media behavior", () => {
+describe("legacy Capacitor web composer upload gate", () => {
   beforeEach(() => {
     nativeRuntime.isNativePlatform.mockReturnValue(false);
     nativeRuntime.getPlatform.mockReturnValue("web");
   });
 
-  it("shows a clear readiness notice and removes the file picker on iOS", () => {
+  it("does not expose unsupported legacy-wrapper uploads", () => {
     nativeRuntime.isNativePlatform.mockReturnValue(true);
     nativeRuntime.getPlatform.mockReturnValue("ios");
 
-    const { container, getByRole } = render(
+    const { container } = render(
       <MemoryRouter initialEntries={["/app/posts/new"]}>
         <ComposerPage />
       </MemoryRouter>,
     );
 
-    expect(getByRole("note", { name: "iPhone 앱 미디어 업로드 안내" }))
-      .toHaveTextContent("현재 iPhone 앱에서는 텍스트만 등록할 수 있고");
     expect(container.querySelector('input[type="file"]')).toBeNull();
   });
 
   it("preserves the existing direct-upload picker on the web", () => {
-    const { container, queryByRole } = render(
+    const { container } = render(
       <MemoryRouter initialEntries={["/app/posts/new"]}>
         <ComposerPage />
       </MemoryRouter>,
     );
 
-    expect(queryByRole("note", { name: "iPhone 앱 미디어 업로드 안내" })).toBeNull();
     expect(container.querySelector('input[type="file"]')).toBeEnabled();
   });
 });

@@ -20,10 +20,6 @@ import type {
   Conversation,
   ExecutiveOfficeCode,
   ExecutiveOfficesByYear,
-  LedgerEntry,
-  LedgerEntryInput,
-  MeetingMinute,
-  MeetingMinuteInput,
   MembershipApplication,
   MembershipRole,
   Message,
@@ -115,8 +111,9 @@ interface PendingPostPublish {
   userId: string;
   post: Post;
   storagePaths: string[];
-  sourceFiles: File[];
+  sourceFiles: Array<WeakRef<File>>;
   fileFingerprints: string[];
+  snapshotDiscarded?: boolean;
 }
 
 interface PendingMessageReconciliation {
@@ -154,6 +151,10 @@ export interface AppDataContextValue extends AppDataState {
   requestMembership: (input: ScopedMembershipRequestInput) => Promise<void>;
   createPost: (draft: PostDraft, onProgress?: (progress: number) => void) => Promise<Post>;
   addComment: (postId: string, body: string) => Promise<void>;
+  updatePost: (postId: string, revision: number, title: string, body: string, removeMediaIds?: string[], addMedia?: Array<Record<string, unknown>>) => Promise<void>;
+  deletePost: (postId: string, revision: number) => Promise<void>;
+  setPostReaction: (postId: string, kind: "amen" | "prayer" | "receipt", active: boolean) => Promise<void>;
+  blockPostAuthor: (postId: string) => Promise<void>;
   startConversation: (otherUserId: string) => Promise<string>;
   loadConversationMessages: (conversationId: string) => Promise<void>;
   sendMessage: (conversationId: string, body: string, files?: File[]) => Promise<void>;
@@ -165,10 +166,6 @@ export interface AppDataContextValue extends AppDataState {
     serviceYear: number,
     officeCodes: ExecutiveOfficeCode[],
   ) => Promise<void>;
-  saveMeetingMinute: (input: MeetingMinuteInput) => Promise<void>;
-  deleteMeetingMinute: (id: string) => Promise<void>;
-  saveLedgerEntry: (input: LedgerEntryInput) => Promise<void>;
-  deleteLedgerEntry: (id: string) => Promise<void>;
   markNotificationsRead: () => Promise<void>;
   loadMorePosts: () => Promise<void>;
   ensurePost: (postId: string) => Promise<"loaded" | "not_found">;
@@ -346,8 +343,6 @@ function createEmptyState(mode: AppDataState["mode"], loading = false): AppDataS
     conversations: [],
     messagesByConversation: {},
     notifications: [],
-    meetingMinutes: [],
-    ledgerEntries: [],
   };
 }
 
@@ -495,7 +490,15 @@ function withDemoDefaults(value: AppDataState): AppDataState {
     : undefined;
 
   return {
-    ...value,
+    mode: value.mode,
+    loading: value.loading,
+    requiredConsentDocuments: value.requiredConsentDocuments,
+    consentGateOpen: value.consentGateOpen,
+    organizations: value.organizations,
+    posts: value.posts,
+    conversations: value.conversations,
+    messagesByConversation: value.messagesByConversation,
+    notifications: value.notifications,
     viewer: value.viewer ? {
       ...value.viewer,
       membership: viewerMembership ? {
@@ -531,8 +534,6 @@ function withDemoDefaults(value: AppDataState): AppDataState {
         ? application.requestedServiceYear
         : undefined,
     })),
-    meetingMinutes: Array.isArray(value.meetingMinutes) ? value.meetingMinutes : [],
-    ledgerEntries: Array.isArray(value.ledgerEntries) ? value.ledgerEntries : [],
   };
 }
 
@@ -614,7 +615,21 @@ function mapBoardCategory(slug: unknown): Post["category"] {
   if (slug === "prayer") return "prayer";
   if (slug === "media") return "photo_video";
   if (slug === "fellowship") return "sharing";
+  if (slug === "anonymous-qa") return "anonymous_qa";
+  if (slug === "official-document") return "official_document";
+  if (slug === "family-news") return "family_news";
   return "notice";
+}
+
+function communityPostFields(row: Record<string, unknown>) {
+  return {
+    isAnonymous: row.is_anonymous === true, isOwner: row.is_owner === true,
+    isSystem: row.is_system === true,
+    revision: Number(row.revision ?? 1), amenCount: Number(row.amen_count ?? 0),
+    prayerCount: Number(row.prayer_count ?? 0), receiptCount: Number(row.receipt_count ?? 0),
+    reactedAmen: row.reacted_amen === true, reactedPrayer: row.reacted_prayer === true,
+    acknowledged: row.acknowledged === true,
+  };
 }
 
 function rowOf(value: unknown): Record<string, unknown> | null {
@@ -625,7 +640,35 @@ function rowsOf(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === "object") as Array<Record<string, unknown>> : [];
 }
 
-const EXECUTIVE_OPERATIONS_PAGE_SIZE = 500;
+async function fetchCommunityPosts(limit: number, signal?: AbortSignal) {
+  const data: Array<Record<string, unknown>> = [];
+  if (!supabase) return { data, error: null };
+  while (data.length < limit) {
+    const count = Math.min(500, limit - data.length);
+    const request = supabase.rpc("list_community_posts", { p_limit: count, p_offset: data.length });
+    const result = await (signal ? request.abortSignal(signal) : request);
+    if (result.error) return { data, error: result.error };
+    const rows = rowsOf(result.data); data.push(...rows);
+    if (rows.length < count) break;
+  }
+  return { data, error: null };
+}
+
+async function fetchCommunityComments(postIds: string[], signal?: AbortSignal) {
+  const data: Array<Record<string, unknown>> = [];
+  if (!supabase) return { data, error: null };
+  for (let start = 0; start < postIds.length; start += 500) {
+    for (let offset = 0; ; offset += 1000) {
+      const request = supabase.rpc("list_community_comments", { p_post_ids: postIds.slice(start, start + 500), p_limit: 1000, p_offset: offset });
+      const result = await (signal ? request.abortSignal(signal) : request);
+      if (result.error) return { data, error: result.error };
+      const rows = rowsOf(result.data); data.push(...rows);
+      if (rows.length < 1000) break;
+    }
+  }
+  return { data, error: null };
+}
+
 const MEMBERS_PAGE_SIZE = 500;
 const PROFILE_ID_CHUNK_SIZE = 100;
 
@@ -693,69 +736,18 @@ async function fetchProfilesByIds(profileIds: string[], signal?: AbortSignal) {
   };
 }
 
-async function fetchAllMeetingMinutes(organizationId: string, signal?: AbortSignal) {
-  if (!supabase) return { data: [] as Array<Record<string, unknown>>, error: null };
-  const data: Array<Record<string, unknown>> = [];
 
-  for (let from = 0; ; from += EXECUTIVE_OPERATIONS_PAGE_SIZE) {
-    const pageRequest = supabase
-      .from("meeting_minutes")
-      .select("id, organization_id, meeting_year, meeting_date, title, body, status, updated_at")
-      .eq("organization_id", organizationId)
-      .order("meeting_date", { ascending: false })
-      .order("id", { ascending: true })
-      .range(from, from + EXECUTIVE_OPERATIONS_PAGE_SIZE - 1);
-    const result = await (signal ? pageRequest.abortSignal(signal) : pageRequest);
-    if (result.error) return { data, error: result.error };
-    const page = rowsOf(result.data);
-    data.push(...page);
-    if (page.length < EXECUTIVE_OPERATIONS_PAGE_SIZE) break;
-  }
 
-  return { data, error: null };
-}
 
-async function fetchAllLedgerEntries(organizationId: string, signal?: AbortSignal) {
-  if (!supabase) return { data: [] as Array<Record<string, unknown>>, error: null };
-  const data: Array<Record<string, unknown>> = [];
-
-  for (let from = 0; ; from += EXECUTIVE_OPERATIONS_PAGE_SIZE) {
-    const pageRequest = supabase
-      .from("ledger_entries")
-      .select("id, organization_id, fiscal_year, entry_date, entry_type, category, description, amount, memo, updated_at")
-      .eq("organization_id", organizationId)
-      .order("entry_date", { ascending: false })
-      .order("id", { ascending: true })
-      .range(from, from + EXECUTIVE_OPERATIONS_PAGE_SIZE - 1);
-    const result = await (signal ? pageRequest.abortSignal(signal) : pageRequest);
-    if (result.error) return { data, error: result.error };
-    const page = rowsOf(result.data);
-    data.push(...page);
-    if (page.length < EXECUTIVE_OPERATIONS_PAGE_SIZE) break;
-  }
-
-  return { data, error: null };
-}
 
 function mapMembershipStatus(value: unknown): "active" | "suspended" | "revoked" {
   if (value === "suspended" || value === "revoked") return value;
   return "active";
 }
 
-function canWriteMeetingMinutes(viewer: ViewerContext | null): boolean {
-  if (viewer?.membership?.role !== "executive") return false;
-  return viewer.membership.executiveOfficeCodes.some((code) =>
-    code === "president"
-      || code === "vice_president"
-      || code === "general_secretary"
-      || code === "secretary",
-  );
-}
 
-function canWriteLedger(viewer: ViewerContext | null): boolean {
-  if (viewer?.membership?.role !== "executive") return false;
-  return viewer.membership.executiveOfficeCodes.some((code) => code === "president" || code === "treasurer");
-}
+
+
 
 interface SignedUrlRequestEntry {
   generation: number;
@@ -909,6 +901,17 @@ function mapNotification(row: Record<string, unknown>): Notification {
 }
 
 export function AppDataProvider({ children }: PropsWithChildren) {
+  useEffect(() => {
+    if (!canPersistSensitiveClientState()) return;
+    try {
+      for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.sessionStorage.key(index);
+        if (key?.startsWith("jaegun-minute-operation-v1:") || key?.startsWith("jaegun-ledger-operation-v1:")) {
+          window.sessionStorage.removeItem(key);
+        }
+      }
+    } catch { /* Unavailable client storage must not affect server authorization. */ }
+  }, []);
   const [state, setState] = useState<AppDataState>(() =>
     import.meta.env.DEV && !isSupabaseConfigured
       ? readDemoState()
@@ -945,10 +948,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const pendingPostPublishesRef = useRef(new Map<string, PendingPostPublish>());
   const pendingPostCreatesRef = useRef(new Map<string, Promise<Post>>());
   const pendingMessageReconciliationsRef = useRef(readMessageReconciliations());
-  const pendingMeetingMinuteIdsRef = useRef(new Map<string, string>());
-  const pendingMeetingMinuteSavesRef = useRef(new Map<string, Promise<string>>());
-  const pendingLedgerEntryIdsRef = useRef(new Map<string, string>());
-  const pendingLedgerEntrySavesRef = useRef(new Map<string, Promise<string>>());
   const conversationMessageLoadGenerationRef = useRef(new Map<string, number>());
   const conversationStateGenerationRef = useRef(new Map<string, number>());
   const conversationSummaryLoadGenerationRef = useRef(0);
@@ -1272,7 +1271,34 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     }
   }, []);
 
-  const invalidateRemoteWork = useCallback((nextUserId: string | null, preserveActiveLoad = false) => {
+  const discardPostOperationSnapshots = useCallback(() => {
+    pendingPostCreatesRef.current.clear();
+    // Keep only actor-bound reconciliation receipts for already-uploaded bytes.
+    // Discarding these could duplicate a publication whose response was lost.
+    for (const pending of pendingPostPublishesRef.current.values()) {
+      pending.post = {
+        id: pending.post.id, organizationId: pending.post.organizationId,
+        authorId: pending.userId, authorName: "", category: pending.post.category,
+        title: "", body: "", createdAt: pending.post.createdAt, comments: [], reactionCount: 0,
+        media: pending.post.media.map((media) => ({
+          id: media.id, kind: media.kind, storagePath: media.storagePath,
+          mimeType: media.mimeType, byteSize: media.byteSize, url: "",
+        })),
+      };
+      pending.snapshotDiscarded = true;
+    }
+    if (!canPersistSensitiveClientState()) return;
+    try {
+      for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.sessionStorage.key(index);
+        if (key?.startsWith("jaegun-post-operation-v1:")) window.sessionStorage.removeItem(key);
+      }
+    } catch { /* Private drafts never survive a usable session transition through fallback storage. */ }
+  }, []);
+
+  const invalidateRemoteWork = useCallback((nextUserId: string | null, preserveActiveLoad = false, discardProtectedDrafts = false) => {
+    const previousActor = activeRemoteUserIdRef.current ?? stateRef.current.viewer?.profile.id ?? null;
+    if (discardProtectedDrafts || (previousActor !== null && previousActor !== nextUserId)) discardPostOperationSnapshots();
     if (!preserveActiveLoad) {
       remoteLoadAbortControllerRef.current?.abort();
       remoteLoadAbortControllerRef.current = null;
@@ -1302,13 +1328,14 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       generation: remoteLoadGenerationRef.current,
       sessionEpoch: remoteSessionEpochRef.current,
     };
-  }, []);
+  }, [discardPostOperationSnapshots]);
 
   const isRemoteActorCurrent = useCallback((sessionEpoch: number, userId: string) =>
     remoteSessionEpochRef.current === sessionEpoch
     && activeRemoteUserIdRef.current === userId
     && !remoteLoadsBlockedRef.current
     && stateRef.current.mode === "supabase"
+    && stateRef.current.consentGateOpen === true
     && stateRef.current.viewer?.profile.id === userId,
   []);
 
@@ -1430,6 +1457,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       }
       const consentGateOpen = requiredConsentsAreCurrent(safetyPrivacyState);
       if (!consentGateOpen) {
+        discardPostOperationSnapshots();
         clearSignedUrlCaches();
         replaceState({
           ...createEmptyState("supabase", false),
@@ -1488,12 +1516,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       : membershipOrganizationId
         ? fetchAllOrganizationMemberships(membershipOrganizationId, abortController.signal)
         : Promise.resolve({ data: [], error: null });
-    const meetingMinutesRequest = membershipOrganizationId
-      ? fetchAllMeetingMinutes(membershipOrganizationId, abortController.signal)
-      : Promise.resolve({ data: [], error: null });
-    const ledgerEntriesRequest = membershipOrganizationId
-      ? fetchAllLedgerEntries(membershipOrganizationId, abortController.signal)
-      : Promise.resolve({ data: [], error: null });
 
     const [
       boardsResult,
@@ -1502,21 +1524,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       membersResult,
       conversationsResult,
       notificationsResult,
-      meetingMinutesResult,
-      ledgerEntriesResult,
     ] = await Promise.all([
       supabase
         .from("boards")
         .select("id, organization_id, slug, name, staff_only_posting")
         .abortSignal(abortController.signal),
-      supabase
-        .from("posts")
-        .select("id, organization_id, board_id, author_id, author_label, title, body, status, is_system, is_pinned, published_at, created_at")
-        .eq("status", "published")
-        .order("is_pinned", { ascending: false })
-        .order("published_at", { ascending: false })
-        .limit(postLimit)
-        .abortSignal(abortController.signal),
+      fetchCommunityPosts(postLimit, abortController.signal),
       supabase
         .from("membership_applications")
         .select("id, organization_id, user_id, requested_role, requested_church_title_code, requested_executive_office_codes, requested_service_year, status, applicant_note, review_reason, created_at, reviewed_at")
@@ -1531,8 +1544,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         .order("created_at", { ascending: false })
         .limit(50)
         .abortSignal(abortController.signal),
-      meetingMinutesRequest,
-      ledgerEntriesRequest,
     ]);
 
     const firstError = [
@@ -1542,8 +1553,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       membersResult.error,
       conversationsResult.error,
       notificationsResult.error,
-      meetingMinutesResult.error,
-      ledgerEntriesResult.error,
     ].find(Boolean);
     if (firstError) throw firstError;
 
@@ -1552,8 +1561,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     const applicationRows = rowsOf(applicationsResult.data);
     const memberRows = rowsOf(membersResult.data);
     const conversationRows = rowsOf(conversationsResult.data);
-    const meetingMinuteRows = rowsOf(meetingMinutesResult.data);
-    const ledgerEntryRows = rowsOf(ledgerEntriesResult.data);
     const postIds = postRows.map((row) => String(row.id));
 
     const [postMediaResult, commentsResult, executiveAssignmentsResult] = await Promise.all([
@@ -1561,7 +1568,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         ? supabase.from("post_media").select("id, post_id, storage_path, kind, mime_type, byte_size, alt_text, sort_order").in("post_id", postIds).order("sort_order").abortSignal(abortController.signal)
         : Promise.resolve({ data: [], error: null }),
       postIds.length
-        ? supabase.from("comments").select("id, post_id, author_id, body, status, created_at").in("post_id", postIds).eq("status", "active").order("created_at").abortSignal(abortController.signal)
+        ? fetchCommunityComments(postIds, abortController.signal)
         : Promise.resolve({ data: [], error: null }),
       fetchActiveExecutiveOfficeAssignments(serverServiceYear, abortController.signal),
     ]);
@@ -1683,12 +1690,13 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           id: String(row.id),
           organizationId: row.organization_id ? String(row.organization_id) : undefined,
           authorId,
+          ...communityPostFields(row),
           authorName: row.author_label ? String(row.author_label) : profileMap.get(authorId)?.name ?? "공동체 회원",
           authorAvatarUrl: profileMap.get(authorId)?.avatarUrl,
           category: mapBoardCategory(board?.slug),
           title: String(row.title),
           body: String(row.body),
-          isOfficial: row.is_system === true || board?.slug === "notice",
+          isOfficial: row.is_system === true || board?.slug === "notice" || board?.slug === "official-document",
           isPinned: row.is_pinned === true,
           createdAt: String(row.published_at ?? row.created_at),
           media: mediaRows.filter((media) => String(media.post_id) === String(row.id) && media.signed_url).map((media) => ({
@@ -1704,11 +1712,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
             id: String(comment.id),
             postId: String(row.id),
             authorId: String(comment.author_id ?? "deleted-user"),
-            authorName: profileMap.get(String(comment.author_id))?.name ?? "공동체 회원",
+            isOwner: comment.is_owner === true,
+            authorName: comment.author_label ? String(comment.author_label) : profileMap.get(String(comment.author_id))?.name ?? "공동체 회원",
             body: String(comment.body),
             createdAt: String(comment.created_at),
           })),
-          reactionCount: 0,
+          reactionCount: Number(row.amen_count ?? 0) + Number(row.prayer_count ?? 0),
         };
       }),
       applications,
@@ -1731,30 +1740,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       conversations,
       messagesByConversation,
       notifications: rowsOf(notificationsResult.data).map(mapNotification),
-      meetingMinutes: meetingMinuteRows.map((row): MeetingMinute => ({
-        id: String(row.id),
-        organizationId: String(row.organization_id),
-        meetingYear: Number(row.meeting_year),
-        meetingDate: String(row.meeting_date),
-        title: String(row.title),
-        body: String(row.body),
-        status: row.status === "published" ? "published" : "draft",
-        authorName: "운영진",
-        updatedAt: String(row.updated_at),
-      })),
-      ledgerEntries: ledgerEntryRows.map((row): LedgerEntry => ({
-        id: String(row.id),
-        organizationId: String(row.organization_id),
-        fiscalYear: Number(row.fiscal_year),
-        entryDate: String(row.entry_date),
-        entryType: row.entry_type === "income" ? "income" : "expense",
-        category: String(row.category),
-        description: String(row.description),
-        amount: Number(row.amount),
-        memo: row.memo ? String(row.memo) : undefined,
-        authorName: "운영진",
-        updatedAt: String(row.updated_at),
-      })),
     };
     if (!isRequestCurrent()) return;
     const currentMessages = stateRef.current.messagesByConversation;
@@ -1854,7 +1839,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         window.setTimeout(() => void loadRemoteRef.current().catch(() => undefined), 0);
       }
     }
-  }, [flushMessageReconciliations, flushPostCleanupQueues, invalidateRemoteWork, replaceState, updateState]);
+  }, [discardPostOperationSnapshots, flushMessageReconciliations, flushPostCleanupQueues, invalidateRemoteWork, replaceState, updateState]);
 
   useEffect(() => {
     loadRemoteRef.current = loadRemote;
@@ -2796,6 +2781,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     const viewer = state.viewer;
     const membership = viewer?.membership;
     if (!viewer || !membership) throw new Error("승인된 회원만 글을 작성할 수 있습니다.");
+    if (!draft.clientOperationId) throw new Error("같은 게시 요청을 확인할 수 있는 식별자가 필요합니다.");
     assertNativeMediaUploadsAllowed(draft.files.length);
     const requestSessionEpoch = remoteSessionEpochRef.current;
     const requestUserId = viewer.profile.id;
@@ -2804,32 +2790,19 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       if (validation) throw new Error(validation);
     }
     if (supabase && state.mode === "supabase") {
-      const remoteOperationKey = draft.clientOperationId
-        ? `${requestUserId}:${draft.clientOperationId}`
-        : JSON.stringify([
-        requestUserId,
-        membership.organizationId,
-        draft.category,
-        draft.title,
-        draft.body,
-        ...draft.files.map((file) => [file.name, file.type, file.size, file.lastModified]),
-        ]);
+      const remoteOperationKey = `${requestUserId}:${draft.clientOperationId}`;
       const existingCreate = pendingPostCreatesRef.current.get(remoteOperationKey);
       if (existingCreate) return existingCreate;
       const remoteCreate = (async () => {
       const client = supabase;
-      const postOperationId = draft.clientOperationId ?? crypto.randomUUID();
-      const publishKey = draft.clientOperationId
-        ? `${requestUserId}:${draft.clientOperationId}`
-        : JSON.stringify([
-        requestUserId,
-        membership.organizationId,
-        draft.category,
-        draft.title,
-        draft.body,
-        ...draft.files.map((file) => [file.name, file.type, file.size, file.lastModified]),
-        ]);
+      const postOperationId = draft.clientOperationId;
+      const publishKey = remoteOperationKey;
       const finishPublishedPost = (post: Post) => {
+        if (!isRemoteActorCurrent(requestSessionEpoch, requestUserId)) {
+          throw new DOMException("게시 요청의 계정 또는 세션이 변경되었습니다.", "AbortError");
+        }
+        post = { ...post, isOwner: true, revision: 1, isAnonymous: draft.category === "anonymous_qa",
+          ...(draft.category === "anonymous_qa" ? { authorId: "", authorName: "익명", authorAvatarUrl: undefined } : {}) };
         const liveStoragePaths = pendingPostPublishesRef.current.get(publishKey)?.storagePaths ?? [];
         pendingPostPublishesRef.current.delete(publishKey);
         clearPublishedPostCleanup(requestUserId, post.id, liveStoragePaths);
@@ -2856,6 +2829,9 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         sharing: "fellowship",
         prayer: "prayer",
         photo_video: "media",
+        anonymous_qa: "anonymous-qa",
+        official_document: "official-document",
+        family_news: "family-news",
       };
       const { data: boardRow, error: boardError } = await supabase
         .from("boards")
@@ -2864,13 +2840,14 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         .eq("slug", boardSlug[draft.category])
         .single();
       if (boardError) throw boardError;
-      const saveOwnedDraft = async () => client.rpc("save_owned_post_draft", {
+      const saveOwnedDraft = async () => client.rpc("save_community_post_draft", {
         p_post_id: postOperationId,
         p_expected_author_id: requestUserId,
         p_organization_id: membership.organizationId,
         p_board_id: boardRow.id,
         p_title: draft.title,
         p_body: draft.body,
+        p_is_anonymous: draft.category === "anonymous_qa",
       });
       const verifySavedDraft = (row: Record<string, unknown>) => {
         if (String(row.board_id) !== String(boardRow.id)
@@ -2892,6 +2869,25 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           throw new Error("게시글 저장 결과를 확인하지 못했습니다. 같은 내용으로 다시 시도해 주세요.");
         }
         const statusRow = rowOf(statusResult.data);
+        if (retryPending.snapshotDiscarded && statusRow
+          && (statusRow.status === "published" || (statusRow.status === "draft" && statusRow.scope_recreated !== true))) {
+          if (typeof statusRow.title !== "string" || typeof statusRow.body !== "string") {
+            throw new Error("게시글의 서버 저장 내용을 확인하지 못했습니다. 같은 게시 요청으로 다시 확인해 주세요.");
+          }
+          const media = await Promise.all(retryPending.post.media.map(async (item) => {
+            if (!item.storagePath) throw new Error("이전 첨부 파일의 서버 경로를 확인하지 못했습니다.");
+            const url = await getCachedSignedUrl("community-media", item.storagePath,
+              () => isRemoteActorCurrent(requestSessionEpoch, requestUserId));
+            if (!url) throw new Error("이전 첨부 파일의 현재 접근 권한을 확인하지 못했습니다.");
+            return { ...item, url };
+          }));
+          if (!isRemoteActorCurrent(requestSessionEpoch, requestUserId)) {
+            throw new DOMException("게시 요청의 계정 또는 세션이 변경되었습니다.", "AbortError");
+          }
+          retryPending.post = { ...retryPending.post, title: statusRow.title, body: statusRow.body,
+            authorName: viewer.profile.displayName, media };
+          retryPending.snapshotDiscarded = false;
+        }
         if (statusRow?.status === "published") {
           return finishPublishedPost({
             ...retryPending.post,
@@ -2902,7 +2898,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
           verifySavedDraft(statusRow);
           const currentFileFingerprints = draft.files.map(mediaFileFingerprint);
           const sameSourceFiles = retryPending.sourceFiles.length === draft.files.length
-            && draft.files.every((file, index) => file === retryPending.sourceFiles[index]);
+            && draft.files.every((file, index) => file === retryPending.sourceFiles[index].deref());
           const sameFingerprints = retryPending.fileFingerprints.length === currentFileFingerprints.length
             && currentFileFingerprints.every((fingerprint, index) => fingerprint === retryPending.fileFingerprints[index]);
           retryRequiresFreshMedia = statusRow.scope_recreated === true
@@ -3049,7 +3045,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         const pendingPost: PendingPostPublish = {
           userId: requestUserId,
           storagePaths: [...attemptedObjectPaths],
-          sourceFiles: [...draft.files],
+          sourceFiles: draft.files.map((file) => new WeakRef(file)),
           fileFingerprints: draft.files.map(mediaFileFingerprint),
           post: {
             id: String(postRow.id),
@@ -3140,10 +3136,14 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     }));
     onProgress?.(1);
     const post: Post = {
-      id: draft.clientOperationId ?? crypto.randomUUID(),
+      id: draft.clientOperationId,
       organizationId: membership.organizationId,
       authorId: viewer.profile.id,
       authorName: viewer.profile.displayName,
+      isAnonymous: draft.category === "anonymous_qa",
+      isOwner: true,
+      revision: 1,
+      ...(draft.category === "anonymous_qa" ? { authorId: "", authorName: "익명" } : {}),
       category: draft.category,
       title: draft.title,
       body: draft.body,
@@ -3159,7 +3159,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   const ensurePost = useCallback(async (postId: string): Promise<"loaded" | "not_found"> => {
     const normalizedPostId = postId.trim();
     if (!normalizedPostId) return "not_found";
-    if (stateRef.current.posts.some((post) => post.id === normalizedPostId)) return "loaded";
+    if (stateRef.current.mode !== "supabase" && stateRef.current.posts.some((post) => post.id === normalizedPostId)) return "loaded";
     if (!supabase || stateRef.current.mode !== "supabase") return "not_found";
 
     const sessionEpoch = remoteSessionEpochRef.current;
@@ -3177,15 +3177,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       throw cancelledError;
     };
 
-    const { data: postData, error: postError } = await supabase
-      .from("posts")
-      .select("id, organization_id, board_id, author_id, author_label, title, body, status, is_system, is_pinned, published_at, created_at")
-      .eq("id", normalizedPostId)
-      .eq("status", "published")
-      .maybeSingle();
+    const { data: postData, error: postError } = await supabase.rpc("list_community_posts", { p_post_id: normalizedPostId, p_limit: 1 });
     if (postError) throw postError;
     assertRequestCurrent();
-    const postRow = rowOf(postData);
+    const postRow = rowsOf(postData)[0];
     if (!postRow) return "not_found";
 
     const [boardResult, mediaResult, commentsResult] = await Promise.all([
@@ -3199,23 +3194,18 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         .select("id, post_id, storage_path, kind, mime_type, byte_size, alt_text, sort_order")
         .eq("post_id", normalizedPostId)
         .order("sort_order"),
-      supabase
-        .from("comments")
-        .select("id, post_id, author_id, body, status, created_at")
-        .eq("post_id", normalizedPostId)
-        .eq("status", "active")
-        .order("created_at"),
+      fetchCommunityComments([normalizedPostId]),
     ]);
     const relatedError = [boardResult.error, mediaResult.error, commentsResult.error].find(Boolean);
     if (relatedError) throw relatedError;
     assertRequestCurrent();
 
     const commentRows = rowsOf(commentsResult.data);
-    const authorId = postRow.author_id ? String(postRow.author_id) : "operations";
+    const authorId = postRow.author_id ? String(postRow.author_id) : "";
     const profileIds = Array.from(new Set([
       authorId,
       ...commentRows.map((comment) => comment.author_id ? String(comment.author_id) : "").filter(Boolean),
-    ]));
+    ].filter(Boolean)));
     const profilesResult = await fetchProfilesByIds(profileIds);
     if (profilesResult.error) throw profilesResult.error;
     assertRequestCurrent();
@@ -3241,6 +3231,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       id: String(postRow.id),
       organizationId: postRow.organization_id ? String(postRow.organization_id) : undefined,
       authorId,
+      ...communityPostFields(postRow),
       authorName: postRow.author_label
         ? String(postRow.author_label)
         : profileMap.get(authorId)?.name ?? "공동체 회원",
@@ -3248,7 +3239,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       category: mapBoardCategory(boardRow?.slug),
       title: String(postRow.title),
       body: String(postRow.body),
-      isOfficial: postRow.is_system === true || boardRow?.slug === "notice",
+      isOfficial: postRow.is_system === true || boardRow?.slug === "notice" || boardRow?.slug === "official-document",
       isPinned: postRow.is_pinned === true,
       createdAt: String(postRow.published_at ?? postRow.created_at),
       media: media.flatMap(({ row, url }) => url ? [{
@@ -3264,11 +3255,12 @@ export function AppDataProvider({ children }: PropsWithChildren) {
         id: String(comment.id),
         postId: normalizedPostId,
         authorId: String(comment.author_id ?? "deleted-user"),
-        authorName: profileMap.get(String(comment.author_id))?.name ?? "공동체 회원",
+        isOwner: comment.is_owner === true,
+        authorName: comment.author_label ? String(comment.author_label) : profileMap.get(String(comment.author_id))?.name ?? "공동체 회원",
         body: String(comment.body),
         createdAt: String(comment.created_at),
       })),
-      reactionCount: 0,
+      reactionCount: Number(postRow.amen_count ?? 0) + Number(postRow.prayer_count ?? 0),
     };
     assertRequestCurrent();
     updateState((previous) => {
@@ -3282,6 +3274,43 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     });
     return "loaded";
   }, [updateState]);
+
+  const mutateCommunityPost = useCallback(async (name: string, parameters: Record<string, unknown>, postId: string, remove = false) => {
+    const actor = stateRef.current.viewer?.profile.id;
+    const epoch = remoteSessionEpochRef.current;
+    if (!actor || stateRef.current.consentGateOpen !== true) throw new Error("로그인과 최신 필수 동의가 필요합니다.");
+    if (supabase && stateRef.current.mode === "supabase") {
+      const scopedParameters = name === "set_post_reaction" || name === "block_community_post_author"
+        ? { ...parameters, p_expected_actor_id: actor } : parameters;
+      const result = await supabase.rpc(name, scopedParameters);
+      if (result.error) throw result.error;
+      if (!isRemoteActorCurrent(epoch, actor)) return;
+      if (!remove) { await ensurePost(postId); return; }
+    }
+    if (remove) updateState((previous) => ({ ...previous, posts: previous.posts.filter((item) => item.id !== postId) }));
+  }, [ensurePost, isRemoteActorCurrent, updateState]);
+
+  const updatePost = useCallback(async (postId: string, revision: number, title: string, body: string, removeMediaIds: string[] = [], addMedia: Array<Record<string, unknown>> = []) => {
+    await mutateCommunityPost("update_owned_community_post", { p_post_id: postId, p_expected_revision: revision, p_title: title, p_body: body, p_remove_media_ids: removeMediaIds, p_add_media: addMedia }, postId);
+    if (stateRef.current.mode === "demo") updateState((previous) => ({ ...previous, posts: previous.posts.map((post) => post.id === postId ? { ...post, title, body, revision: revision + 1, media: post.media.filter((media) => !removeMediaIds.includes(media.id)) } : post) }));
+  }, [mutateCommunityPost, updateState]);
+  const deletePost = useCallback(async (postId: string, revision: number) => {
+    await mutateCommunityPost("update_owned_community_post", { p_post_id: postId, p_expected_revision: revision, p_title: "", p_body: "", p_delete: true }, postId, true);
+  }, [mutateCommunityPost]);
+  const blockPostAuthor = useCallback(async (postId: string) => {
+    await mutateCommunityPost("block_community_post_author", { p_post_id: postId }, postId, true);
+    scheduleRemoteRefresh();
+  }, [mutateCommunityPost, scheduleRemoteRefresh]);
+  const setPostReaction = useCallback(async (postId: string, kind: "amen" | "prayer" | "receipt", active: boolean) => {
+    await mutateCommunityPost("set_post_reaction", { p_post_id: postId, p_kind: kind, p_active: active, p_expected_revision: stateRef.current.posts.find((post) => post.id === postId)?.revision ?? 1 }, postId);
+    if (stateRef.current.mode === "demo") updateState((previous) => ({ ...previous, posts: previous.posts.map((post) => {
+      if (post.id !== postId) return post;
+      const flag = kind === "amen" ? "reactedAmen" : kind === "prayer" ? "reactedPrayer" : "acknowledged";
+      const count = kind === "amen" ? "amenCount" : kind === "prayer" ? "prayerCount" : "receiptCount";
+      const desired = kind === "receipt" ? true : active;
+      return { ...post, [flag]: desired, [count]: Math.max(0, (post[count] ?? 0) + (desired === Boolean(post[flag]) ? 0 : desired ? 1 : -1)) };
+    }) }));
+  }, [mutateCommunityPost, updateState]);
 
   const addComment = useCallback(async (postId: string, body: string) => {
     if (!state.viewer) throw new Error("로그인이 필요합니다.");
@@ -3781,7 +3810,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       window.clearTimeout(conversationTimer);
       window.clearTimeout(notificationTimer);
       pendingConversationIds.clear();
-      invalidateRemoteWork(realtimeViewerId);
+      invalidateRemoteWork(realtimeViewerId, false, true);
       const current = stateRef.current;
       const profile = current.viewer?.profile;
       replaceState({
@@ -3837,10 +3866,7 @@ export function AppDataProvider({ children }: PropsWithChildren) {
       .on("postgres_changes", { event: "*", schema: "public", table: "membership_applications", select: ["id"] }, scheduleAggregateRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "organization_memberships", select: ["id"] }, scheduleAggregateRefresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "executive_office_assignments", select: ["id"] }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "meeting_minutes", select: ["id"] }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "ledger_entries", select: ["id"] }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "posts", select: ["id"] }, scheduleAggregateRefresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "comments", select: ["id"] }, scheduleAggregateRefresh)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "community_board_changes", select: ["id"] }, scheduleAggregateRefresh)
       .subscribe();
     return () => {
       cancelled = true;
@@ -4038,216 +4064,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     }));
   }, [isRemoteActorCurrent, scheduleRemoteRefresh, serviceYear, state.members, state.mode, state.viewer, updateState]);
 
-  const saveMeetingMinute = useCallback(async (input: MeetingMinuteInput) => {
-    const viewer = state.viewer;
-    if (!viewer) throw new Error("로그인이 필요합니다.");
-    const requestSessionEpoch = remoteSessionEpochRef.current;
-    const requestUserId = viewer.profile.id;
-    const organizationId = viewer.membership?.organizationId;
-    if (!organizationId) throw new Error("승인된 교회 소속이 필요합니다.");
-    if (!canWriteMeetingMinutes(viewer)) throw new Error("현재 직책에는 회의록 작성 권한이 없습니다.");
-    if (input.meetingYear !== serviceYear) throw new Error("지난 연도 회의록은 열람만 할 수 있습니다.");
-    const title = input.title.trim();
-    const body = input.body.trim();
-    if (!title || !body) throw new Error("회의록 제목과 내용을 입력해 주세요.");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.meetingDate) || Number(input.meetingDate.slice(0, 4)) !== input.meetingYear) {
-      throw new Error("회의 연도와 회의 날짜를 확인해 주세요.");
-    }
-    let savedId = input.id ?? input.clientOperationId;
-    if (supabase && state.mode === "supabase") {
-      const saveKey = JSON.stringify([
-        requestUserId,
-        organizationId,
-        input.id ?? input.clientOperationId ?? null,
-        input.meetingYear,
-        input.meetingDate,
-        title,
-        body,
-        input.status,
-      ]);
-      const existingSave = pendingMeetingMinuteSavesRef.current.get(saveKey);
-      if (existingSave) {
-        await existingSave;
-        return;
-      }
-      const stableId = input.id
-        ?? input.clientOperationId
-        ?? pendingMeetingMinuteIdsRef.current.get(saveKey)
-        ?? crypto.randomUUID();
-      if (!input.id) pendingMeetingMinuteIdsRef.current.set(saveKey, stableId);
-      const saveRequest = (async () => {
-        const { data, error: rpcError } = await supabase.rpc("save_meeting_minute", {
-          p_id: stableId,
-          p_create: !input.id,
-          p_organization_id: organizationId,
-          p_meeting_year: input.meetingYear,
-          p_meeting_date: input.meetingDate,
-          p_title: title,
-          p_body: body,
-          p_status: input.status,
-        });
-        if (rpcError) throw rpcError;
-        return data ? String(data) : stableId;
-      })();
-      pendingMeetingMinuteSavesRef.current.set(saveKey, saveRequest);
-      try {
-        savedId = await saveRequest;
-        pendingMeetingMinuteIdsRef.current.delete(saveKey);
-      } finally {
-        if (pendingMeetingMinuteSavesRef.current.get(saveKey) === saveRequest) {
-          pendingMeetingMinuteSavesRef.current.delete(saveKey);
-        }
-      }
-      if (!isRemoteActorCurrent(requestSessionEpoch, requestUserId)) return;
-      scheduleRemoteRefresh();
-    }
-    const minute: MeetingMinute = {
-      id: savedId ?? crypto.randomUUID(),
-      organizationId,
-      meetingYear: input.meetingYear,
-      meetingDate: input.meetingDate,
-      title,
-      body,
-      status: input.status,
-      authorName: viewer.profile.displayName,
-      updatedAt: new Date().toISOString(),
-    };
-    updateState((previous) => ({
-      ...previous,
-      meetingMinutes: [minute, ...previous.meetingMinutes.filter((item) => item.id !== minute.id)]
-        .sort((left, right) => right.meetingDate.localeCompare(left.meetingDate)),
-    }));
-  }, [isRemoteActorCurrent, scheduleRemoteRefresh, serviceYear, state.mode, state.viewer, updateState]);
-
-  const deleteMeetingMinute = useCallback(async (id: string) => {
-    const requestSessionEpoch = remoteSessionEpochRef.current;
-    const requestUserId = state.viewer?.profile.id;
-    if (!canWriteMeetingMinutes(state.viewer)) throw new Error("현재 직책에는 회의록 삭제 권한이 없습니다.");
-    const target = state.meetingMinutes.find((item) => item.id === id);
-    if (!target) throw new Error("삭제할 회의록을 찾을 수 없습니다.");
-    if (target.meetingYear !== serviceYear) throw new Error("지난 연도 회의록은 삭제할 수 없습니다.");
-    if (supabase && state.mode === "supabase") {
-      const { error: rpcError } = await supabase.rpc("delete_meeting_minute", { p_id: id });
-      if (rpcError) throw rpcError;
-      if (!requestUserId || !isRemoteActorCurrent(requestSessionEpoch, requestUserId)) return;
-      scheduleRemoteRefresh();
-    }
-    updateState((previous) => ({
-      ...previous,
-      meetingMinutes: previous.meetingMinutes.filter((item) => item.id !== id),
-    }));
-  }, [isRemoteActorCurrent, scheduleRemoteRefresh, serviceYear, state.meetingMinutes, state.mode, state.viewer, updateState]);
-
-  const saveLedgerEntry = useCallback(async (input: LedgerEntryInput) => {
-    const viewer = state.viewer;
-    if (!viewer) throw new Error("로그인이 필요합니다.");
-    const requestSessionEpoch = remoteSessionEpochRef.current;
-    const requestUserId = viewer.profile.id;
-    const organizationId = viewer.membership?.organizationId;
-    if (!organizationId) throw new Error("승인된 교회 소속이 필요합니다.");
-    if (!canWriteLedger(viewer)) throw new Error("현재 직책에는 회계장부 작성 권한이 없습니다.");
-    if (input.fiscalYear !== serviceYear) throw new Error("지난 연도 회계장부는 열람만 할 수 있습니다.");
-    const category = input.category.trim();
-    const description = input.description.trim();
-    const memo = input.memo?.trim() || undefined;
-    if (!category || !description) throw new Error("회계 분류와 설명을 입력해 주세요.");
-    if (!Number.isFinite(input.amount) || input.amount <= 0 || input.amount > 9_999_999_999_999.99) {
-      throw new Error("금액은 0보다 크고 9조 9,999억 9,999만 9,999.99원 이하여야 합니다.");
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.entryDate) || Number(input.entryDate.slice(0, 4)) !== input.fiscalYear) {
-      throw new Error("회계연도와 거래 날짜를 확인해 주세요.");
-    }
-    let savedId = input.id ?? input.clientOperationId;
-    if (supabase && state.mode === "supabase") {
-      const saveKey = JSON.stringify([
-        requestUserId,
-        organizationId,
-        input.id ?? input.clientOperationId ?? null,
-        input.fiscalYear,
-        input.entryDate,
-        input.entryType,
-        category,
-        description,
-        input.amount,
-        memo ?? null,
-      ]);
-      const existingSave = pendingLedgerEntrySavesRef.current.get(saveKey);
-      if (existingSave) {
-        await existingSave;
-        return;
-      }
-      const stableId = input.id
-        ?? input.clientOperationId
-        ?? pendingLedgerEntryIdsRef.current.get(saveKey)
-        ?? crypto.randomUUID();
-      if (!input.id) pendingLedgerEntryIdsRef.current.set(saveKey, stableId);
-      const saveRequest = (async () => {
-        const { data, error: rpcError } = await supabase.rpc("save_ledger_entry", {
-          p_id: stableId,
-          p_create: !input.id,
-          p_organization_id: organizationId,
-          p_fiscal_year: input.fiscalYear,
-          p_entry_date: input.entryDate,
-          p_entry_type: input.entryType,
-          p_category: category,
-          p_description: description,
-          p_amount: input.amount,
-          p_memo: memo ?? null,
-        });
-        if (rpcError) throw rpcError;
-        return data ? String(data) : stableId;
-      })();
-      pendingLedgerEntrySavesRef.current.set(saveKey, saveRequest);
-      try {
-        savedId = await saveRequest;
-        pendingLedgerEntryIdsRef.current.delete(saveKey);
-      } finally {
-        if (pendingLedgerEntrySavesRef.current.get(saveKey) === saveRequest) {
-          pendingLedgerEntrySavesRef.current.delete(saveKey);
-        }
-      }
-      if (!isRemoteActorCurrent(requestSessionEpoch, requestUserId)) return;
-      scheduleRemoteRefresh();
-    }
-    const entry: LedgerEntry = {
-      id: savedId ?? crypto.randomUUID(),
-      organizationId,
-      fiscalYear: input.fiscalYear,
-      entryDate: input.entryDate,
-      entryType: input.entryType,
-      category,
-      description,
-      amount: input.amount,
-      memo,
-      authorName: viewer.profile.displayName,
-      updatedAt: new Date().toISOString(),
-    };
-    updateState((previous) => ({
-      ...previous,
-      ledgerEntries: [entry, ...previous.ledgerEntries.filter((item) => item.id !== entry.id)]
-        .sort((left, right) => right.entryDate.localeCompare(left.entryDate)),
-    }));
-  }, [isRemoteActorCurrent, scheduleRemoteRefresh, serviceYear, state.mode, state.viewer, updateState]);
-
-  const deleteLedgerEntry = useCallback(async (id: string) => {
-    const requestSessionEpoch = remoteSessionEpochRef.current;
-    const requestUserId = state.viewer?.profile.id;
-    if (!canWriteLedger(state.viewer)) throw new Error("현재 직책에는 회계장부 삭제 권한이 없습니다.");
-    const target = state.ledgerEntries.find((item) => item.id === id);
-    if (!target) throw new Error("삭제할 장부 항목을 찾을 수 없습니다.");
-    if (target.fiscalYear !== serviceYear) throw new Error("지난 연도 회계장부는 삭제할 수 없습니다.");
-    if (supabase && state.mode === "supabase") {
-      const { error: rpcError } = await supabase.rpc("delete_ledger_entry", { p_id: id });
-      if (rpcError) throw rpcError;
-      if (!requestUserId || !isRemoteActorCurrent(requestSessionEpoch, requestUserId)) return;
-      scheduleRemoteRefresh();
-    }
-    updateState((previous) => ({
-      ...previous,
-      ledgerEntries: previous.ledgerEntries.filter((item) => item.id !== id),
-    }));
-  }, [isRemoteActorCurrent, scheduleRemoteRefresh, serviceYear, state.ledgerEntries, state.mode, state.viewer, updateState]);
-
   const markNotificationsRead = useCallback(async () => {
     const requestSessionEpoch = remoteSessionEpochRef.current;
     const requestUserId = state.viewer?.profile.id;
@@ -4291,6 +4107,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     signOut,
     requestMembership,
     createPost,
+    updatePost,
+    deletePost,
+    setPostReaction,
+    blockPostAuthor,
     addComment,
     startConversation,
     loadConversationMessages,
@@ -4299,10 +4119,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     reviewApplication,
     setMembershipStatus,
     setExecutiveOffices,
-    saveMeetingMinute,
-    deleteMeetingMinute,
-    saveLedgerEntry,
-    deleteLedgerEntry,
     markNotificationsRead,
     loadMorePosts,
     ensurePost,
@@ -4311,8 +4127,10 @@ export function AppDataProvider({ children }: PropsWithChildren) {
   }), [
     addComment,
     createPost,
-    deleteLedgerEntry,
-    deleteMeetingMinute,
+    updatePost,
+    deletePost,
+    setPostReaction,
+    blockPostAuthor,
     enterDemo,
     ensurePost,
     error,
@@ -4330,8 +4148,6 @@ export function AppDataProvider({ children }: PropsWithChildren) {
     requestMembership,
     refreshProtectedMediaUrl,
     reviewApplication,
-    saveLedgerEntry,
-    saveMeetingMinute,
     serviceYear,
     sendMessage,
     setMembershipStatus,

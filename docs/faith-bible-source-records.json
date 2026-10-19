@@ -1,0 +1,669 @@
+{
+  "archive_url": "https://www.crosswire.org/ftpmirror/pub/sword/packages/rawzip/KorRV.zip",
+  "archive_sha256": "194dd52ceabdefb97a60f6627de22e97990e0a43b1b388caf4013d010884ecd7",
+  "module": "KorRV 2.0.1",
+  "versification": "NRSV",
+  "method": "Locate verse record using module NRSV reference metadata, then independently read original ZIP members: .bzv record at index*10 decoded little-endian <IIH (block,start,length); .bzs record at block*12 decoded <III (compressedOffset,compressedLength,uncompressedLength); zlib-decompress original .bzz span; slice [start:start+length] and decode UTF-8 without OSIS cleaning. All20 reported empty slots are zero-length original records; adjacent original text and XML retained verbatim.",
+  "records": [
+    {
+      "reference": "시편 72장:20",
+      "testament": "ot",
+      "records": [
+        {
+          "index": 15590,
+          "byte_offset": 155900,
+          "record_hex": "13000000ae0c0200ca00",
+          "block": 19,
+          "start": 134318,
+          "length": 202,
+          "raw_text": "그 영화로운 이름을 영원히 찬송할지어다 온 땅에 그 영광이 충만할지어다 아멘 아멘 이새의 아들 다윗의 기도가 필하다  <chapter eID=\"gen15570\" osisID=\"Ps.72\"/>"
+        },
+        {
+          "index": 15591,
+          "byte_offset": 155910,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 15592,
+          "byte_offset": 155920,
+          "record_hex": "13000000780d02002900",
+          "block": 19,
+          "start": 134520,
+          "length": 41,
+          "raw_text": "<chapter osisID=\"Ps.73\" sID=\"gen15590\"/> "
+        }
+      ]
+    },
+    {
+      "reference": "이사야 30장:2",
+      "testament": "ot",
+      "records": [
+        {
+          "index": 18952,
+          "byte_offset": 189520,
+          "record_hex": "17000000ae5d0100a501",
+          "block": 23,
+          "start": 89518,
+          "length": 421,
+          "raw_text": "여호와께서 가라사대 화 있을진저 패역한 자식들이여 그들이 계교를 베푸나 나로 말미암아 하지 아니하며 맹약을 맺으나 나의 신으로 말미암아 하지 아니하였음이로다 그들이 바로의 세력 안에서 스스로 강하려 하며 애굽의 그늘에 피하려 하여 애굽으로 내려갔으되 나의 입에 묻지 아니하였으니 죄에 죄를 더하도다 "
+        },
+        {
+          "index": 18953,
+          "byte_offset": 189530,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 18954,
+          "byte_offset": 189540,
+          "record_hex": "17000000535f01007c00",
+          "block": 23,
+          "start": 89939,
+          "length": 124,
+          "raw_text": "그러므로 바로의 세력이 너희의 수치가 되며 애굽의 그늘에 피함이 너희의 수욕이 될 것이라 "
+        }
+      ]
+    },
+    {
+      "reference": "이사야 48장:2",
+      "testament": "ot",
+      "records": [
+        {
+          "index": 19367,
+          "byte_offset": 193670,
+          "record_hex": "17000000276802007601",
+          "block": 23,
+          "start": 157735,
+          "length": 374,
+          "raw_text": "야곱 집이여 이스라엘의 이름으로 일컬음을 받으며 유다의 근원에서 나왔으며 거룩한 성 백성이라 칭하며 그 이름이 만군의 여호와이신 이스라엘의 하나님을 의지하면서 성실치 아니하고 의로움이 없이 여호와의 이름으로 맹세하며 이스라엘의 하나님을 부르는 너희는 들을지어다 "
+        },
+        {
+          "index": 19368,
+          "byte_offset": 193680,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 19369,
+          "byte_offset": 193690,
+          "record_hex": "170000009d690200a000",
+          "block": 23,
+          "start": 158109,
+          "length": 160,
+          "raw_text": "여호와께서 가라사대 내가 옛적에 장래사를 고하였고 내 입에서 내어 보였고 내가 홀연히 그 일을 행하여 이루었느니라 "
+        }
+      ]
+    },
+    {
+      "reference": "예레미야 21장:2",
+      "testament": "ot",
+      "records": [
+        {
+          "index": 20233,
+          "byte_offset": 202330,
+          "record_hex": "180000004e5a0100b801",
+          "block": 24,
+          "start": 88654,
+          "length": 440,
+          "raw_text": "시드기야 왕이 말기야의 아들 바스훌과 제사장 마아세야의 아들 스바냐를 보내어 예레미야에게 말하기를 바벨론 왕 느부갓네살이 우리를 치니 청컨대 너는 우리를 위하여 여호와께 간구하라 여호와께서 혹시 그 모든 기사로 우리를 도와 행하시면 그가 우리를 떠나리라 하던 그 때에 여호와께로부터 예레미야에게 말씀이 임하니라 "
+        },
+        {
+          "index": 20234,
+          "byte_offset": 202340,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 20235,
+          "byte_offset": 202350,
+          "record_hex": "18000000065c01005b00",
+          "block": 24,
+          "start": 89094,
+          "length": 91,
+          "raw_text": "예레미야가 그들에게 대답하되 너희는 시드기야에게 이같이 말하라 "
+        }
+      ]
+    },
+    {
+      "reference": "에스겔 24장:5",
+      "testament": "ot",
+      "records": [
+        {
+          "index": 21914,
+          "byte_offset": 219140,
+          "record_hex": "1a000000b97c01003d01",
+          "block": 26,
+          "start": 97465,
+          "length": 317,
+          "raw_text": "건 후에 물을 붓고 양떼에서 고른 것을 가지고 각을 뜨고 그 넓적다리와 어깨고기의 모든 좋은 덩이를 그 가운데 모아 넣으며 고른 뼈를 가득히 담고 그 뼈를 위하여 가마 밑에 나무를 쌓아 넣고 잘 삶되 가마속의 뼈가 무르도록 삶을지어다 "
+        },
+        {
+          "index": 21915,
+          "byte_offset": 219150,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 21916,
+          "byte_offset": 219160,
+          "record_hex": "1a000000f67d0100dc00",
+          "block": 26,
+          "start": 97782,
+          "length": 220,
+          "raw_text": "그러므로 나 주 여호와가 말하노라 피흘린 성읍, 녹슨 가마 곧 그 속의 녹을 없이 하지 아니한 가마여 화 있을진저 제비 뽑을 것도 없이 그 덩이를 일일이 꺼낼지어다 "
+        }
+      ]
+    },
+    {
+      "reference": "마태복음 18장:11",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 613,
+          "byte_offset": 6130,
+          "record_hex": "01000000c52a0100b900",
+          "block": 1,
+          "start": 76485,
+          "length": 185,
+          "raw_text": "삼가 이 소자 중에 하나도 업신 여기지 말라 너희에게 말하노니 저희 천사들이 하늘에서 하늘에 계신 내 아버지의 얼굴을 항상 뵈옵느니라 "
+        },
+        {
+          "index": 614,
+          "byte_offset": 6140,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 615,
+          "byte_offset": 6150,
+          "record_hex": "010000007e2b0100da00",
+          "block": 1,
+          "start": 76670,
+          "length": 218,
+          "raw_text": "너희 생각에는 어떻겠느뇨 만일 어떤 사람이 양 일백 마리가 있는데 그 중에 하나가 길을 잃었으면 그 아흔아홉 마리를 산에 두고 가서 길 잃은 양을 찾지 않겠느냐 "
+        }
+      ]
+    },
+    {
+      "reference": "마가복음 9장:44",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 1477,
+          "byte_offset": 14770,
+          "record_hex": "0200000089b10000c100",
+          "block": 2,
+          "start": 45449,
+          "length": 193,
+          "raw_text": "만일 네 손이 너를 범죄케 하거든 찍어 버리라 불구자로 영생에 들어가는 것이 두 손을 가지고 지옥 꺼지지 않는 불에 들어가는 것보다 나으니라 "
+        },
+        {
+          "index": 1478,
+          "byte_offset": 14780,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 1479,
+          "byte_offset": 14790,
+          "record_hex": "020000004ab20000af00",
+          "block": 2,
+          "start": 45642,
+          "length": 175,
+          "raw_text": "만일 네 발이 너를 범죄케 하거든 찍어 버리라 절뚝발이로 영생에 들어가는 것이 두 발을 가지고 지옥에 던지우는 것보다 나으니라 "
+        }
+      ]
+    },
+    {
+      "reference": "마가복음 9장:46",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 1479,
+          "byte_offset": 14790,
+          "record_hex": "020000004ab20000af00",
+          "block": 2,
+          "start": 45642,
+          "length": 175,
+          "raw_text": "만일 네 발이 너를 범죄케 하거든 찍어 버리라 절뚝발이로 영생에 들어가는 것이 두 발을 가지고 지옥에 던지우는 것보다 나으니라 "
+        },
+        {
+          "index": 1480,
+          "byte_offset": 14800,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 1481,
+          "byte_offset": 14810,
+          "record_hex": "02000000f9b20000b900",
+          "block": 2,
+          "start": 45817,
+          "length": 185,
+          "raw_text": "만일 네 눈이 너를 범죄케 하거든 빼어버리라 한 눈으로 하나님의 나라에 들어가는 것이 두 눈을 가지고 지옥에 던지우는 것보다 나으니라 "
+        }
+      ]
+    },
+    {
+      "reference": "마가복음 11장:26",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 1563,
+          "byte_offset": 15630,
+          "record_hex": "02000000e7dc0000b300",
+          "block": 2,
+          "start": 56551,
+          "length": 179,
+          "raw_text": "서서 기도할 때에 아무에게나 혐의가 있거든 용서하라 그리하여야 하늘에 계신 너희 아버지도 너희 허물을 사하여 주시리라 하셨더라 "
+        },
+        {
+          "index": 1564,
+          "byte_offset": 15640,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 1565,
+          "byte_offset": 15650,
+          "record_hex": "020000009add00009c00",
+          "block": 2,
+          "start": 56730,
+          "length": 156,
+          "raw_text": "저희가 다시 예루살렘에 들어가니라 예수께서 성전에서 걸어다니실 때에 대제사장들과 서기관들과 장로들이 나아와 "
+        }
+      ]
+    },
+    {
+      "reference": "마가복음 15장:28",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 1755,
+          "byte_offset": 17550,
+          "record_hex": "020000007e3a01007400",
+          "block": 2,
+          "start": 80510,
+          "length": 116,
+          "raw_text": "강도 둘을 예수와 함께 십자가에 못 박으니 하나는 그의 우편에, 하나는 좌편에 있더라 "
+        },
+        {
+          "index": 1756,
+          "byte_offset": 17560,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 1757,
+          "byte_offset": 17570,
+          "record_hex": "02000000f23a01008300",
+          "block": 2,
+          "start": 80626,
+          "length": 131,
+          "raw_text": "지나가는 자들은 자기 머리를 흔들며 예수를 모욕하여 가로되 아하 성전을 헐고 사흘에 짓는 자여 "
+        }
+      ]
+    },
+    {
+      "reference": "누가복음 17장:36",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 2607,
+          "byte_offset": 26070,
+          "record_hex": "03000000779501007900",
+          "block": 3,
+          "start": 103799,
+          "length": 121,
+          "raw_text": "두 여자가 함께 매를 갈고 있으매 하나는 데려감을 당하고 하나는 버려둠을 당할 것이니라 "
+        },
+        {
+          "index": 2608,
+          "byte_offset": 26080,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 2609,
+          "byte_offset": 26090,
+          "record_hex": "03000000f0950100b500",
+          "block": 3,
+          "start": 103920,
+          "length": 181,
+          "raw_text": "저희가 대답하여 가로되 주여 어디오니이까 가라사대 주검 있는 곳에는 독수리가 모이느니라 하시니라  <chapter eID=\"gen26675\" osisID=\"Luke.17\"/>"
+        }
+      ]
+    },
+    {
+      "reference": "누가복음 23장:17",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 2878,
+          "byte_offset": 28780,
+          "record_hex": "03000000b00f02002400",
+          "block": 3,
+          "start": 135088,
+          "length": 36,
+          "raw_text": "그러므로 때려서 놓겠노라 "
+        },
+        {
+          "index": 2879,
+          "byte_offset": 28790,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 2880,
+          "byte_offset": 28800,
+          "record_hex": "03000000d40f02007800",
+          "block": 3,
+          "start": 135124,
+          "length": 120,
+          "raw_text": "무리가 일제히 소리질러 가로되 이 사람을 없이하고 바라바를 우리에게 놓아 주소서 하니 "
+        }
+      ]
+    },
+    {
+      "reference": "사도행전 8장:37",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 4171,
+          "byte_offset": 41710,
+          "record_hex": "05000000a49400008f00",
+          "block": 5,
+          "start": 38052,
+          "length": 143,
+          "raw_text": "길 가다가 물 있는 곳에 이르러 내시가 말하되 보라 물이 있으니 내가 침례를 받음에 무슨 거리낌이 있느뇨 "
+        },
+        {
+          "index": 4172,
+          "byte_offset": 41720,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 4173,
+          "byte_offset": 41730,
+          "record_hex": "05000000339500006d00",
+          "block": 5,
+          "start": 38195,
+          "length": 109,
+          "raw_text": "이에 명하여 병거를 머물고 빌립과 내시가 둘 다 물에 내려가 빌립이 침례를 주고 "
+        }
+      ]
+    },
+    {
+      "reference": "사도행전 15장:26",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 4433,
+          "byte_offset": 44330,
+          "record_hex": "05000000bd170100db00",
+          "block": 5,
+          "start": 71613,
+          "length": 219,
+          "raw_text": "사람을 택하여 우리 주 예수 그리스도의 이름을 위하여 생명을 아끼지 아니하는 자인 우리의 사랑하는 바나바와 바울과 함께 너희에게 보내기를 일치 가결하였노라 "
+        },
+        {
+          "index": 4434,
+          "byte_offset": 44340,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 4435,
+          "byte_offset": 44350,
+          "record_hex": "05000000981801005400",
+          "block": 5,
+          "start": 71832,
+          "length": 84,
+          "raw_text": "그리하여 유다와 실라를 보내니 저희도 이 일을 말로 전하리라 "
+        }
+      ]
+    },
+    {
+      "reference": "사도행전 15장:34",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 4441,
+          "byte_offset": 44410,
+          "record_hex": "05000000e71a01007a00",
+          "block": 5,
+          "start": 72423,
+          "length": 122,
+          "raw_text": "얼마 있다가 평안히 가라는 전송을 형제들에게 받고 자기를 보내던 사람들에게로 돌아가되 "
+        },
+        {
+          "index": 4442,
+          "byte_offset": 44420,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 4443,
+          "byte_offset": 44430,
+          "record_hex": "05000000611b01008400",
+          "block": 5,
+          "start": 72545,
+          "length": 132,
+          "raw_text": "바울과 바나바는 안디옥에서 유하여 다수한 다른 사람들과 함께 주의 말씀을 가르치며 전파하니라 "
+        }
+      ]
+    },
+    {
+      "reference": "사도행전 28장:29",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 4906,
+          "byte_offset": 49060,
+          "record_hex": "050000006b1102007500",
+          "block": 5,
+          "start": 135531,
+          "length": 117,
+          "raw_text": "그런즉 하나님의 이 구원을 이방인에게로 보내신 줄 알라 저희는 또한 들으리라 하더라 "
+        },
+        {
+          "index": 4907,
+          "byte_offset": 49070,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 4908,
+          "byte_offset": 49080,
+          "record_hex": "05000000e01102006200",
+          "block": 5,
+          "start": 135648,
+          "length": 98,
+          "raw_text": "바울이 온 이태를 자기 셋집에 유하며 자기에게 오는 사람을 다 영접하고 "
+        }
+      ]
+    },
+    {
+      "reference": "로마서 9장:2",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 5145,
+          "byte_offset": 51450,
+          "record_hex": "060000002d7e0000e200",
+          "block": 6,
+          "start": 32301,
+          "length": 226,
+          "raw_text": "내가 그리스도 안에서 참말을 하고 거짓말을 아니하노라 내게 큰 근심이 있는 것과 마음에 그치지 않는 고통이 있는 것을 내 양심이 성령 안에서 나로 더불어 증거하노니 "
+        },
+        {
+          "index": 5146,
+          "byte_offset": 51460,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 5147,
+          "byte_offset": 51470,
+          "record_hex": "060000000f7f00008c00",
+          "block": 6,
+          "start": 32527,
+          "length": 140,
+          "raw_text": "나의 형제 곧 골육의 친척을 위하여 내 자신이 저주를 받아 그리스도에게서 끊어질지라도 원하는 바로라 "
+        }
+      ]
+    },
+    {
+      "reference": "로마서 16장:24",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 5355,
+          "byte_offset": 53550,
+          "record_hex": "0600000017ef00009900",
+          "block": 6,
+          "start": 61207,
+          "length": 153,
+          "raw_text": "나와 온 교회 식주인 가이오도 너희에게 문안하고 이 성의 재무 에라스도와 형제 구아도도 너희에게 문안하느니라 "
+        },
+        {
+          "index": 5356,
+          "byte_offset": 53560,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 5357,
+          "byte_offset": 53570,
+          "record_hex": "06000000b0ef00005600",
+          "block": 6,
+          "start": 61360,
+          "length": 86,
+          "raw_text": "나의 복음과 예수 그리스도를 전파함은 영세 전부터 감취었다가 "
+        }
+      ]
+    },
+    {
+      "reference": "고린도후서 13장:14",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 6083,
+          "byte_offset": 60830,
+          "record_hex": "08000000619d0000d900",
+          "block": 8,
+          "start": 40289,
+          "length": 217,
+          "raw_text": "주 예수 그리스도의 은혜와 하나님의 사랑과 성령의 교통하심이 너희 무리와 함께 있을지어다  <chapter eID=\"gen30165\" osisID=\"2Cor.13\"/> <div eID=\"gen29909\" osisID=\"2Cor\" type=\"book\"/>"
+        },
+        {
+          "index": 6084,
+          "byte_offset": 60840,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 6085,
+          "byte_offset": 60850,
+          "record_hex": "09000000000000002f00",
+          "block": 9,
+          "start": 0,
+          "length": 47,
+          "raw_text": "<div osisID=\"Gal\" sID=\"gen30179\" type=\"book\"/> "
+        }
+      ]
+    },
+    {
+      "reference": "요한계시록 12장:18",
+      "testament": "nt",
+      "records": [
+        {
+          "index": 8043,
+          "byte_offset": 80430,
+          "record_hex": "1b00000003830000f400",
+          "block": 27,
+          "start": 33539,
+          "length": 244,
+          "raw_text": "용이 여자에게 분노하여 돌아가서 그 여자의 남은 자손 곧 하나님의 계명을 지키며 예수의 증거를 가진 자들로 더불어 싸우려고 바다 모래 위에 섰더라  <chapter eID=\"gen32120\" osisID=\"Rev.12\"/>"
+        },
+        {
+          "index": 8044,
+          "byte_offset": 80440,
+          "record_hex": "00000000000000000000",
+          "block": 0,
+          "start": 0,
+          "length": 0,
+          "raw_text": ""
+        },
+        {
+          "index": 8045,
+          "byte_offset": 80450,
+          "record_hex": "1b000000f78300002a00",
+          "block": 27,
+          "start": 33783,
+          "length": 42,
+          "raw_text": "<chapter osisID=\"Rev.13\" sID=\"gen32138\"/> "
+        }
+      ]
+    }
+  ]
+}

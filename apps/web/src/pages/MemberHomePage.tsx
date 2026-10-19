@@ -8,6 +8,7 @@ import { HOME_WIDGET_IDS, type HomeWidgetId } from "../components/home/homeWidge
 import { useHomeWidgetLayout } from "../components/home/useHomeWidgetLayout";
 import "./member-community-home.css";
 import { FaithHomeWidget } from "./FaithPages";
+import { LiveHomeBanner } from "./LiveHomeBanner";
 
 const HOME_WIDGET_COMPONENTS = {
   faith: FaithHomeWidget,
@@ -46,6 +47,7 @@ function MemberHomeLayout({ scope }: { scope: string | null }) {
 
   return (
     <div className={`member-home-page${draft ? " member-home-page--editing" : ""}`}>
+      <LiveHomeBanner />
       <header className="member-home-heading">
         <div>
           <h1>홈</h1>

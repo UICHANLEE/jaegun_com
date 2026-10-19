@@ -21,6 +21,7 @@ import { resolveAppBranch, reviewableApplications, type AppBranch } from "../com
 import { CategoryBadge, EmptyState, formatRelativeKorean } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
 import { canManageDepartmentOfficers } from "../data/departmentGovernance";
+import { useExecutiveRecords } from '../data/scopedRecordsHooks';
 import {
   EXECUTIVE_OFFICE_LABELS,
   type ExecutiveOfficeCode,
@@ -123,10 +124,11 @@ export function ManagerDashboardPage() {
     members,
     posts,
     notifications,
-    meetingMinutes,
-    ledgerEntries,
     serviceYear: currentYear,
   } = useAppData();
+  const { records: executiveRecords, error: executiveRecordsError, loaded: executiveRecordsLoaded } = useExecutiveRecords();
+  const minutes = useMemo(() => executiveRecords.filter((record) => record.kind === 'minutes'), [executiveRecords]);
+  const ledger = useMemo(() => executiveRecords.filter((record) => record.kind === 'finance'), [executiveRecords]);
   const branch = resolveAppBranch(viewer);
   const isPlatformAdmin = branch === "platform_admin";
   const isMinister = branch === "minister";
@@ -171,19 +173,17 @@ export function ManagerDashboardPage() {
     if (!isExecutive || !organizationId) {
       return { meetingCount, publishedMeetingCount, draftMeetingCount, income, expense, balance: 0 };
     }
-    for (const minute of meetingMinutes) {
-      if (minute.organizationId !== organizationId || minute.meetingYear !== currentYear) continue;
+    for (const minute of minutes) {
       meetingCount += 1;
       if (minute.status === "published") publishedMeetingCount += 1;
       else draftMeetingCount += 1;
     }
-    for (const entry of ledgerEntries) {
-      if (entry.organizationId !== organizationId || entry.fiscalYear !== currentYear) continue;
-      if (entry.entryType === "income") income += entry.amount;
-      else expense += entry.amount;
+    for (const entry of ledger) {
+      if (entry.entry_type === "income") income += Number(entry.amount);
+      else expense += Number(entry.amount);
     }
     return { meetingCount, publishedMeetingCount, draftMeetingCount, income, expense, balance: income - expense };
-  }, [currentYear, isExecutive, ledgerEntries, meetingMinutes, organizationId]);
+  }, [isExecutive, ledger, minutes, organizationId]);
 
   const metrics = useMemo<MetricItem[]>(() => {
     if (isPlatformAdmin) {
@@ -261,15 +261,15 @@ export function ManagerDashboardPage() {
     return [
       {
         label: `${currentYear}년 회의록`,
-        displayValue: executiveYearSummary.meetingCount.toLocaleString("ko-KR"),
-        detail: `${executiveYearSummary.publishedMeetingCount}개 공개 · ${executiveYearSummary.draftMeetingCount}개 작성 중`,
+        displayValue: executiveRecordsLoaded ? executiveYearSummary.meetingCount.toLocaleString("ko-KR") : "—",
+        detail: executiveRecordsLoaded ? `${executiveYearSummary.publishedMeetingCount}개 확정 · ${executiveYearSummary.draftMeetingCount}개 작성 중` : "서버 권한·기록 확인 중",
         href: "/manage/minutes",
         tone: "blue",
         icon: <Notebook weight="fill" />,
       },
       {
         label: "올해 수입",
-        displayValue: formatWon(executiveYearSummary.income),
+        displayValue: executiveRecordsLoaded ? formatWon(executiveYearSummary.income) : "—",
         detail: "회계장부 수입 합계",
         href: "/manage/ledger",
         tone: "green",
@@ -278,7 +278,7 @@ export function ManagerDashboardPage() {
       },
       {
         label: "올해 지출",
-        displayValue: formatWon(executiveYearSummary.expense),
+        displayValue: executiveRecordsLoaded ? formatWon(executiveYearSummary.expense) : "—",
         detail: "회계장부 지출 합계",
         href: "/manage/ledger",
         tone: "orange",
@@ -287,7 +287,7 @@ export function ManagerDashboardPage() {
       },
       {
         label: "장부 잔액",
-        displayValue: formatWon(executiveYearSummary.balance),
+        displayValue: executiveRecordsLoaded ? formatWon(executiveYearSummary.balance) : "—",
         detail: "수입에서 지출을 뺀 금액",
         href: "/manage/ledger",
         tone: executiveYearSummary.balance < 0 ? "red" : "blue",
@@ -295,7 +295,7 @@ export function ManagerDashboardPage() {
         valueKind: "currency",
       },
     ];
-  }, [currentYear, executiveYearSummary, isMinister, isPlatformAdmin, organizations, pendingApplications.length, scopedMembers, unreadNotifications]);
+  }, [currentYear, executiveYearSummary, executiveRecordsLoaded, isMinister, isPlatformAdmin, organizations, pendingApplications.length, scopedMembers, unreadNotifications]);
 
   const quickActions = useMemo<QuickAction[]>(() => {
     if (isPlatformAdmin) {
@@ -402,32 +402,18 @@ export function ManagerDashboardPage() {
       href: `/app/posts/${post.id}`,
       category: post.category,
     }));
-    const meetingActivities: ManagerActivity[] = isExecutive && organizationId
-      ? meetingMinutes
-          .filter((minute) => minute.organizationId === organizationId)
-          .map((minute) => ({
-            id: `meeting-${minute.id}`,
-            kind: "meeting",
-            label: "회의록",
-            title: minute.title,
-            description: `${minute.meetingDate} · ${minute.status === "published" ? "공개" : "작성 중"}`,
-            createdAt: minute.updatedAt,
-            href: "/manage/minutes",
-          }))
-      : [];
-    const ledgerActivities: ManagerActivity[] = isExecutive && organizationId
-      ? ledgerEntries
-          .filter((entry) => entry.organizationId === organizationId)
-          .map((entry) => ({
-            id: `ledger-${entry.id}`,
-            kind: "ledger",
-            label: entry.entryType === "income" ? "수입" : "지출",
-            title: entry.description,
-            description: `${entry.category} · ${formatWon(entry.amount)}`,
-            createdAt: entry.updatedAt,
-            href: "/manage/ledger",
-          }))
-      : [];
+    const meetingActivities: ManagerActivity[] = isExecutive
+      ? minutes.map((minute) => ({
+          id: `meeting-${minute.id}`, kind: "meeting", label: "회의록", title: minute.title,
+          description: `${minute.record_date} · ${minute.status === "published" ? "확정" : "작성 중"}`,
+          createdAt: minute.record_date, href: "/manage/minutes",
+        })) : [];
+    const ledgerActivities: ManagerActivity[] = isExecutive
+      ? ledger.map((entry) => ({
+          id: `ledger-${entry.id}`, kind: "ledger", label: entry.entry_type === "income" ? "수입" : "지출",
+          title: entry.title, description: `${entry.category} · ${formatWon(Number(entry.amount))}`,
+          createdAt: entry.record_date, href: "/manage/ledger",
+        })) : [];
 
     return [
       ...applicationActivities,
@@ -438,7 +424,7 @@ export function ManagerDashboardPage() {
     ]
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
       .slice(0, 6);
-  }, [isExecutive, isPlatformAdmin, ledgerEntries, meetingMinutes, notifications, organizationId, organizationsById, pendingApplications, posts]);
+  }, [isExecutive, isPlatformAdmin, ledger, minutes, notifications, organizationId, organizationsById, pendingApplications, posts]);
 
   const HeroRoleIcon = isExecutive ? Briefcase : ShieldCheck;
   const statusHeading = isExecutive ? `${currentYear}년 운영 요약` : isMinister ? "사역 현황" : "관리 현황";
@@ -446,6 +432,7 @@ export function ManagerDashboardPage() {
 
   return (
     <div className={`manager-dashboard manager-dashboard--${branch}`}>
+      {isExecutive && executiveRecordsError ? <p role="alert">{executiveRecordsError} 회의록·장부에서 직접 다시 조회하세요.</p> : null}
       <section className="manager-dashboard__hero">
         <div>
           <p className="eyebrow">{presentation.eyebrow}</p>

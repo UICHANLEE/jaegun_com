@@ -11,11 +11,13 @@ import {
   Sparkle,
   CalendarBlank,
   UsersThree,
+  DotsThree,
 } from "@phosphor-icons/react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAppData } from "../data/AppDataProvider";
 import { canManageChurch } from "./access";
 import { Brand } from "./Brand";
+import { AppearancePicker } from './AppearancePicker';
 import { ServiceErrorNotice } from "./ServiceErrorNotice";
 import "./community-navigation.css";
 import "./mobile-layout.css";
@@ -29,6 +31,19 @@ const NAV_ITEMS = [
   { to: "/app/ai", label: "AI", icon: Sparkle },
   { to: "/app/profile", label: "내 정보", icon: UserCircle },
 ];
+
+const MOBILE_NAV_ITEMS = [
+  { to: "/app/home", label: "홈", icon: House },
+  { to: "/app/events", label: "모임", icon: CalendarBlank },
+  { to: "/app/posts", label: "게시판", icon: Article },
+  { to: "/app/chats", label: "채팅", icon: ChatCircleDots },
+  { to: "/app/more", label: "더보기", icon: DotsThree },
+];
+
+export function mobileNavigationActive(to: string, path: string): boolean {
+  if (to === "/app/more") return /^\/app\/(more|churches|ai|profile|organizations|records|meetings|live|privacy|security|account|notification-preferences|blocked-users|faith)(\/|$)/.test(path);
+  return path === to || path.startsWith(`${to}/`);
+}
 
 export function AppShell() {
   useMobileViewport();
@@ -49,6 +64,7 @@ export function AppShell() {
       <a className="community-skip-link" href="#community-main">본문으로 건너뛰기</a>
       <aside className="desktop-sidebar" aria-label="주요 메뉴">
         <Brand />
+        <AppearancePicker compact />
         <nav className="desktop-nav">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -104,13 +120,14 @@ export function AppShell() {
         </main>
         {!isFocusedRoute ? (
           <nav className="bottom-nav community-bottom-nav" aria-label="주요 메뉴">
-            {NAV_ITEMS.map((item) => {
+            {MOBILE_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
+              const active = mobileNavigationActive(item.to, location.pathname);
               return (
-                <NavLink key={item.to} to={item.to}>
+                <Link key={item.to} to={item.to} className={active ? "active" : undefined} aria-current={active ? "page" : undefined}>
                   <Icon weight="regular" />
                   <span>{item.label}</span>
-                </NavLink>
+                </Link>
               );
             })}
           </nav>

@@ -1,0 +1,5 @@
+{
+  "nodeModulesDir": "none",
+  "imports": { "@supabase/supabase-js": "npm:@supabase/supabase-js@2.112.0" },
+  "compilerOptions": { "strict": true, "lib": ["deno.window", "dom", "dom.iterable"] }
+}

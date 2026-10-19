@@ -1,0 +1,28 @@
+.tools-landing, .operations-page {
+  width: min(100%, 1040px); margin-inline: auto;
+  padding: clamp(20px, 4vw, 40px); color: var(--community-ink);
+  line-height: 1.65; overflow-wrap: anywhere;
+}
+.tools-landing h1, .operations-page h1 { font-size: 1.65rem; margin-bottom: 12px; }
+.tools-landing h2, .operations-page h2 { font-size: 1.1rem; margin-block: 16px 8px; }
+.tools-landing .eyebrow { color: var(--community-blue-ink); font-weight: 700; font-size: .8rem; margin-bottom: 8px; }
+.tools-landing header > p:last-child, .tools-landing > p { color: var(--community-muted); }
+.tools-landing__directory { margin-block: 28px; border-top: 1px solid var(--community-line); }
+.tools-landing__item { padding: 20px 0; border-bottom: 1px solid var(--community-line); }
+.tools-landing__item h2 { margin-top: 0; }
+.tools-landing__item p:last-child { display: inline-block; margin-top: 12px; padding: 4px 10px; color: var(--community-green-ink); background: var(--community-green-soft); border-radius: 6px; font-size: .8rem; }
+.operations-page nav { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 24px; }
+.operations-page label { display: grid; gap: 8px; margin-block: 16px; }
+.operations-page :is(input,select,textarea,button) { font: inherit; min-height: 44px; border: 1px solid var(--community-line-strong); border-radius: 8px; color: var(--community-ink); background: var(--community-surface); padding: 10px 12px; max-width: 100%; }
+.operations-page button { margin: 4px; cursor: pointer; }
+.operations-page button[aria-pressed="true"] { background: var(--community-solid-green); color: var(--community-on-solid); border-color: var(--community-solid-green); }
+.operations-page button:disabled { opacity: .55; cursor: default; }
+.operations-page :is(input,textarea) { width: 100%; }
+.operations-page :is(button,input,select,textarea):focus-visible { outline: 3px solid var(--community-focus); outline-offset: 2px; }
+.operations-page section { margin-block: 24px; padding-block: 16px; border-top: 1px solid var(--community-line); }
+.operations-page li { padding-block: 12px; border-bottom: 1px solid var(--community-line); }
+.operations-page pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+.operations-page__metrics { display: grid; grid-template-columns: repeat(auto-fit,minmax(130px,1fr)); gap: 16px; }
+.operations-page__metrics dt { color: var(--community-muted); font-size: .85rem; }
+.operations-page__metrics dd { font-weight: 700; font-size: 1.35rem; margin: 0; }
+.operations-page [role="alert"] { padding: 12px; border: 1px solid var(--community-danger-line); border-radius: 8px; }

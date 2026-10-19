@@ -33,9 +33,11 @@ import type {
   EventResponseInput,
   EventScope,
 } from "../data/events";
-import { useUnsavedChangesWarning } from "../unsavedChanges";
+import { confirmDiscardChanges, useUnsavedChangesWarning } from "../unsavedChanges";
+import { EventFieldPanel } from "./EventFieldPanel";
 import { EventLogisticsPanel } from "./EventLogisticsPanel";
 import "./event-pages.css";
+import { calendarDays, countCalendarEvents, occursOnDay, seoulDay, shiftCalendarDay, shiftCalendarMonth } from "../eventCalendar";
 
 const KOREAN_DATE = new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul",
@@ -141,18 +143,35 @@ export function EventCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [month, setMonth] = useState(() => seoulDay(getServerNow()).slice(0, 7));
+  const [selectedDay, setSelectedDay] = useState(() => seoulDay(getServerNow()));
+  const days = useMemo(() => calendarDays(month), [month]);
 
   useEffect(() => {
     if (!viewer) return;
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    const from = new Date(getServerNow()).toISOString();
-    const to = new Date(getServerNow() + 180 * 24 * 60 * 60 * 1000).toISOString();
+    // Include events spanning into the displayed grid (server duration limit: 7 days).
+    const from = new Date(`${shiftCalendarDay(days[0], -7)}T00:00:00+09:00`).toISOString();
+    const to = new Date(`${shiftCalendarDay(days[days.length - 1], 1)}T00:00:00+09:00`).toISOString();
+    async function fetchWindow(start: string, end: string): Promise<EventOccurrence[]> {
+      const rows = await listEventOccurrences(mode, viewer!.profile.id, { from: start, to: end, limit: 200, context, signal: controller.signal });
+      if (rows.length < 200) return rows;
+      const midpoint = Math.floor((Date.parse(start) + Date.parse(end)) / 2);
+      if (midpoint <= Date.parse(start) || midpoint >= Date.parse(end)) {
+        throw new Error("같은 시각에 일정이 너무 많아 모두 표시하지 못했습니다. 담당자에게 문의해 주세요.");
+      }
+      const middle = new Date(midpoint).toISOString();
+      const left = await fetchWindow(start, middle);
+      const right = await fetchWindow(middle, end);
+      return [...left, ...right];
+    }
     Promise.all([
       listEventScopes(mode, context, controller.signal),
-      listEventOccurrences(mode, viewer.profile.id, { from, to, context, signal: controller.signal }),
+      fetchWindow(from, to),
     ]).then(([nextScopes, nextOccurrences]) => {
+      if (controller.signal.aborted) return;
       setScopes(nextScopes);
       setOccurrences(nextOccurrences);
     }).catch((caught) => {
@@ -161,18 +180,26 @@ export function EventCalendarPage() {
       if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
-  }, [context, getServerNow, mode, reloadKey, viewer]);
+  }, [context, days, mode, reloadKey, viewer]);
 
-  const visible = selectedScope
+  const visible = useMemo(() => selectedScope
     ? occurrences.filter((occurrence) => occurrence.scopeId === selectedScope)
-    : occurrences;
+    : occurrences, [occurrences, selectedScope]);
   const canManage = scopes.some((scope) => scope.canManage);
+  const selectedEvents = useMemo(() => visible.filter((event) => occursOnDay(event, selectedDay)), [visible, selectedDay]);
+  const calendarCounts = useMemo(() => countCalendarEvents(visible, days), [visible, days]);
+  const today = seoulDay(getServerNow());
+  function changeMonth(next: string) {
+    setMonth(next);
+    setSelectedDay(`${next}-01`);
+    setOccurrences([]);
+  }
 
   return (
     <div className="page event-page">
       <PageIntro
         eyebrow="COMMUNITY CALENDAR"
-        title="다가오는 일정"
+        title="예배·모임 일정"
         description="총회·노회·교회가 공개한 일정을 한곳에서 확인하고 참석 여부를 알려 주세요."
         action={canManage ? <Link className="button button--primary" to="/manage/events/new"><Plus weight="bold" /> 일정 만들기</Link> : undefined}
       />
@@ -182,13 +209,34 @@ export function EventCalendarPage() {
           {scopes.map((scope) => <button type="button" key={scope.id} aria-pressed={selectedScope === scope.id} onClick={() => setSelectedScope(scope.id)}>{scope.name}</button>)}
         </div>
       ) : null}
+      <section className="event-calendar" aria-label="월간 일정">
+        <div className="event-calendar__toolbar">
+          <button type="button" aria-label="이전 달" onClick={() => changeMonth(shiftCalendarMonth(month, -1))}>‹</button>
+          <h2 aria-live="polite">{month.slice(0, 4)}년 {Number(month.slice(5))}월</h2>
+          <button type="button" aria-label="다음 달" onClick={() => changeMonth(shiftCalendarMonth(month, 1))}>›</button>
+          <button type="button" onClick={() => { const today = seoulDay(getServerNow()); if (month !== today.slice(0, 7)) changeMonth(today.slice(0, 7)); setSelectedDay(today); }}>오늘</button>
+        </div>
+        <div className="event-calendar__grid">
+          {["일", "월", "화", "수", "목", "금", "토"].map((day) => <span className="event-calendar__weekday" key={day}>{day}</span>)}
+          {days.map((day) => {
+            const count = calendarCounts.get(day) ?? 0;
+            return <button type="button" key={day} aria-pressed={day === selectedDay}
+              aria-current={day === today ? "date" : undefined}
+              aria-label={`${day}, 일정 ${count}개`} className={day.startsWith(month) ? "" : "event-calendar__outside"}
+              onClick={() => setSelectedDay(day)}>
+              <span>{Number(day.slice(-2))}</span><small>{count ? `${count}개` : "\u00a0"}</small>
+            </button>;
+          })}
+        </div>
+      </section>
+      <h2 className="event-calendar__selected">{selectedDay.replaceAll("-", ".")} 일정</h2>
       {error ? <><ErrorBanner message={error} /><button className="button button--secondary event-retry" type="button" onClick={() => setReloadKey((value) => value + 1)}>다시 시도</button></> : null}
       {loading ? (
         <div className="event-loading" role="status"><CircleNotch className="event-spinner" /><span>일정을 불러오고 있어요.</span></div>
-      ) : !error && visible.length ? (
-        <div className="event-list">{visible.map((occurrence) => <EventCard key={occurrence.occurrenceId} occurrence={occurrence} />)}</div>
+      ) : !error && selectedEvents.length ? (
+        <div className="event-list">{selectedEvents.map((occurrence) => <EventCard key={occurrence.occurrenceId} occurrence={occurrence} />)}</div>
       ) : !error ? (
-        <EmptyState icon={<CalendarBlank />} title="예정된 일정이 없어요" description="새 일정이 등록되면 이곳에서 바로 확인할 수 있어요." action={canManage ? <Link className="button button--secondary" to="/manage/events/new">첫 일정 만들기</Link> : undefined} />
+        <EmptyState icon={<CalendarBlank />} title="선택한 날짜에 일정이 없어요" description="달력에서 다른 날짜를 선택해 보세요." action={canManage ? <Link className="button button--secondary" to="/manage/events/new">일정 만들기</Link> : undefined} />
       ) : null}
     </div>
   );
@@ -197,7 +245,7 @@ export function EventCalendarPage() {
 export function EventDetailPage() {
   const { occurrenceId = "" } = useParams();
   const navigate = useNavigate();
-  const { mode, viewer, organizations } = useAppData();
+  const { mode, viewer, organizations, consentGateOpen } = useAppData();
   const organization = organizations.find((item) => item.id === viewer?.membership?.organizationId);
   const context = useDemoEventContext(viewer, organization?.name ?? "재건OO교회");
   const userId = viewer?.profile.id;
@@ -212,7 +260,7 @@ export function EventDetailPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const [logisticsDirty, setLogisticsDirty] = useState(false);
   const confirmHistoryNavigation = useUnsavedChangesWarning(logisticsDirty);
-  const actorKey = `${mode}:${userId ?? ""}:${occurrenceId}:${context.scopeId}:${context.canManage}:${context.canManageLogistics}`;
+  const actorKey = `${mode}:${userId ?? ""}:${occurrenceId}:${context.scopeId}:${context.canManage}:${context.canManageLogistics}:${viewer?.membership?.status}:${consentGateOpen}`;
   const [loadedActorKey, setLoadedActorKey] = useState("");
   const currentActorKey = useRef(actorKey);
   currentActorKey.current = actorKey;
@@ -243,6 +291,7 @@ export function EventDetailPage() {
 
   const handleResponse = useCallback(async (nextResponse: EventResponseInput) => {
     if (!viewer || !occurrence) return;
+    if (!confirmDiscardChanges(logisticsDirty)) return;
     const requestActorKey = actorKey;
     setSavingResponse(nextResponse);
     setError(null);
@@ -258,7 +307,7 @@ export function EventDetailPage() {
     } finally {
       if (currentActorKey.current === requestActorKey) setSavingResponse(null);
     }
-  }, [actorKey, context, mode, occurrence, viewer]);
+  }, [actorKey, context, logisticsDirty, mode, occurrence, viewer]);
 
   async function handleCancel() {
     if (!occurrence || cancelReason.trim().length < 2) return;
@@ -309,16 +358,16 @@ export function EventDetailPage() {
                 {feedback ? <p className="event-rsvp__success" role="status">{feedback}</p> : null}
               </section>
             ) : null}
-            {occurrence.canManageLogistics && viewer ? (
-              <EventLogisticsPanel
-                key={actorKey}
-                mode={mode}
-                userId={viewer.profile.id}
-                occurrenceId={occurrence.occurrenceId}
-                context={context}
+            {viewer && mode !== "demo" ? (
+              <EventFieldPanel key={`${actorKey}:${occurrence.ownResponse}`} occurrenceId={occurrence.occurrenceId}
+                startsAt={occurrence.startsAt} endsAt={occurrence.endsAt} closed={cancelled}
+                onDirtyChange={setLogisticsDirty} />
+            ) : null}
+            {!cancelled && viewer && mode === "demo" && occurrence.canManageLogistics ? (
+              <EventLogisticsPanel key={actorKey} mode={mode} userId={viewer.profile.id}
+                occurrenceId={occurrence.occurrenceId} context={context}
                 rosterVersion={`${occurrence.yesCount}:${occurrence.maybeCount}:${occurrence.waitlistCount}:${occurrence.ownResponse}`}
-                onDirtyChange={setLogisticsDirty}
-              />
+                onDirtyChange={setLogisticsDirty} />
             ) : null}
             {occurrence.canManage ? (
               <section className="event-manager-actions">

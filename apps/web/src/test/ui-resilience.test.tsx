@@ -136,13 +136,6 @@ describe("media and interaction resilience", () => {
     expect(screen.getByText("지원하지않는파일.gif")).toBeInTheDocument();
   });
 
-  it("renders the reaction count as read-only information", async () => {
-    storeMemberState();
-    renderApp("/app/posts/post-retreat");
-
-    expect(await screen.findByLabelText(/공감 \d+개/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /공감/ })).not.toBeInTheDocument();
-  });
 
   it("uses the same exact media contract in the post composer", async () => {
     storeMemberState();

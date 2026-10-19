@@ -1,4 +1,4 @@
-.bottom-nav.community-bottom-nav { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.bottom-nav.community-bottom-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .bottom-nav.community-bottom-nav a { min-width: 44px; }
 .community-shortcuts { display: grid; gap: 6px; margin: 14px 0; padding-top: 14px; border-top: 1px solid var(--line); }
 .community-shortcuts a, .manager-community-tools a { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 10px 12px; border-radius: 12px; color: var(--forest-800); font-size: .9rem; font-weight: 700; }

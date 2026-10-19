@@ -44,6 +44,7 @@ import {
   RoleBadge,
 } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
+import { RecordAccessLinks } from "./ScopedRecordsAccessLinks";
 import { executiveApprovalErrorMessage, getExecutiveApprovalIssue } from "../executiveApprovalPolicy";
 import {
   CHURCH_TITLE_LABELS,
@@ -55,6 +56,7 @@ import {
   type MembershipRole,
 } from "../types/domain";
 import { isOfficialIosNativeClient } from "../native/platform";
+import { loadSensitiveActionAuthStatus } from "../data/sensitiveActionAuth";
 
 export function ProfilePage() {
   const { viewer, organizations, applications, mode, signOut } = useAppData();
@@ -111,6 +113,20 @@ export function ProfilePage() {
           </Link>
         </section>
       ) : null}
+
+      <section className="profile-section">
+        <h2>공동체 도구</h2>
+        <div className="profile-menu-group">
+          <Link className="profile-menu" to="/bible"><span className="profile-menu__icon"><Article /></span><span><strong>성경 본문·오프라인 읽기</strong><small>개역한글 본문과 검색</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/organizations"><span className="profile-menu__icon"><Buildings /></span><span><strong>조직·명단·직책 이력</strong><small>접근 가능한 범위와 연합부서</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/meetings"><span className="profile-menu__icon"><ChatCircleDots /></span><span><strong>화상회의</strong><small>채널·임원 회의와 회의록</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/live"><span className="profile-menu__icon"><Eye /></span><span><strong>교회 라이브·주보</strong><small>방송과 교회 안 아멘 대화</small></span><CaretRight /></Link>
+          <Link className="profile-menu" to="/app/reports"><span className="profile-menu__icon"><Flag /></span><span><strong>내 신고·조치·이의신청</strong><small>본인 사건의 처리 상태 확인</small></span><CaretRight /></Link>
+          {viewer?.profile.globalRole === "platform_admin" ? <Link className="profile-menu" to="/manage/operations"><span className="profile-menu__icon"><ShieldCheck /></span><span><strong>운영 관제·감사</strong><small>실측 사용량과 사유가 기록되는 사건 조사</small></span><CaretRight /></Link> : null}
+        </div>
+      </section>
+
+      <RecordAccessLinks />
 
       {canManage ? (
         <section className="profile-section">
@@ -274,13 +290,19 @@ function ApplicationReviewCard({
 
 export function ApprovalsPage() {
   const navigate = useNavigate();
-  const { viewer, organizations, applications, reviewApplication, serviceYear } = useAppData();
+  const { viewer, organizations, applications, reviewApplication, serviceYear, mode } = useAppData();
   const reviewable = reviewableApplications(viewer, applications);
   const [role, setRole] = useState<"all" | MembershipRole>("all");
   const [success, setSuccess] = useState<string | null>(null);
+  const [requiresGoogle, setRequiresGoogle] = useState(false);
   const filtered = reviewable.filter((item) => role === "all" || item.requestedRole === role);
 
   async function handleReview(id: string, decision: "approved" | "rejected", note?: string) {
+    if (!viewer || !(await loadSensitiveActionAuthStatus(mode, viewer.profile.id)).verified) {
+      setRequiresGoogle(true);
+      throw new Error("승인·반려에는 최근 Google 본인 확인이 필요합니다. 보안 설정에서 인증한 뒤 작업을 다시 눌러 주세요.");
+    }
+    setRequiresGoogle(false);
     const item = applications.find((application) => application.id === id);
     await reviewApplication(id, decision, note);
     setSuccess(`${item?.applicantName ?? "가입 신청"}님을 ${decision === "approved" ? "승인" : "반려"}했습니다.`);
@@ -301,6 +323,7 @@ export function ApprovalsPage() {
           <p>관리자는 사역자·임원을, 교회 사역자와 임원은 소속 교회의 회원을 승인할 수 있어요.</p>
           <div className="authority-banner"><ShieldCheck weight="fill" /><span><strong>{viewer?.profile.globalRole === "platform_admin" ? "플랫폼 관리자 권한" : `${viewer?.membership ? ROLE_LABELS[viewer.membership.role] : "관리"} 권한`}</strong><small>서버 권한 정책이 승인 범위를 안전하게 제한합니다.</small></span></div>
         </div>
+        {requiresGoogle ? <div className="error-banner" role="alert"><p>최근 Google 본인 확인이 필요합니다. 인증 후 작업을 직접 다시 실행해 주세요.</p><Link className="button button--secondary" to="/app/security">보안 설정·Google 본인 확인</Link></div> : null}
         {success ? <div className="success-toast" role="status"><CheckCircle weight="fill" />{success}</div> : null}
         <div className="filter-chips management-filters" role="group" aria-label="신청 역할 필터">
           {(["all", "member", "executive", "minister"] as const).map((item) => <button key={item} type="button" aria-pressed={role === item} onClick={() => setRole(item)}>{item === "all" ? `전체 ${reviewable.length}` : `${ROLE_LABELS[item]} ${reviewable.filter((application) => application.requestedRole === item).length}`}</button>)}

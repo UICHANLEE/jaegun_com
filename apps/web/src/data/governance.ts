@@ -226,12 +226,12 @@ export async function assignGovernanceOffice(
   serviceYear: number,
   officeCode: GovernanceOfficeCode,
   userId: string,
+  expectedUserId: string | null,
 ) {
-  const { error } = await client().rpc("assign_governance_office", {
-    p_scope_id: scopeId,
-    p_service_year: serviceYear,
-    p_office_code: officeCode,
-    p_user_id: userId,
+  const { error } = await client().rpc("mutate_governance_office", {
+    p_request_id: crypto.randomUUID(), p_scope_id: scopeId, p_department_id: null,
+    p_service_year: serviceYear, p_office_code: officeCode,
+    p_user_id: userId, p_expected_user_id: expectedUserId,
   });
   if (error) throw error;
 }
@@ -240,11 +240,12 @@ export async function clearGovernanceOffice(
   scopeId: string,
   serviceYear: number,
   officeCode: GovernanceOfficeCode,
+  expectedUserId: string | null,
 ) {
-  const { error } = await client().rpc("clear_governance_office", {
-    p_scope_id: scopeId,
-    p_service_year: serviceYear,
-    p_office_code: officeCode,
+  const { error } = await client().rpc("mutate_governance_office", {
+    p_request_id: crypto.randomUUID(), p_scope_id: scopeId, p_department_id: null,
+    p_service_year: serviceYear, p_office_code: officeCode,
+    p_user_id: null, p_expected_user_id: expectedUserId,
   });
   if (error) throw error;
 }

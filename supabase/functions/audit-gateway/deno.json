@@ -1,0 +1,5 @@
+{
+  "nodeModulesDir": "none",
+  "compilerOptions": { "strict": true, "lib": ["deno.ns", "dom", "esnext"] },
+  "imports": { "ipaddr.js": "npm:ipaddr.js@2.2.0" }
+}

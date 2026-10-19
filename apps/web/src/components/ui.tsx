@@ -26,6 +26,9 @@ export const CATEGORY_LABELS: Record<PostCategory, string> = {
   sharing: "나눔",
   prayer: "기도",
   photo_video: "사진·영상",
+  anonymous_qa: "익명 질문·답변",
+  official_document: "공문",
+  family_news: "경조사",
 };
 
 export const ROLE_LABELS: Record<MembershipRole, string> = {

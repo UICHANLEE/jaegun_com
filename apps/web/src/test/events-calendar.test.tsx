@@ -61,6 +61,7 @@ function singleDraft(overrides: Partial<EventDraft> = {}): EventDraft {
 
 beforeEach(() => {
   __resetDemoEventsForTests();
+  vi.restoreAllMocks();
 });
 
 describe("events adapter", () => {
@@ -174,11 +175,21 @@ describe("events adapter", () => {
 });
 
 describe("event pages", () => {
-  it("renders a mobile-friendly upcoming list with a manager action", async () => {
+  it("filters events by the selected Seoul day and keeps empty months navigable", async () => {
+    vi.spyOn(mockAppData, "getServerNow").mockReturnValue(Date.parse("2099-10-01T01:00:00Z"));
+    await saveEvent("demo", singleDraft({ startsAt: "2099-10-01T01:00:00Z", endsAt: "2099-10-01T02:00:00Z" }));
+    await saveEvent("demo", singleDraft({ id: "next-day", title: "다음 날 모임", startsAt: "2099-10-02T01:00:00Z", endsAt: "2099-10-02T02:00:00Z" }));
     render(<MemoryRouter><EventCalendarPage /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "다가오는 일정" })).toBeInTheDocument();
-    expect(await screen.findByText("공동체 연합 기도회")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /일정 만들기/ })).toHaveAttribute("href", "/manage/events/new");
+    expect(await screen.findByRole("link", { name: /정원 테스트/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /다음 날 모임/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /2099-10-02, 일정/ }));
+    expect(screen.getByRole("link", { name: /다음 날 모임/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /정원 테스트/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "다음 달" }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: /다음 날 모임/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "이전 달" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "오늘" }));
+    expect(await screen.findByRole("link", { name: /정원 테스트/ })).toBeInTheDocument();
   });
 
   it("lets a member RSVP from the event detail without a page reload", async () => {

@@ -84,3 +84,7 @@ verify_jwt = false
 # character EVENT_REMINDER_SCHEDULER_SECRET before using the service-role RPC.
 [functions.dispatch-event-reminders]
 verify_jwt = false
+
+# The handler validates the authenticated actor before every receipt operation.
+[functions.finance-receipt]
+verify_jwt = false

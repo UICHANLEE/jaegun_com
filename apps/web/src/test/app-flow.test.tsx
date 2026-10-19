@@ -273,13 +273,12 @@ describe("primary service journeys", () => {
     expect(screen.getAllByRole("link", { name: "회계장부" })).not.toHaveLength(0);
 
     fireEvent.click(screen.getAllByRole("link", { name: "회의록" })[0]);
-    expect(await screen.findByRole("heading", { name: "임원 회의 기록" })).toBeInTheDocument();
-    expect(screen.getByText("읽기 전용")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "회의록 작성" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "회의록" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "새 회의록" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getAllByRole("link", { name: "회계장부" })[0]);
-    expect(await screen.findByRole("heading", { name: "교회 재정 기록" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "항목 등록" })).not.toHaveLength(0);
+    expect(await screen.findByRole("heading", { name: "회계 장부" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "새 전표" })).not.toBeInTheDocument();
   });
 
   it("keeps minister navigation focused on pastoral member operations", async () => {
@@ -408,7 +407,7 @@ describe("primary service journeys", () => {
     expect(screen.queryByRole("heading", { name: "교회 재정 기록" })).not.toBeInTheDocument();
   });
 
-  it("keeps past executive records read-only even for a current president", async () => {
+  it("does not promote demo office metadata into real financial write authority", async () => {
     const base = createDemoState();
     window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({
       ...base,
@@ -427,19 +426,13 @@ describe("primary service journeys", () => {
     }));
 
     renderApp(["/manage/ledger"]);
-    expect(await screen.findByRole("heading", { name: "교회 재정 기록" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "항목 등록" })).not.toHaveLength(0);
-
-    fireEvent.change(screen.getByRole("combobox", { name: "회계 연도" }), {
-      target: { value: String(getServiceYear() - 1) },
-    });
-
-    expect(screen.getByText("읽기 전용")).toBeInTheDocument();
-    expect(screen.getByText(/지난 연도 회계장부는 보존 기록으로 열람만/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "항목 등록" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "회계 장부" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "새 전표" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("spinbutton", { name: "연도" }), { target: { value: String(getServiceYear() - 1) } });
+    expect(screen.queryByRole("button", { name: "새 전표" })).not.toBeInTheDocument();
   });
 
-  it("restores one pending ledger operation and clears it after a successful save", async () => {
+  it("purges retired persisted ledger draft bodies and never automatically replays them", async () => {
     const base = createDemoState();
     window.localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify({
       ...base,
@@ -469,14 +462,11 @@ describe("primary service journeys", () => {
     }));
 
     renderApp(["/manage/ledger"]);
-    expect(await screen.findByDisplayValue("복원된 장부 작업")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("120000")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "항목 저장" }));
-
-    expect(await screen.findByText("장부 항목을 저장했습니다.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "회계 장부" })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("복원된 장부 작업")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("120000")).not.toBeInTheDocument();
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem(DEMO_STORAGE_KEY) ?? "{}").ledgerEntries)
-      .toEqual(expect.arrayContaining([expect.objectContaining({ id: operationId })]));
+    expect(JSON.parse(window.localStorage.getItem(DEMO_STORAGE_KEY) ?? "{}")).not.toHaveProperty("ledgerEntries");
   });
 
   it("routes a church executive to management and blocks an ordinary member from it", async () => {

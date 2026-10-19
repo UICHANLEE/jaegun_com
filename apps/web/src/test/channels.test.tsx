@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const remote = vi.hoisted(() => ({
-  fetch: vi.fn(), thread: vi.fn(), command: vi.fn(), rich: vi.fn(), upload: vi.fn(), remove: vi.fn(), actor: "actor-a",
+  fetch: vi.fn(), thread: vi.fn(), command: vi.fn(), rich: vi.fn(), update: vi.fn(), upload: vi.fn(), remove: vi.fn(), actor: "actor-a",
   realtimeHandler: undefined as undefined | (()=>void),
 }));
 vi.mock("../data/AppDataProvider", () => ({ useAppData: () => ({
@@ -15,7 +15,7 @@ vi.mock("../data/supabase", () => ({supabase: {
   channel:()=>({on:(_event:string,_filter:unknown,handler:()=>void)=>{remote.realtimeHandler=handler;return {subscribe:(callback:(status:string)=>void)=>{callback("SUBSCRIBED");return {};}};}}),
   removeChannel:vi.fn(), storage:{from:()=>({remove:remote.remove})},
 }}));
-vi.mock("../data/channels", async (original) => ({...await original<object>(), fetchChannels:remote.fetch, fetchChannelThread:remote.thread, channelCommand:remote.command, channelRichCommand:remote.rich}));
+vi.mock("../data/channels", async (original) => ({...await original<object>(), fetchChannels:remote.fetch, fetchChannelThread:remote.thread, channelCommand:remote.command, channelRichCommand:remote.rich, updateCommunityChannel:remote.update}));
 vi.mock("../data/mediaUpload", () => ({uploadCommunityFile:remote.upload}));
 vi.mock("../components/SafetyControls", () => ({ReportActionLink: () => <a href="/report">신고</a>, BlockUserControl: () => <button>차단</button>}));
 import { ChannelPage } from "../pages/ChannelPages";
@@ -25,7 +25,7 @@ const snapshot = {actorId:"actor-a",channels:[channel],members:[],messages:[]};
 function app(path="/app/chats/channels/channel-a") {
   return <MemoryRouter initialEntries={[path]}><Routes><Route path="/app/chats/channels" element={<ChannelPage/>}/><Route path="/app/chats/channels/:channelId" element={<ChannelPage/>}/></Routes></MemoryRouter>;
 }
-beforeEach(() => { vi.resetAllMocks(); remote.actor="actor-a"; remote.realtimeHandler=undefined; remote.fetch.mockResolvedValue(snapshot); remote.thread.mockResolvedValue({actorId:"actor-a",rootId:"message-a",messages:[]}); remote.command.mockResolvedValue({id:"channel-a"}); remote.rich.mockResolvedValue({id:"message-a"}); remote.remove.mockResolvedValue({error:null}); });
+beforeEach(() => { vi.resetAllMocks(); remote.actor="actor-a"; remote.realtimeHandler=undefined; remote.fetch.mockResolvedValue(snapshot); remote.thread.mockResolvedValue({actorId:"actor-a",rootId:"message-a",messages:[]}); remote.command.mockResolvedValue({id:"channel-a"}); remote.rich.mockResolvedValue({id:"message-a"}); remote.update.mockResolvedValue({id:"channel-a"}); remote.remove.mockResolvedValue({error:null}); });
 
 describe("member-created channels", () => {
   it("lets ordinary approved members create private-by-default channels", async () => {
@@ -75,6 +75,25 @@ describe("member-created channels", () => {
     render(app()); await screen.findByLabelText("채널 메시지");
     expect(screen.queryByRole("button",{name:"채널 보관"})).not.toBeInTheDocument();
     expect(screen.queryByRole("button",{name:"초대 보내기"})).not.toBeInTheDocument();
+  });
+  it("edits metadata against the displayed revision without changing visibility",async()=>{
+    render(app());
+    fireEvent.click(await screen.findByRole("button",{name:"이름·소개 수정"}));
+    fireEvent.change(screen.getByLabelText("채널 이름"),{target:{value:"새 찬양팀"}});
+    fireEvent.click(screen.getByRole("button",{name:"이름·소개 저장"}));
+    await waitFor(()=>expect(remote.update).toHaveBeenCalledWith("actor-a","channel-a",{name:"새 찬양팀",description:"주일 준비",expectedName:"찬양팀",expectedDescription:"주일 준비"}));
+  });
+  it("freezes uncertain metadata and retries the exact CAS request",async()=>{
+    remote.update.mockRejectedValueOnce(new Error("network"));
+    render(app());
+    fireEvent.click(await screen.findByRole("button",{name:"이름·소개 수정"}));
+    fireEvent.change(screen.getByLabelText("채널 이름"),{target:{value:"새 모임"}});
+    fireEvent.click(screen.getByRole("button",{name:"이름·소개 저장"}));
+    await screen.findByRole("alert");
+    expect(screen.getByLabelText("채널 이름")).toHaveAttribute("readonly");
+    fireEvent.click(screen.getByRole("button",{name:"같은 변경 결과 확인"}));
+    await waitFor(()=>expect(remote.update).toHaveBeenCalledTimes(2));
+    expect(remote.update.mock.calls[1]).toEqual(remote.update.mock.calls[0]);
   });
   it("clears old private data immediately when the actor changes", async () => {
     remote.fetch.mockResolvedValue({...snapshot,messages:[{id:"message-a",seq:1,body:"이전 계정 비공개",senderId:"actor-a",senderName:"가",createdAt:"2026-09-01T00:00:00Z"}]});

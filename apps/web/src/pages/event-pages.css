@@ -24,6 +24,20 @@
 .event-retry { margin-top: 12px; }
 @keyframes event-spin { to { transform: rotate(360deg); } }
 
+.event-calendar { margin-bottom: 20px; border-block: 1px solid var(--line); padding: 12px 0; }
+.event-calendar__toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.event-calendar__toolbar h2 { flex: 1; text-align: center; font-size: 1rem; }
+.event-calendar__toolbar button { min-width: 44px; min-height: 44px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
+.event-calendar__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; }
+.event-calendar__weekday { text-align: center; padding: 8px 0; color: var(--muted); font-size: .78rem; }
+.event-calendar__grid button { min-width: 0; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 1px solid transparent; border-radius: 8px; background: var(--paper); color: var(--ink); }
+.event-calendar__grid button small { font-size: .65rem; color: var(--muted); }
+.event-calendar__grid button.event-calendar__outside { color: var(--muted); }
+.event-calendar__grid button[aria-current="date"] { border-color: var(--community-solid-green); }
+.event-calendar__grid button[aria-pressed="true"] { background: var(--community-solid-green); color: var(--community-on-solid); }
+.event-calendar__grid button[aria-pressed="true"] small { color: var(--community-on-solid); }
+.event-calendar__selected { margin: 16px 0; font-size: 1rem; }
+
 .event-detail-page__content { padding: 22px 16px 40px; }
 .event-detail-hero { border-radius: 22px; padding: 24px 20px; color: var(--community-on-solid); background: var(--community-official); box-shadow: var(--shadow-md); }
 .event-detail-hero > span { display: block; margin-bottom: 8px; color: var(--community-on-solid); font-size: .74rem; font-weight: 800; }
@@ -82,3 +96,15 @@
 @media (prefers-reduced-motion: reduce) {
   .event-spinner { animation-duration: 1.8s; }
 }
+
+.event-field { display: grid; gap: 16px; min-width: 0; }
+.event-field fieldset { display: grid; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.event-field label { display: grid; gap: 6px; min-width: 0; }
+.event-field input, .event-field select, .event-field button { min-height: 44px; max-width: 100%; }
+.event-field input, .event-field select { color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.event-field input[type="checkbox"] { width: 24px; }
+.event-field ul { list-style: none; padding: 0; display: grid; gap: 12px; }
+.event-field li { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 8px; overflow-wrap: anywhere; }
+.event-field-row, .event-field-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.event-field-row > input { flex: 1 1 100px; width: 100px; }
+.event-field img { max-width: 100%; background: white; }

@@ -19,7 +19,7 @@
 .member-home-edit-button svg { width:17px; height:17px; }
 .member-home-edit-button[aria-expanded=true] { background:var(--community-blue-soft); border-color:var(--community-blue); color:var(--community-blue-ink); }
 .member-home-status { padding:12px 14px; border:1px solid var(--community-line); border-radius:8px; background:var(--community-blue-soft); color:var(--community-ink); font-size:.8rem; line-height:1.7; margin:0 0 20px; }
-.member-home-widgets { display:grid; grid-template-columns:minmax(0,1fr); gap:28px; }
+.member-home-widgets { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; }
 .home-widget { min-width:0; margin:0; }
 .home-widget__heading { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:44px; margin-bottom:10px; }
 .home-widget__heading h2 { margin:0; font-size:1rem; font-weight:700; line-height:1.5; letter-spacing:-.035em; }

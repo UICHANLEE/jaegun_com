@@ -45,6 +45,9 @@ import {
   type GovernanceScopeCode,
   type GovernanceTreeNode,
 } from "../types/domain";
+import { requireGovernanceProof } from "../data/governanceManagement";
+import { GovernanceHistoryPanel, GovernanceManagementPanels } from "./GovernanceManagementPanels";
+import { useGovernanceBinding, type GovernanceBinding } from "../data/useGovernanceBinding";
 
 type GovernanceTab = "officers" | "roster" | "delegations";
 
@@ -222,6 +225,11 @@ function ScopeSummary({ label, value, detail, icon }: { label: string; value: nu
 }
 
 export function OrganizationAdministrationPage() {
+  const binding = useGovernanceBinding();
+  return <OrganizationAdministrationContent key={binding.key} binding={binding} />;
+}
+
+function OrganizationAdministrationContent({ binding }: { binding: GovernanceBinding }) {
   const navigate = useNavigate();
   const { viewer, mode, organizations, members, serviceYear, getServerNow } = useAppData();
   const [tree, setTree] = useState<GovernanceTreeNode[]>([]);
@@ -688,6 +696,8 @@ export function OrganizationAdministrationPage() {
     setSavingOffice(true);
     setRosterError(null);
     try {
+      await requireGovernanceProof(mode, viewer?.profile.id ?? "");
+      if (binding.current.current !== binding.key) return;
       if (import.meta.env.DEV && mode === "demo") {
         setDemoOffices((current) => assignDemoOffice(
           current,
@@ -698,9 +708,10 @@ export function OrganizationAdministrationPage() {
         ));
         setDemoRevision((current) => current + 1);
       } else {
-        await assignGovernanceOffice(selectedScope.scopeId, selectedYear, editingOffice, target.userId);
+        await assignGovernanceOffice(selectedScope.scopeId, selectedYear, editingOffice, target.userId, officeHolders.get(editingOffice)?.userId ?? null);
         await Promise.all([reloadRoster(), reloadOfficerRoster()]);
       }
+      setDemoRevision((current) => current + 1);
       setEditingOffice(null);
       setNotice(`${officeLabel(selectedScope.scopeType, editingOffice)} 담당자를 설정했습니다.`);
     } catch (reason) {
@@ -717,6 +728,8 @@ export function OrganizationAdministrationPage() {
     const nextCodes = holder.officeCodes.filter((item) => item !== code);
     setSavingOffice(true);
     try {
+      await requireGovernanceProof(mode, viewer?.profile.id ?? "");
+      if (binding.current.current !== binding.key) return;
       if (import.meta.env.DEV && mode === "demo") {
         setDemoOffices((current) => ({
           ...current,
@@ -724,9 +737,10 @@ export function OrganizationAdministrationPage() {
         }));
         setDemoRevision((current) => current + 1);
       } else {
-        await clearGovernanceOffice(selectedScope.scopeId, selectedYear, code);
+        await clearGovernanceOffice(selectedScope.scopeId, selectedYear, code, holder.userId);
         await Promise.all([reloadRoster(), reloadOfficerRoster()]);
       }
+      setDemoRevision((current) => current + 1);
       setEditingOffice(null);
       setNotice(`${officeLabel(selectedScope.scopeType, code)} 자리를 공석으로 변경했습니다.`);
     } catch (reason) {
@@ -750,6 +764,8 @@ export function OrganizationAdministrationPage() {
     setSavingDelegation(true);
     setDelegationError(null);
     try {
+      await requireGovernanceProof(mode, viewer?.profile.id ?? "");
+      if (binding.current.current !== binding.key) return;
       if (import.meta.env.DEV && mode === "demo") {
         setDemoDelegations((current) => [...current, {
           id: `demo-delegation-${current.length + 1}`,
@@ -792,6 +808,8 @@ export function OrganizationAdministrationPage() {
     if (!revokeTarget || !revokeReason.trim()) return;
     setSavingDelegation(true);
     try {
+      await requireGovernanceProof(mode, viewer?.profile.id ?? "");
+      if (binding.current.current !== binding.key) return;
       if (import.meta.env.DEV && mode === "demo") {
         setDemoDelegations((current) => current.map((item) => item.id === revokeTarget
           ? { ...item, status: "revoked", revokedAt: `${selectedYear}-01-01` }
@@ -827,6 +845,7 @@ export function OrganizationAdministrationPage() {
           <div><p className="eyebrow">ORGANIZATION GOVERNANCE</p><span className="governance-authority"><ShieldCheck weight="fill" /> {authorityLabel}</span><h1 id="governance-title">총회부터 교회까지 한 흐름으로 관리하세요.</h1><p>연도별 임원 구성, 노회·교회 명단과 위임 권한을 실제 권한 범위 안에서 확인합니다.</p></div>
           <div className="governance-hero__path" aria-label="현재 선택 범위">{breadcrumb.map((item, index) => <span key={item.scopeId}>{index ? <CaretRight /> : <Buildings weight="fill" />}<strong>{item.displayName}</strong></span>)}</div>
         </section>
+        <GovernanceManagementPanels sessionBinding={binding} onOrganizationSaved={() => setTreeRevision((current) => current + 1)} />
 
         {treeLoading ? <div className="governance-inline-loading" role="status"><CircleNotch className="spin" /> 조직 계층을 불러오는 중</div> : null}
         {treeError ? <EmptyState icon={<WarningCircle />} title="조직 정보를 불러오지 못했어요" description={treeError} action={<button className="button button--secondary" type="button" onClick={() => setTreeRevision((current) => current + 1)}>다시 시도</button>} /> : null}
@@ -893,6 +912,7 @@ export function OrganizationAdministrationPage() {
             {!delegationsLoading && !currentDelegations.length ? <EmptyState icon={<Key />} title="활성 위임이 없어요" description="목사 또는 회장이 필요한 기능과 기간을 지정해 위임할 수 있습니다." /> : null}
           </section> : null}
 
+          <GovernanceHistoryPanel scopeId={selectedScope.scopeId} year={selectedYear} revision={demoRevision + treeRevision} />
           <footer className="governance-security-note"><ShieldCheck weight="fill" /><p><strong>화면의 권한 표시는 보조 수단입니다.</strong><span>실제 저장·조회 범위는 서버가 조직 소속, 임기와 위임 상태를 다시 확인합니다.</span></p></footer>
         </> : null}
       </div>

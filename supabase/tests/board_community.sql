@@ -1,0 +1,124 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path=public,extensions,pg_catalog;
+select no_plan();
+insert into auth.users(id,email,raw_user_meta_data) values
+('bc000000-0000-4000-8000-000000000001','board-author@example.test','{"display_name":"익명 실제 이름"}'),
+('bc000000-0000-4000-8000-000000000002','board-reader@example.test','{"display_name":"독자"}'),
+('bc000000-0000-4000-8000-000000000003','board-moderator@example.test','{"display_name":"운영자"}'),
+('bc000000-0000-4000-8000-000000000004','board-other@example.test','{"display_name":"다른 교회"}');
+insert into public.user_consents(user_id,document_key,document_version,accepted,source)
+select p.id,d.document_key,d.version,true,'admin_migration' from public.profiles p cross join public.consent_documents d
+where p.id::text like 'bc000000-%' and d.required and d.retired_at is null and d.published_at<=statement_timestamp() and d.effective_at<=statement_timestamp();
+update public.organizations set status='active' where slug in ('jaegun-bupyeong','jaegun-namseoul');
+select set_config('test.board_org',(select id::text from public.organizations where slug='jaegun-bupyeong'),true);
+select set_config('test.board_other',(select id::text from public.organizations where slug='jaegun-namseoul'),true);
+insert into public.organization_memberships(user_id,organization_id,role,status) values
+('bc000000-0000-4000-8000-000000000001',current_setting('test.board_org')::uuid,'member','active'),
+('bc000000-0000-4000-8000-000000000002',current_setting('test.board_org')::uuid,'member','active'),
+('bc000000-0000-4000-8000-000000000003',current_setting('test.board_org')::uuid,'minister','active'),
+('bc000000-0000-4000-8000-000000000004',current_setting('test.board_other')::uuid,'member','active');
+select ok(not has_table_privilege('authenticated','public.posts','select'),'raw post rows are not a client API');
+select ok(not has_column_privilege('authenticated','public.posts','author_id','select'),'no column grant bypasses anonymous authors');
+select ok(not has_column_privilege('authenticated','public.comments','author_id','select'),'anonymous original author replies have no raw identity bypass');
+select ok(not has_column_privilege('authenticated','public.post_media','uploader_id','select'),'attachment uploader does not reveal anonymous identity');
+select ok(not has_table_privilege('authenticated','private.post_reactions','insert'),'reaction counters cannot be forged through table writes');
+select ok(not has_table_privilege('authenticated','private.anonymous_author_blocks','select'),'blocking an anonymous author cannot reveal identity through a block table');
+select ok(not has_function_privilege('anon','public.list_community_posts(uuid,uuid,integer,integer)','execute'),'signed-out actors cannot read projected feed');
+select ok(not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename in ('posts','comments','post_media')),'realtime cannot publish author-bearing board rows');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000001',true);
+select lives_ok($$select public.save_community_post_draft('bd000000-0000-4000-8000-000000000001',auth.uid(),current_setting('test.board_org')::uuid,(select id from public.boards where organization_id=current_setting('test.board_org')::uuid and slug='anonymous-qa'),'질문','개인정보 없는 질문',true)$$,'member creates real anonymous Q&A draft');
+select lives_ok($$select public.publish_owned_post('bd000000-0000-4000-8000-000000000001',auth.uid(),'{}')$$,'anonymous draft uses hardened publish');
+select lives_ok($$select public.publish_owned_post('bd000000-0000-4000-8000-000000000001',auth.uid(),'{}')$$,'publish retries keep same UUID');
+select is((select p->>'author_id' from public.list_community_posts('bd000000-0000-4000-8000-000000000001') p),null::text,'even owner projection removes anonymous author UUID');
+select is((select p->>'author_label' from public.list_community_posts('bd000000-0000-4000-8000-000000000001') p),'익명','anonymous server label');
+select ok((select (p->>'is_owner')::boolean from public.list_community_posts('bd000000-0000-4000-8000-000000000001') p),'owner gets capability boolean instead of identity');
+select throws_ok($$select author_id from public.posts$$,'42501',null,'direct REST author column is forbidden');
+select lives_ok($$insert into public.comments(id,post_id,author_id,body) values('be000000-0000-4000-8000-000000000001','bd000000-0000-4000-8000-000000000001',auth.uid(),'추가 질문')$$,'anonymous author can reply');
+select is((select c->>'author_id' from public.list_community_comments(array['bd000000-0000-4000-8000-000000000001']::uuid[]) c),null::text,'anonymous original author reply is server-redacted');
+select lives_ok($$select public.save_community_post_draft('bd000000-0000-4000-8000-000000000002',auth.uid(),current_setting('test.board_org')::uuid,(select id from public.boards where organization_id=current_setting('test.board_org')::uuid and slug='prayer'),'기도','함께 기도해 주세요',false)$$,'prayer post draft');
+select public.publish_owned_post('bd000000-0000-4000-8000-000000000002',auth.uid(),'{}');
+reset role;
+select set_config('test.board_media_path',current_setting('test.board_org')||'/posts/bd000000-0000-4000-8000-000000000002/bf000000-0000-4000-8000-000000000001.jpg',true);
+insert into storage.objects(bucket_id,name,owner,owner_id,metadata)
+values('community-media',current_setting('test.board_media_path'),'bc000000-0000-4000-8000-000000000001','bc000000-0000-4000-8000-000000000001','{"mimetype":"image/jpeg","size":1024}');
+set local role authenticated;
+select lives_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000002',1,'기도','함께 기도해 주세요',false,'{}',jsonb_build_array(jsonb_build_object('storage_path',current_setting('test.board_media_path'),'kind','image','mime_type','image/jpeg','byte_size',1024,'file_name','기도 사진.jpg')))$$,'post editing attaches an actual actor-owned Storage object atomically');
+select is((select count(id) from public.post_media where post_id='bd000000-0000-4000-8000-000000000002'),1::bigint,'minimal media grant returns attached metadata');
+select throws_ok($$select uploader_id from public.post_media$$,'42501',null,'native media request cannot select an uploader identity');
+select throws_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000002',2,'기도','함께 기도해 주세요',false,'{}',jsonb_build_array(jsonb_build_object('storage_path',current_setting('test.board_org')||'/posts/bd000000-0000-4000-8000-000000000002/bf000000-0000-4000-8000-000000000002.jpg','kind','image','mime_type','image/jpeg','byte_size',1024)))$$,'42501','post_media_owner_required','forged media metadata cannot attach missing bytes');
+select lives_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000002',2,'기도','함께 기도해 주세요',false,array(select id from public.post_media where post_id='bd000000-0000-4000-8000-000000000002'))$$,'owner removes media through revision-safe edit');
+select is((select count(id) from public.post_media where post_id='bd000000-0000-4000-8000-000000000002'),0::bigint,'removed attachment no longer appears in network metadata');
+select lives_ok($$select public.save_community_post_draft('bd000000-0000-4000-8000-000000000003',auth.uid(),current_setting('test.board_org')::uuid,(select id from public.boards where organization_id=current_setting('test.board_org')::uuid and slug='family-news'),'축하 소식','함께 축하해 주세요',false)$$,'dedicated family news board is writable');
+select public.publish_owned_post('bd000000-0000-4000-8000-000000000003',auth.uid(),'{}');
+select throws_ok($$select public.save_community_post_draft('bd000000-0000-4000-8000-000000000004',auth.uid(),current_setting('test.board_org')::uuid,(select id from public.boards where organization_id=current_setting('test.board_org')::uuid and slug='official-document'),'공문','사칭 공문',false)$$,'42501',null,'ordinary member cannot impersonate an official document');
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000002',true);
+select lives_ok($$insert into public.comments(id,post_id,author_id,body) values('be000000-0000-4000-8000-000000000002','bd000000-0000-4000-8000-000000000001',auth.uid(),'답변드립니다')$$,'another member can answer the anonymous question');
+select is((select c->>'author_id' from public.list_community_comments(array['bd000000-0000-4000-8000-000000000001']::uuid[],'be000000-0000-4000-8000-000000000002') c),null::text,'anonymous answers also remove identity in the actual network projection');
+select ok((select p::text not like '%bc000000-0000-4000-8000-000000000001%' from public.list_community_posts('bd000000-0000-4000-8000-000000000001') p),'network projection contains no author UUID');
+select is((public.set_post_reaction('bd000000-0000-4000-8000-000000000002','prayer',true,auth.uid())->>'prayer_count')::integer,1,'first unique prayer');
+select is((public.set_post_reaction('bd000000-0000-4000-8000-000000000002','prayer',true,auth.uid())->>'prayer_count')::integer,1,'retry cannot inflate prayer');
+select is((public.set_post_reaction('bd000000-0000-4000-8000-000000000002','amen',true,auth.uid())->>'amen_count')::integer,1,'unique amen is independent of prayer');
+select is((public.set_post_reaction('bd000000-0000-4000-8000-000000000002','prayer',false,auth.uid())->>'prayer_count')::integer,0,'desired-state removal decrements once');
+select throws_ok($$select public.set_post_reaction('bd000000-0000-4000-8000-000000000002','receipt',true,auth.uid())$$,'22023','official_document_required','cannot acknowledge an arbitrary post as official');
+select throws_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000001',1,'변조','변조')$$,'42501','post_owner_required','reader cannot edit anonymous content');
+select lives_ok($$select public.create_content_report('post','bd000000-0000-4000-8000-000000000001','other','검토 요청')$$,'real anonymous target can be reported without knowing author');
+select throws_ok($$select reported_user_id,evidence_snapshot from public.content_reports$$,'42501',null,'reporter cannot recover anonymous identity or evidence through direct-table SELECT');
+select throws_ok($$select target_user_id from public.moderation_actions$$,'42501',null,'reporter cannot deanonymize a target through moderation action references');
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000003',true);
+select throws_ok($$select reported_user_id,evidence_snapshot from public.content_reports$$,'42501',null,'ordinary scoped moderator must use reason-bound incident evidence access');
+select throws_ok($$select target_user_id from public.moderation_actions$$,'42501',null,'moderator has no direct identity-bearing action ledger bypass');
+select lives_ok($$select public.save_community_post_draft('bd000000-0000-4000-8000-000000000004',auth.uid(),current_setting('test.board_org')::uuid,(select id from public.boards where organization_id=current_setting('test.board_org')::uuid and slug='official-document'),'공문','공식 안내',false)$$,'authorized minister posts official document');
+select public.publish_owned_post('bd000000-0000-4000-8000-000000000004',auth.uid(),'{}');
+select ok((select bool_and(reported_user_id is null and target_author_name='신고 대상' and details is null) from public.list_moderation_reports()),'moderation queue does not bypass incident-bound author investigation');
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000002',true);
+select is((public.set_post_reaction('bd000000-0000-4000-8000-000000000004','receipt',true,auth.uid(),1)->>'receipt_count')::integer,1,'document acknowledgment is actor-bound');
+select is((public.set_post_reaction('bd000000-0000-4000-8000-000000000004','receipt',true,auth.uid(),1)->>'receipt_count')::integer,1,'acknowledgment retry is unique');
+select ok((public.set_post_reaction('bd000000-0000-4000-8000-000000000004','receipt',false,auth.uid(),1)->>'acknowledged')::boolean,'receipt is not silently erased');
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000003',true);
+select public.update_owned_community_post('bd000000-0000-4000-8000-000000000004',1,'수정 공문','변경된 공식 안내');
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000002',true);
+select is((select (p->>'receipt_count')::integer from public.list_community_posts('bd000000-0000-4000-8000-000000000004') p),0,'edited documents do not inherit acknowledgments of unseen content');
+select throws_ok($$select public.set_post_reaction('bd000000-0000-4000-8000-000000000004','receipt',true,auth.uid(),1)$$,'40001','document_revision_conflict','reader cannot acknowledge a revision they did not load');
+select is((public.set_post_reaction('bd000000-0000-4000-8000-000000000004','receipt',true,auth.uid(),2)->>'receipt_count')::integer,1,'reader explicitly acknowledges the new document revision');
+select public.set_post_reaction('bd000000-0000-4000-8000-000000000004','receipt',true,auth.uid(),2);
+select throws_ok($$select public.set_post_reaction('bd000000-0000-4000-8000-000000000002','amen',true,'bc000000-0000-4000-8000-000000000001')$$,'42501','community_actor_session_changed','old-account reaction cannot mutate the new account');
+select throws_ok($$select public.block_community_post_author('bd000000-0000-4000-8000-000000000001','bc000000-0000-4000-8000-000000000001')$$,'42501','community_actor_session_changed','old-account block cannot mutate the new account');
+select ok(public.block_community_post_author('bd000000-0000-4000-8000-000000000001',auth.uid()),'reader blocks anonymous author without a user UUID');
+select ok(public.block_community_post_author('bd000000-0000-4000-8000-000000000001',auth.uid()),'lost anonymous block response retry is idempotent');
+select is((select count(*) from public.list_community_posts('bd000000-0000-4000-8000-000000000001')),0::bigint,'anonymous block removes author content');
+select ok((select b::text not like '%bc000000-0000-4000-8000-000000000001%' from public.list_my_anonymous_blocks() b),'anonymous block management network response contains no target UUID');
+select is((select count(*) from public.user_blocks where blocked_user_id='bc000000-0000-4000-8000-000000000001'),0::bigint,'ordinary block grant does not disclose anonymous author linkage');
+select ok((public.get_my_safety_privacy_state()->'blocked_users')::text not like '%bc000000-0000-4000-8000-000000000001%','privacy settings cannot deanonymize a blocked author');
+select ok(public.remove_my_anonymous_block((select (b->>'id')::uuid from public.list_my_anonymous_blocks() b)),'opaque anonymous block can be removed without identity');
+select is((select count(*) from public.list_community_posts('bd000000-0000-4000-8000-000000000001')),1::bigint,'unblocking restores ordinary content visibility');
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000004',true);
+select is((select count(*) from public.list_community_posts('bd000000-0000-4000-8000-000000000001')),0::bigint,'other church cannot read anonymous post');
+select throws_ok($$select public.set_post_reaction('bd000000-0000-4000-8000-000000000002','amen',true,auth.uid())$$,'42501',null,'other church cannot spoof reaction');
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000001',true);
+select is((select body from public.notifications where entity_id='bd000000-0000-4000-8000-000000000001' and metadata->>'comment_id'='be000000-0000-4000-8000-000000000002'),'익명 답변이 등록되었습니다.','notification response cannot deanonymize the anonymous answerer');
+select ok(public.block_community_comment_author('be000000-0000-4000-8000-000000000002',auth.uid()),'anonymous answerer can be blocked by comment target without identity disclosure');
+select is((select count(*) from public.list_community_comments(array['bd000000-0000-4000-8000-000000000001']::uuid[],'be000000-0000-4000-8000-000000000002')),0::bigint,'blocked anonymous answers disappear from server projection');
+select lives_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000001',1,'수정 질문','수정 내용')$$,'anonymous author can edit via owner capability');
+select throws_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000001',1,'낡은 수정','덮어쓰기')$$,'40001','post_revision_conflict','stale device cannot overwrite a newer revision');
+select lives_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000001',2,'','',true)$$,'owner deletes anonymous post');
+select lives_ok($$select public.update_owned_community_post('bd000000-0000-4000-8000-000000000001',2,'','',true)$$,'lost deletion response retry is idempotent');
+select is((select count(*) from public.list_community_posts('bd000000-0000-4000-8000-000000000001')),0::bigint,'deleted post is removed from server projection');
+reset role;
+insert into public.platform_admins(user_id,note) values('bc000000-0000-4000-8000-000000000004','Synthetic admin identity bypass test');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000004',true);
+select is((select count(*) from public.list_community_posts('bd000000-0000-4000-8000-000000000001')),0::bigint,'platform admin has no deleted-author raw feed bypass');
+select throws_ok($$select author_id from public.posts$$,'42501',null,'platform role does not restore raw direct-table grants');
+reset role;
+delete from public.user_consents where user_id='bc000000-0000-4000-8000-000000000002';
+set local role authenticated;
+select set_config('request.jwt.claim.sub','bc000000-0000-4000-8000-000000000002',true);
+select throws_ok($$select * from public.list_community_posts()$$,'42501','current_required_consents_required','stale consent closes feed before projection');
+select throws_ok($$select public.set_post_reaction('bd000000-0000-4000-8000-000000000002','amen',true,auth.uid())$$,'42501','current_required_consents_required','stale consent closes reaction mutations');
+reset role;
+select is((select count(*) from public.audit_logs where action='community.document_acknowledged' and entity_id='bd000000-0000-4000-8000-000000000004'),2::bigint,'receipt audit is idempotent within each document revision');
+select is((select count(*) from private.media_cleanup_items where storage_path=current_setting('test.board_media_path')),1::bigint,'removed direct-upload bytes enter existing durable cleanup queue');
+select * from finish();
+rollback;

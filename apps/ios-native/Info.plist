@@ -20,10 +20,21 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSCameraUsageDescription</key>
+	<string>행사 QR 출석 확인, 화상회의, 게시글·대화 및 비공개 영수증 촬영에 카메라를 사용합니다.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>사용자가 참여한 화상회의와 영상 촬영에 마이크를 사용합니다.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>게시글·대화 및 비공개 영수증에 첨부할 사진과 영상을 선택합니다.</string>
 	<key>SUPABASE_PUBLIC_KEY</key>
 	<string>$(SUPABASE_PUBLIC_KEY)</string>
 	<key>SUPABASE_URL</key>
 	<string>$(SUPABASE_URL)</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>voip</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiresFullScreen</key>

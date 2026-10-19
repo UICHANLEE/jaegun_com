@@ -18,6 +18,7 @@ const OnboardingPage = lazy(() => import("./pages/AuthPages").then((module) => (
 const PendingPage = lazy(() => import("./pages/AuthPages").then((module) => ({ default: module.PendingPage })));
 const ManagerShell = lazy(() => import("./components/ManagerShell").then((module) => ({ default: module.ManagerShell })));
 const MemberHomePage = lazy(() => import("./pages/MemberHomePage").then((module) => ({ default: module.MemberHomePage })));
+const MorePage = lazy(() => import("./pages/MorePage").then((module) => ({ default: module.MorePage })));
 const ManagerDashboardPage = lazy(() => import("./pages/ManagerDashboardPage").then((module) => ({ default: module.ManagerDashboardPage })));
 const FeedPage = lazy(() => import("./pages/FeedPages").then((module) => ({ default: module.FeedPage })));
 const ComposerPage = lazy(() => import("./pages/FeedPages").then((module) => ({ default: module.ComposerPage })));
@@ -60,6 +61,17 @@ const LegalTermsPage = lazy(() => import("./pages/SafetyPrivacyPages").then((mod
 const CommunityPolicyPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.CommunityPolicyPage })));
 const PublicAccountDeletionPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.PublicAccountDeletionPage })));
 const PublicSupportPage = lazy(() => import("./pages/SafetyPrivacyPages").then((module) => ({ default: module.PublicSupportPage })));
+const FaithBiblePage = lazy(() => import("./pages/FaithBibleReader").then((module) => ({ default: module.FaithBiblePage })));
+const MeetingPage = lazy(() => import("./pages/MeetingLivePages").then((module) => ({ default: module.MeetingPage })));
+const ChurchLivePage = lazy(() => import("./pages/MeetingLivePages").then((module) => ({ default: module.ChurchLivePage })));
+const OperationsConsolePage = lazy(() => import("./pages/OperationsConsolePage").then((module) => ({ default: module.OperationsConsolePage })));
+const MyReportsPage = lazy(() => import("./pages/MyReportsPage").then((module) => ({ default: module.MyReportsPage })));
+const OperationsAppealPage = lazy(() => import("./pages/OperationsAppealPage").then((module) => ({ default: module.OperationsAppealPage })));
+
+function PlatformAdminOnly({ children }: { children: ReactNode }) {
+  const { viewer } = useAppData();
+  return viewer?.profile.globalRole === "platform_admin" ? children : <Navigate to="/app/profile" replace />;
+}
 
 function ManagerOnly({ children }: { children: ReactNode }) {
   const { viewer } = useAppData();
@@ -269,8 +281,14 @@ function AuthenticatedRoutes() {
           <Route path="/app/faith/withdraw" element={<FaithWithdrawalPage />} />
           <Route element={<AppShell />}>
             <Route path="/app/home" element={<MemberHomePage />} />
+            <Route path="/app/more" element={<MorePage />} />
             <Route path="/app/faith" element={<MemberOnly><FaithPage /></MemberOnly>} />
             <Route path="/app/ai" element={<AIAssistantPage />} />
+            <Route path="/app/meetings" element={<MemberOnly><MeetingPage /></MemberOnly>} />
+            <Route path="/app/live" element={<MemberOnly><ChurchLivePage /></MemberOnly>} />
+            <Route path="/app/organizations" element={<MemberOnly><OrganizationAdministrationPage /></MemberOnly>} />
+            <Route path="/app/records/minutes" element={<MemberOnly><MeetingMinutesPage /></MemberOnly>} />
+            <Route path="/app/records/finance" element={<MemberOnly><AccountingLedgerPage /></MemberOnly>} />
             <Route path="/app/posts" element={<FeedPage />} />
             <Route path="/app/posts/new" element={<MemberOnly><ComposerPage /></MemberOnly>} />
             <Route path="/app/posts/:postId" element={<PostDetailPage />} />
@@ -296,11 +314,12 @@ function AuthenticatedRoutes() {
           <Route path="/manage" element={<ManagerOnly><ManagerShell /></ManagerOnly>}>
             <Route index element={<Navigate to="/manage/home" replace />} />
             <Route path="home" element={<ManagementHomeRoute />} />
-            <Route path="approvals" element={<OperationsManagerOnly><SensitiveActionGate><ApprovalsPage /></SensitiveActionGate></OperationsManagerOnly>} />
+            <Route path="approvals" element={<OperationsManagerOnly><ApprovalsPage /></OperationsManagerOnly>} />
             <Route path="members" element={<OperationsManagerOnly><MembersPage /></OperationsManagerOnly>} />
-            <Route path="organization" element={<SensitiveActionGate><OrganizationAdministrationPage /></SensitiveActionGate>} />
-            <Route path="departments" element={<DepartmentOfficersOnly><SensitiveActionGate><DepartmentOfficerManagementPage /></SensitiveActionGate></DepartmentOfficersOnly>} />
+            <Route path="organization" element={<OrganizationAdministrationPage />} />
+            <Route path="departments" element={<DepartmentOfficersOnly><DepartmentOfficerManagementPage /></DepartmentOfficersOnly>} />
             <Route path="moderation" element={<ModerationOnly><SensitiveActionGate><ModerationQueuePage /></SensitiveActionGate></ModerationOnly>} />
+            <Route path="operations" element={<PlatformAdminOnly><OperationsConsolePage /></PlatformAdminOnly>} />
             <Route path="posts" element={<OperationsManagerOnly><FeedPage /></OperationsManagerOnly>} />
             <Route path="minutes" element={<ExecutiveOnly><MeetingMinutesPage /></ExecutiveOnly>} />
             <Route path="ledger" element={<ExecutiveOnly><AccountingLedgerPage /></ExecutiveOnly>} />
@@ -317,11 +336,18 @@ function AppRoutes() {
   const { viewer, loading, consentGateOpen, passwordRecoveryReady } = useAppData();
   const { pathname } = useLocation();
 
+  // Public licensed text must remain readable when Auth/bootstrap is offline.
+  if (pathname === "/bible") return <FaithBiblePage />;
   if (loading) return <LoadingScreen />;
   if (passwordRecoveryReady && pathname !== "/reset-password") return <Navigate to="/reset-password" replace />;
   if (pathname === "/forgot-password") return <ForgotPasswordPage />;
   if (pathname === "/reset-password" || pathname === "/auth/callback/recovery") return <ResetPasswordPage />;
   if (!viewer) return <SignedOutRoutes />;
+  // Self-only case discovery/appeal is available even after core consent expires.
+  if (pathname === "/app/reports" || pathname.startsWith("/app/reports/")) return <Routes>
+    <Route path="/app/reports" element={<MyReportsPage />} />
+    <Route path="/app/reports/:reportId/appeal" element={<OperationsAppealPage />} />
+  </Routes>;
   if (consentGateOpen === false) return <ConsentRequiredRoutes />;
   if (!viewer.membership && viewer.profile.globalRole !== "platform_admin") {
     return <AccountSetupRoutes pending={viewer.application?.status === "pending"} />;

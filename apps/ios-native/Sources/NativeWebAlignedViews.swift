@@ -2,7 +2,7 @@ import SwiftUI
 
 struct NativeCommunityNavigation: View {
     @Binding var selection: String
-    static let items = [("home", "홈", "house"), ("posts", "게시판", "doc.text"), ("chats", "채팅", "bubble.left"), ("churches", "교회", "building.2"), ("ai", "AI", "sparkles"), ("profile", "내 정보", "person.crop.circle")]
+    static let items = [("home", "홈", "house"), ("events", "모임", "calendar"), ("posts", "게시판", "doc.text"), ("chats", "채팅", "bubble.left"), ("more", "더보기", "ellipsis")]
     var body: some View {
         HStack(spacing: 0) {
             ForEach(Self.items, id: \.0) { id, label, icon in
@@ -25,7 +25,16 @@ struct NativeMemberHomeView: View {
     @State private var posts: [[String: Any]] = []
     @State private var loading = true
     @State private var error: String?
-    private var pinned: [String: Any]? { posts.first { $0["is_pinned"] as? Bool == true } }
+    @State private var requestID: UUID?
+    @State private var loadedIdentity = ""
+    private var identity: String {
+        guard session.signedIn, !session.consentRequired else { return "" }
+        let membership = session.context["membership"] as? [String: Any] ?? [:]
+        guard nativeText(membership, "status") == "active" else { return "" }
+        return "\(session.sessionGeneration):\(nativeText(membership, "organization_id"))"
+    }
+    private var visiblePosts: [[String: Any]] { loadedIdentity == identity ? posts : [] }
+    private var pinned: [String: Any]? { visiblePosts.first { $0["is_pinned"] as? Bool == true } }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
@@ -35,6 +44,7 @@ struct NativeMemberHomeView: View {
                         Label("소속 교회 확인", systemImage: "building.2").font(.caption).frame(minHeight: 44)
                     }
                 }
+                NativeLiveHomeBanner()
                 NativeFaithHomeSummary()
                 VStack(alignment: .leading, spacing: 12) {
                     Text("교회 공지").font(.headline)
@@ -57,11 +67,11 @@ struct NativeMemberHomeView: View {
                         Spacer()
                         NavigationLink { NativeFeedView() } label: { Label("전체 보기", systemImage: "arrow.right").font(.caption) }.frame(minHeight: 44)
                     }
-                    ForEach(Array(posts.prefix(3).enumerated()), id: \.offset) { _, post in
+                    ForEach(Array(visiblePosts.prefix(3).enumerated()), id: \.offset) { _, post in
                         NavigationLink { NativePostDetailView(post: post) } label: { NativePostSummary(post: post) }.buttonStyle(.plain)
                         Divider()
                     }
-                    if !loading && posts.isEmpty { Text("아직 등록된 게시글이 없습니다.").font(.subheadline).foregroundStyle(NativePalette.muted) }
+                    if !loading && visiblePosts.isEmpty && error == nil { Text("아직 등록된 게시글이 없습니다.").font(.subheadline).foregroundStyle(NativePalette.muted) }
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     Text("소모임").font(.headline)
@@ -78,29 +88,37 @@ struct NativeMemberHomeView: View {
                 }
             }.padding(20).frame(maxWidth: 780).frame(maxWidth: .infinity)
         }.background(NativePalette.surface).foregroundStyle(NativePalette.ink)
-            .navigationBarTitleDisplayMode(.inline).task { await load() }.refreshable { await load() }
+            .navigationBarTitleDisplayMode(.inline)
+            .task(id: identity) {
+                if loadedIdentity != identity { posts = []; loadedIdentity = ""; requestID = nil }
+                await load()
+            }
+            .refreshable { await load() }
     }
     private func load() async {
-        loading = true; error = nil
+        let actor = identity
+        guard !actor.isEmpty, requestID == nil else { return }
+        let request = UUID(); requestID = request
+        loading = posts.isEmpty; error = nil
+        defer { if requestID == request { requestID = nil; loading = false } }
         let churchID = nativeText(session.context["membership"] as? [String: Any] ?? [:], "organization_id")
-        guard UUID(uuidString: churchID) != nil else { posts = []; loading = false; return }
-        do { posts = try await session.api.rows("posts", query: "select=id,title,body,author_label,is_pinned,published_at&organization_id=eq.\(churchID)&status=eq.published&order=is_pinned.desc,published_at.desc&limit=20") }
-        catch { posts = []; self.error = "교회 소식을 불러오지 못했습니다. 연결과 접근 권한을 확인해 주세요." }
-        loading = false
+        guard UUID(uuidString: churchID) != nil else { posts = []; return }
+        do {
+            guard let rows = try await session.api.rpc("list_community_posts", body: ["p_limit": 20]) as? [[String: Any]] else { throw NativeAPIError.invalidData }
+            guard identity == actor, requestID == request, !Task.isCancelled else { return }
+            posts = rows; loadedIdentity = actor
+        } catch {
+            guard identity == actor, requestID == request, !Task.isCancelled else { return }
+            if !NativeBoardPolicy.mayRetainProtectedRows(after: error) { posts = []; loadedIdentity = "" }
+            self.error = "교회 소식을 불러오지 못했습니다. 연결과 접근 권한을 확인해 주세요."
+        }
     }
 }
 
 struct NativePostDetailView: View {
     let post: [String: Any]
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Text(nativeText(post, "title")).font(.title2.bold())
-                Text(nativeText(post, "author_label")).font(.caption).foregroundStyle(NativePalette.muted)
-                Divider()
-                Text(nativeText(post, "body")).lineSpacing(5).textSelection(.enabled)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
-        }.navigationTitle("게시글").nativePageStyle()
+        NativeBoardPostDetailView(postID: nativeText(post, "id"))
     }
 }
 
@@ -125,6 +143,9 @@ struct NativeChurchSummaryView: View {
             Section("공동체") {
                 NavigationLink("교회 채널·개인 대화") { NativeCommunityChatHubView() }
                 NavigationLink("예배·모임 일정") { NativeEventOperationsView() }
+                NavigationLink("조직·명단·직책 이력") { NativeGovernanceView() }
+                NavigationLink("교회 라이브·주보") { NativeChurchLiveView() }
+                NavigationLink("화상회의") { NativeMeetingsView() }
             }
         }.navigationTitle("교회").nativePageStyle().task { await load() }.refreshable { await load() }
     }
@@ -138,37 +159,5 @@ struct NativeChurchSummaryView: View {
 }
 
 struct NativeAILandingView: View {
-    @State private var draft = ""
-    @State private var pendingTemplate: String?
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("AI 도우미").font(.title2.bold())
-                Text("공동체에 필요한 글을 준비하세요.").foregroundStyle(NativePalette.muted)
-                NativeCard {
-                    Label("AI 연결 준비 중", systemImage: "sparkles").font(.headline)
-                    Text("현재는 요청 내용을 정리하는 화면입니다. AI 응답을 생성하거나 교회 정보를 외부로 전송하지 않습니다.").font(.subheadline).foregroundStyle(NativePalette.muted)
-                }
-                Text("무엇을 준비할까요?").font(.headline)
-                ForEach(["모임 준비", "공지 작성", "회의록 정리", "성경 공부"], id: \.self) { title in
-                    Button {
-                        if draft.isEmpty { apply(title) } else { pendingTemplate = title }
-                    } label: {
-                        NativeCard { Label(title, systemImage: "doc.text").font(.subheadline) }
-                    }.buttonStyle(.plain).foregroundStyle(NativePalette.blue)
-                }
-                Text("요청 내용").font(.headline)
-                TextEditor(text: $draft).frame(minHeight: 150).padding(10)
-                    .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(NativePalette.line) }
-                    .onChange(of: draft) { _, text in if text.count > 8000 { draft = String(text.prefix(8000)) } }
-                Text("\(draft.count)/8000자").font(.caption).foregroundStyle(NativePalette.muted)
-                Text("입력 내용은 이 화면의 메모리에만 유지됩니다. 개인정보나 민감한 교회 정보는 입력하지 마세요.").font(.caption).foregroundStyle(NativePalette.muted)
-            }.padding(20).frame(maxWidth: 780).frame(maxWidth: .infinity)
-        }.nativePageStyle().scrollDismissesKeyboard(.interactively).navigationTitle("AI")
-            .alert("작성 중인 내용을 바꿀까요?", isPresented: Binding(get: { pendingTemplate != nil }, set: { if !$0 { pendingTemplate = nil } })) {
-                Button("예시로 바꾸기") { if let title = pendingTemplate { apply(title) }; pendingTemplate = nil }
-                Button("취소", role: .cancel) { pendingTemplate = nil }
-            } message: { Text("현재 입력한 내용은 새 예시로 교체됩니다.") }
-    }
-    private func apply(_ title: String) { draft = title + "을 도와주세요. 목적과 필요한 내용을 아래에 작성합니다.\n" }
+    var body: some View { NativeAIDraftView() }
 }

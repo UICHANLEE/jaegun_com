@@ -29,7 +29,7 @@ struct NativeBibleBook: Decodable {
 }
 
 enum NativeBibleCanon {
-    // Reference metadata only; no translation or verse text is distributed.
+    // Canonical reference metadata; licensed verse text is independently integrity-checked.
     static let books: [NativeBibleBook] = {
         guard let url = Bundle.main.url(forResource: "BibleCanon", withExtension: "json"),
               let data = try? Data(contentsOf: url),
@@ -108,11 +108,17 @@ private struct NativePendingQT {
     @Published var error: String?
     @Published var notice: String?
     @Published var awaitingQTResult = false
+    @Published var olderQT: [NativePrivateQT] = []
+    @Published var hasMoreQT = false
+    @Published var pendingShareID: String?
+    @Published var sharedPostID: String?
+    private var pendingShare: (request: String, qt: String)?
     private var pendingQT: NativePendingQT?
     private var generation = UUID()
     func clear() {
         generation = UUID(); snapshot = nil; accepted = nil; busy = false; error = nil; notice = nil
         pendingQT = nil; awaitingQTResult = false
+        olderQT = []; hasMoreQT = false; pendingShare = nil; pendingShareID = nil; sharedPostID = nil
     }
     private func scope(_ session: NativeSession) -> String? {
         let membership = session.context["membership"] as? [String: Any] ?? [:]
@@ -132,13 +138,14 @@ private struct NativePendingQT {
             let status = try await session.api.rpc("get_faith_consent_status", body: ["p_organization_id": church])
             guard current(session, church: church, epoch: epoch, ticket: ticket) else { return }
             accepted = try NativeFaithConsentContract.accepted(status)
-            guard accepted == true else { snapshot = nil; return }
+            guard accepted == true else { snapshot = nil; olderQT = []; hasMoreQT = false; pendingShare = nil; pendingShareID = nil; sharedPostID = nil; return }
             let value = try await session.api.rpc("get_faith_snapshot", body: ["p_organization_id": church])
             guard current(session, church: church, epoch: epoch, ticket: ticket) else { return }
             snapshot = try NativeFaithSnapshot.parse(value)
+            olderQT = []; hasMoreQT = snapshot?.latest_private_qt.count == 25
         } catch {
             guard current(session, church: church, epoch: epoch, ticket: ticket) else { return }
-            snapshot = nil; self.error = "통독·묵상 기록을 불러오지 못했습니다. 연결과 가입 상태를 확인해 주세요."
+            snapshot = nil; olderQT = []; hasMoreQT = false; self.error = "통독·묵상 기록을 불러오지 못했습니다. 연결과 가입 상태를 확인해 주세요."
         }
     }
     func accept(_ session: NativeSession) async {
@@ -213,10 +220,39 @@ private struct NativePendingQT {
             self.error = "삭제 결과를 확인하지 못했습니다. 기록을 다시 불러와 확인해 주세요."
         }
     }
+    func olderNotes(_ session: NativeSession) async {
+        guard !busy, let church = scope(session), let snapshot else { return }
+        let epoch = session.sessionGeneration, ticket = generation
+        busy = true; error = nil
+        defer { if generation == ticket { busy = false } }
+        do {
+            let value = try await session.api.rpc("list_my_qt", body: ["p_organization_id": church, "p_limit": 25, "p_offset": snapshot.latest_private_qt.count + olderQT.count])
+            guard JSONSerialization.isValidJSONObject(value) else { throw NativeAPIError.invalidData }
+            let rows = try JSONDecoder().decode([NativePrivateQT].self, from: JSONSerialization.data(withJSONObject: value))
+            guard rows.count <= 25, rows.allSatisfy({ UUID(uuidString: $0.id) != nil && !$0.body.isEmpty && $0.body.unicodeScalars.count <= 500 }) else { throw NativeAPIError.invalidData }
+            guard current(session, church: church, epoch: epoch, ticket: ticket) else { return }
+            let ids = Set((snapshot.latest_private_qt + olderQT).map(\.id))
+            olderQT.append(contentsOf: rows.filter { !ids.contains($0.id) }); hasMoreQT = rows.count == 25 && snapshot.latest_private_qt.count + olderQT.count < 1000
+        } catch { if current(session, church: church, epoch: epoch, ticket: ticket) { self.error = "이전 묵상을 불러오지 못했습니다." } }
+    }
+    func shareQT(_ note: NativePrivateQT, session: NativeSession) async {
+        guard !busy, !awaitingQTResult, let church = scope(session), pendingShare == nil || pendingShare?.qt == note.id else { return }
+        let request = pendingShare ?? (request: UUID().uuidString, qt: note.id)
+        pendingShare = request; pendingShareID = note.id
+        let epoch = session.sessionGeneration, ticket = generation
+        busy = true; error = nil; notice = nil
+        defer { if generation == ticket { busy = false } }
+        do {
+            let value = try await session.api.rpc("share_my_qt", body: ["p_organization_id": church, "p_qt_id": request.qt, "p_client_request_id": request.request])
+            guard let id = value as? String, UUID(uuidString: id) != nil else { throw NativeAPIError.invalidData }
+            guard current(session, church: church, epoch: epoch, ticket: ticket) else { return }
+            pendingShare = nil; pendingShareID = nil; sharedPostID = id; notice = "명시적으로 선택한 묵상 사본을 교회 게시판에 공유했습니다."
+        } catch { if current(session, church: church, epoch: epoch, ticket: ticket) { self.error = "공유 결과가 불확실합니다. 같은 공유 결과 확인 버튼으로 중복 없이 확인해 주세요." } }
+    }
 }
 
 @MainActor private func nativeFaithIdentity(_ session: NativeSession) -> String {
-    "\(session.sessionGeneration)|\(nativeText(session.context["membership"] as? [String: Any] ?? [:], "organization_id"))|\(session.consentRequired)"
+    "\(session.sessionGeneration)|\(nativeText(session.context["membership"] as? [String: Any] ?? [:], "organization_id"))|\(nativeText(session.context["membership"] as? [String: Any] ?? [:], "status"))|\(session.consentRequired)"
 }
 
 struct NativeFaithHomeSummary: View {
@@ -229,13 +265,18 @@ struct NativeFaithHomeSummary: View {
                 Spacer()
                 NavigationLink { NativeFaithView() } label: { Text("기록하기").font(.caption.weight(.semibold)).frame(minHeight: 44) }
             }
+            NavigationLink("개역한글 성경 읽기 · 오프라인") { NativeBibleReaderView() }.font(.subheadline).frame(minHeight: 44)
             if model.busy { ProgressView("내 기록을 확인하고 있습니다") }
             if model.accepted == false { Text("개인 기록은 별도 선택 동의 후 시작할 수 있습니다.").font(.footnote).foregroundStyle(NativePalette.muted) }
             if let value = model.snapshot {
                 Text("\(value.completed_count) / 1,189장 · 연속 \(value.streak_days)일").font(.subheadline)
                 ProgressView(value: Double(value.completed_count), total: 1189).tint(NativePalette.forest)
-                Text("오늘 계획 · " + NativeBibleCanon.todayPlan(value.server_today).map(NativeBibleCanon.reference).joined(separator: " · "))
-                    .font(.caption).foregroundStyle(NativePalette.muted)
+                Text("오늘의 연간 통독 목표 · 한국 날짜 \(value.server_today)").font(.caption).foregroundStyle(NativePalette.muted)
+                ForEach(NativeBibleCanon.todayPlan(value.server_today), id: \.self) { id in
+                    NavigationLink { NativeBibleReaderView(initialChapterID: id) } label: {
+                        Text(NativeBibleCanon.reference(id) + (value.completed_chapters.contains(id) ? " · 읽음" : " · 미완료")).font(.subheadline).frame(minHeight: 44)
+                    }
+                }
             }
             if let error = model.error { Text(error).font(.footnote).foregroundStyle(.red); Button("다시 확인") { Task { await model.load(session) } }.frame(minHeight: 44) }
         }.task(id: nativeFaithIdentity(session)) { model.clear(); await model.load(session) }
@@ -250,6 +291,7 @@ struct NativeFaithView: View {
     @State private var reference = ""
     @State private var note = ""
     @State private var deleting: NativePrivateQT?
+    @State private var sharing: NativePrivateQT?
     @State private var readConsent = false
     @State private var agreeConsent = false
     private var selectedChapter: Int? { NativeBibleCanon.chapterID(book: book, chapter: chapter) }
@@ -261,7 +303,9 @@ struct NativeFaithView: View {
                 if model.busy { ProgressView("기록을 확인하고 있습니다") }
                 if let error = model.error { Text(error).foregroundStyle(.red); Button("기록 다시 불러오기") { Task { await model.load(session) } }.frame(minHeight: 44) }
                 if let notice = model.notice { Text(notice).foregroundStyle(NativePalette.forest) }
+                if let postID = model.sharedPostID { NavigationLink("공유 게시글 보기") { NativeBoardPostDetailView(postID: postID) }.frame(minHeight: 44) }
             }
+            Section { NavigationLink("성경 읽기 · 전체 본문 오프라인") { NativeBibleReaderView() } }
             if model.accepted == false {
                 Section("개인 기록 선택 동의") {
                     Text("통독·QT를 사용하지 않아도 다른 공동체 기능은 이용할 수 있습니다.")
@@ -278,11 +322,13 @@ struct NativeFaithView: View {
                     Text("\(value.completed_count) / 1,189장 · \(Int(Double(value.completed_count) / 1189 * 100))%")
                     ProgressView(value: Double(value.completed_count), total: 1189).tint(NativePalette.forest)
                     Text("연속 \(value.streak_days)일 · 서버 기준 \(value.server_today)").font(.caption).foregroundStyle(NativePalette.muted)
-                    Text("성경 본문은 사용하시는 성경에서 읽어 주세요. 앱에는 구절 위치와 진도만 제공하며, 본문 재배포 권리를 확인하기 전에는 말씀 텍스트를 포함하지 않습니다.").font(.footnote).foregroundStyle(NativePalette.muted)
+                    Text("개역한글 본문은 위의 성경 읽기에서 오프라인으로 읽을 수 있습니다. 읽음 표시는 본인이 직접 선택할 때만 저장합니다.").font(.footnote).foregroundStyle(NativePalette.muted)
                 }
                 Section("오늘의 연간 통독 계획") {
+                    Text("서버 한국 날짜 \(value.server_today) 기준 1,189장 전체를 하루 3~4장씩 배분합니다. 이미 저장한 기록을 자동으로 바꾸지 않습니다.").font(.footnote)
                     ForEach(NativeBibleCanon.todayPlan(value.server_today), id: \.self) { id in
                         readingButton(id, value: value)
+                        NavigationLink(NativeBibleCanon.reference(id) + " 본문 읽기") { NativeBibleReaderView(initialChapterID: id) }.frame(minHeight: 44)
                     }
                 }
                 Section("직접 읽은 장 선택") {
@@ -305,23 +351,32 @@ struct NativeFaithView: View {
                 }.frame(minHeight: 44).disabled(model.busy || model.snapshot == nil)
                 if model.awaitingQTResult { Text("결과 확인 전에는 원래 내용을 유지합니다. 중복 등록하지 않습니다.").font(.caption).foregroundStyle(NativePalette.muted) }
             }
-            Section("최근 개인 묵상 · 최대 25개") {
+            Section("개인 묵상 기록 · 25개씩 보기") {
                 if let value = model.snapshot, value.latest_private_qt.isEmpty { Text("저장한 묵상이 없습니다.").foregroundStyle(NativePalette.muted) }
-                ForEach(model.snapshot?.latest_private_qt ?? []) { item in
+                ForEach((model.snapshot?.latest_private_qt ?? []) + model.olderQT) { item in
                     VStack(alignment: .leading, spacing: 10) {
                         Text(item.reference).font(.headline)
                         Text(item.body).textSelection(.enabled)
-                        Button("묵상 삭제", role: .destructive) { deleting = item }.frame(minHeight: 44).disabled(model.busy || model.awaitingQTResult)
+                        Button(model.pendingShareID == item.id ? "같은 공유 결과 확인" : "교회 게시판에 공유") {
+                            if model.pendingShareID == item.id { Task { await model.shareQT(item, session: session) } } else { sharing = item }
+                        }.frame(minHeight: 44).disabled(model.busy || model.awaitingQTResult || (model.pendingShareID != nil && model.pendingShareID != item.id))
+                        Button("묵상 삭제", role: .destructive) { deleting = item }.frame(minHeight: 44).disabled(model.busy || model.awaitingQTResult || model.pendingShareID != nil)
                     }.padding(.vertical, 6)
                 }
+                if model.hasMoreQT { Button("이전 묵상 25개 더 보기") { Task { await model.olderNotes(session) } }.frame(minHeight: 44).disabled(model.busy) }
             }
+            NativeFaithCommunityView(optionalAccepted: model.accepted == true).id(model.sharedPostID ?? "community")
         }.navigationTitle("통독·QT").nativePageStyle()
-            .task(id: nativeFaithIdentity(session)) { model.clear(); reference = ""; note = ""; deleting = nil; readConsent = false; agreeConsent = false; await model.load(session) }
+            .task(id: nativeFaithIdentity(session)) { model.clear(); reference = ""; note = ""; deleting = nil; sharing = nil; readConsent = false; agreeConsent = false; await model.load(session) }
             .refreshable { await model.load(session) }
             .alert("개인 묵상을 삭제할까요?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
                 Button("삭제", role: .destructive) { if let item = deleting { Task { await model.deleteQT(item, session: session) } }; deleting = nil }
                 Button("취소", role: .cancel) { deleting = nil }
             } message: { Text("삭제한 개인 묵상은 되돌릴 수 없습니다.") }
+            .confirmationDialog("선택한 묵상을 교회 게시판에 공유할까요?", isPresented: Binding(get: { sharing != nil }, set: { if !$0 { sharing = nil } })) {
+                Button("교회 회원에게 사본 공개") { if let item = sharing { Task { await model.shareQT(item, session: session) } }; sharing = nil }
+                Button("취소", role: .cancel) { sharing = nil }
+            } message: { Text("교회 회원이 읽고 아멘·댓글·신고를 할 수 있습니다. 비공개 원본 삭제나 동의 철회는 게시판 사본을 삭제하지 않습니다.") }
     }
     @ViewBuilder private func readingButton(_ id: Int, value: NativeFaithSnapshot) -> some View {
         let completed = value.completed_chapters.contains(id)

@@ -69,8 +69,6 @@ function RemoteProbe() {
             data.conversations.length,
             Object.keys(data.messagesByConversation).length,
             data.notifications.length,
-            data.meetingMinutes.length,
-            data.ledgerEntries.length,
           ],
         })}
       </output>
@@ -113,7 +111,7 @@ describe("AppDataProvider remote request invalidation", () => {
       mode: "supabase",
       loading: false,
       viewerId: null,
-      privateCounts: [0, 0, 0, 0, 0, 0, 0, 0],
+      privateCounts: [0, 0, 0, 0, 0, 0],
     });
     expect(remote.from.mock.calls.every(([table]) => (
       table === "consent_documents" || table === "public_organization_directory"

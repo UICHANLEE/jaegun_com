@@ -181,12 +181,12 @@ export async function assignDepartmentOffice(input: {
   serviceYear: number;
   officeCode: ExecutiveOfficeCode;
   userId: string;
+  expectedUserId: string | null;
 }) {
-  const { error } = await client().rpc("assign_department_office", {
-    p_department_id: input.departmentId,
-    p_service_year: input.serviceYear,
-    p_office_code: input.officeCode,
-    p_user_id: input.userId,
+  const { error } = await client().rpc("mutate_governance_office", {
+    p_request_id: crypto.randomUUID(), p_scope_id: null, p_department_id: input.departmentId,
+    p_service_year: input.serviceYear, p_office_code: input.officeCode,
+    p_user_id: input.userId, p_expected_user_id: input.expectedUserId,
   });
   if (error) throw error;
 }
@@ -195,11 +195,12 @@ export async function clearDepartmentOffice(input: {
   departmentId: string;
   serviceYear: number;
   officeCode: ExecutiveOfficeCode;
+  expectedUserId: string | null;
 }) {
-  const { error } = await client().rpc("clear_department_office", {
-    p_department_id: input.departmentId,
-    p_service_year: input.serviceYear,
-    p_office_code: input.officeCode,
+  const { error } = await client().rpc("mutate_governance_office", {
+    p_request_id: crypto.randomUUID(), p_scope_id: null, p_department_id: input.departmentId,
+    p_service_year: input.serviceYear, p_office_code: input.officeCode,
+    p_user_id: null, p_expected_user_id: input.expectedUserId,
   });
   if (error) throw error;
 }

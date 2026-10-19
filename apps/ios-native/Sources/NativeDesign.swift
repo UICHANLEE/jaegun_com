@@ -1,5 +1,31 @@
 import SwiftUI
 
+enum NativeAppearance: String, CaseIterable {
+    case system, light, dark
+    var title: String { switch self { case .system: return "시스템 설정"; case .light: return "라이트"; case .dark: return "다크" } }
+    var colorScheme: ColorScheme? { switch self { case .system: return nil; case .light: return .light; case .dark: return .dark } }
+}
+
+struct NativeAppearancePicker: View {
+    var compact = false
+    @AppStorage("jaegun.appearance") private var appearance = "system"
+    var body: some View {
+        if compact {
+            Menu {
+                selection
+            } label: {
+                Image(systemName: "circle.lefthalf.filled").font(.title3)
+                    .foregroundStyle(NativePalette.forest).frame(width: 44, height: 44)
+            }.accessibilityLabel("화면 모드").accessibilityValue(NativeAppearance(rawValue: appearance)?.title ?? "시스템 설정")
+        } else { selection }
+    }
+    private var selection: some View {
+        Picker("화면 모드", selection: $appearance) {
+            ForEach(NativeAppearance.allCases, id: \.rawValue) { mode in Text(mode.title).tag(mode.rawValue) }
+        }
+    }
+}
+
 // Native equivalents of apps/web/src/theme.css; the web product is the visual source.
 enum NativePalette {
     static func token(_ light: UInt, _ dark: UInt) -> Color {
@@ -8,16 +34,18 @@ enum NativePalette {
             return UIColor(red: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255, blue: CGFloat(hex & 255) / 255, alpha: 1)
         })
     }
-    static let canvas = token(0xf5f6f7, 0x111418)
-    static let surface = token(0xffffff, 0x1b2026)
-    static let ink = token(0x20252b, 0xedf1f5)
-    static let muted = token(0x626a74, 0xb0bac5)
-    static let line = token(0xdce1e6, 0x3b4652)
-    static let forest = token(0x356b17, 0xa6d889)
-    static let solidGreen = token(0x28634c, 0x28634c)
-    static let orange = token(0x995000, 0xffba70)
+    static let canvas = token(0xf7f5ef, 0x101814)
+    static let surface = token(0xfffefa, 0x19241f)
+    static let ink = token(0x20372f, 0xf0f5f0)
+    static let muted = token(0x5f6d65, 0xb5c5ba)
+    static let line = token(0xdce4da, 0x3b5043)
+    static let forest = token(0x286044, 0xa6d889)
+    static let solidGreen = token(0x245c46, 0x245c46)
+    static let orange = token(0x96500b, 0xffba70)
     static let blue = token(0x09668e, 0x7ed0fa)
     static let noticeAccent = token(0xfc8401, 0xfc8401)
+    static let leafAccent = token(0x67b42a, 0x67b42a)
+    static let skyAccent = token(0x0498e1, 0x0498e1)
 }
 
 struct NativeBrandHeader: View {
@@ -31,6 +59,14 @@ struct NativeBrandHeader: View {
                 Text("재건 공동체").font(compact ? .headline : .title3.bold()).foregroundStyle(NativePalette.ink)
             }
         }
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottomLeading) {
+            HStack(spacing: 3) {
+                Capsule().fill(NativePalette.noticeAccent)
+                Capsule().fill(NativePalette.leafAccent)
+                Capsule().fill(NativePalette.skyAccent)
+            }.frame(width: compact ? 44 : 58, height: 3).accessibilityHidden(true)
+        }
     }
 }
 
@@ -39,17 +75,19 @@ struct NativeCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) { content }
             .frame(maxWidth: .infinity, alignment: .leading).padding(16)
-            .background(NativePalette.surface, in: RoundedRectangle(cornerRadius: 9))
-            .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(NativePalette.line) }
+            .background(NativePalette.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(NativePalette.line) }
     }
 }
 
 struct NativePrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.headline).frame(maxWidth: .infinity, minHeight: 52)
+        configuration.label.font(.headline).multilineTextAlignment(.center)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .foregroundStyle(Color.white)
-            .background(NativePalette.solidGreen, in: RoundedRectangle(cornerRadius: 9))
+            .background(NativePalette.solidGreen, in: RoundedRectangle(cornerRadius: 12))
             .opacity(!enabled ? 0.45 : configuration.isPressed ? 0.75 : 1)
     }
 }
@@ -93,7 +131,7 @@ struct NativeConsentRow: View {
 
 private struct NativePageStyle: ViewModifier {
     func body(content: Content) -> some View {
-        content.scrollContentBackground(.hidden).background(NativePalette.surface)
+        content.scrollContentBackground(.hidden).background(NativePalette.canvas)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(NativePalette.surface, for: .navigationBar)
     }

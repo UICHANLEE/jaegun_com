@@ -5,6 +5,16 @@ import App from "../App";
 import { AppDataProvider } from "../data/AppDataProvider";
 import { createDemoState, DEMO_VIEWER } from "../data/seed";
 import { UNSAVED_CHANGES_MESSAGE } from "../unsavedChanges";
+import { getServiceYear } from '../serviceTime';
+import type * as RecordService from '../data/scopedRecords';
+
+vi.mock('../data/scopedRecords', async () => {
+  const actual = await vi.importActual<typeof RecordService>('../data/scopedRecords');
+  return { ...actual,
+    scopesForRecordsActor: async () => [{ scope_id: 'record-scope', organization_id: 'org-19', event_id: null, label: '권한 확인된 테스트 교회', can_minutes: true, can_finance: true }],
+    recordsRPC: async (name: string, parameters: Record<string, unknown>) => name === 'get_scoped_records' ? { rows: [], can_write: parameters.p_year === getServiceYear() } : [],
+  };
+});
 
 const DEMO_STORAGE_KEY = "jaegun-community-demo-v4";
 const LAZY_ROUTE_TIMEOUT_MS = 5_000;
@@ -51,9 +61,9 @@ describe("BrowserRouter unsaved traversal integration", () => {
       { timeout: LAZY_ROUTE_TIMEOUT_MS },
     )).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("link", { name: "회의록" })[0]);
-    expect(await screen.findByRole("heading", { name: "임원 회의 기록" }, { timeout: LAZY_ROUTE_TIMEOUT_MS })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "회의록 작성" }));
-    const title = await screen.findByLabelText(/회의 제목/, {}, { timeout: LAZY_ROUTE_TIMEOUT_MS });
+    expect(await screen.findByRole("heading", { name: "회의록" }, { timeout: LAZY_ROUTE_TIMEOUT_MS })).toBeInTheDocument();
+    fireEvent.click((await screen.findByRole("button", { name: "새 회의록" })));
+    const title = await screen.findByLabelText("제목", {}, { timeout: LAZY_ROUTE_TIMEOUT_MS });
     fireEvent.change(title, { target: { value: "브라우저 뒤로 가기에도 남아야 할 초안" } });
     const historyLength = window.history.length;
 
@@ -61,7 +71,7 @@ describe("BrowserRouter unsaved traversal integration", () => {
 
     await waitFor(() => expect(confirm).toHaveBeenCalledWith(UNSAVED_CHANGES_MESSAGE));
     await waitFor(() => expect(window.location.pathname).toBe("/manage/minutes"));
-    expect(screen.getByRole("heading", { name: "임원 회의 기록" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "회의록" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("브라우저 뒤로 가기에도 남아야 할 초안")).toBeInTheDocument();
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(window.history.length).toBe(historyLength);

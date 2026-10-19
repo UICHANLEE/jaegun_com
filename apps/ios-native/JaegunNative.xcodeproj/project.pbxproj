@@ -7,30 +7,80 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		004FCF2FA6EBF904F218D800 /* NativeEventFieldModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D3E3E409D5467D2D141892F /* NativeEventFieldModels.swift */; };
+		0268F1188C15613336DC754A /* NativeExecutiveRecordsFees.swift in Sources */ = {isa = PBXBuildFile; fileRef = D14D51CA478CABD0D22328FD /* NativeExecutiveRecordsFees.swift */; };
 		0E5E182D2DF0F70613BCDB4C /* NativeFaithViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43BED3BC51730C4E9C2A8B5B /* NativeFaithViews.swift */; };
+		0FDBD84D35910D8D7D6F1CF9 /* NativeBoardFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8139F3B32F33FD500E2ACFB4 /* NativeBoardFeedView.swift */; };
+		11FFD891B51224E276273729 /* NativeCalendarMonthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9241E04FA3DBBA04185C8DE /* NativeCalendarMonthView.swift */; };
 		12E1AEA343EB730AF0AA1454 /* NativeFaithTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C91154CAB59C1C64DC10AF6 /* NativeFaithTests.swift */; };
 		13F8E8958A22ED411863CBD7 /* NativeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 756574A99AF283A7DF99EE15 /* NativeConfig.swift */; };
 		1488D179E8310B2D519E8B72 /* NativeSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F442E5B95FD5C40936BC43D /* NativeSession.swift */; };
 		1489D41389826D26034C584B /* NativeWebAlignedViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08351006B1D2EAA2FBBA1927 /* NativeWebAlignedViews.swift */; };
+		152B8E1CC1B102251505453F /* NativeEventWorkbook.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCEFF5DB3D678C101B5F2879 /* NativeEventWorkbook.swift */; };
+		169C439A41216AC42EE31361 /* NativeAIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D7EEDD5A268A62EBED338F /* NativeAIService.swift */; };
 		17ECE5D01FC0EBED5794F32B /* NativeFaithWithdrawalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49D486BA6CC3704A7DA8E430 /* NativeFaithWithdrawalView.swift */; };
+		2533F1BD5E4A1393E5A17796 /* NativeEmailRecoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0549A4CE7F434A7F0C1C3A97 /* NativeEmailRecoveryView.swift */; };
+		28045847CAB2474A44B6AA5C /* NativeEventFieldTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65542071C2E685F6D7354CA0 /* NativeEventFieldTests.swift */; };
+		2D28E05FF771DFF7228284D2 /* NativeAIViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D3E28E7322E5980B9812C1 /* NativeAIViews.swift */; };
+		2FACC33F27990071981B4EF4 /* NativeGovernanceEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE5D635A50CC52E632CA7382 /* NativeGovernanceEditors.swift */; };
+		32A439BC2DD6E43D95A79044 /* NativeLoginAssuranceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 934FD5693234CF3F9354106E /* NativeLoginAssuranceTests.swift */; };
+		331E2C029C68A3D8448BF445 /* NativeChatRealtime.swift in Sources */ = {isa = PBXBuildFile; fileRef = C11137DE7DE9729986EABE01 /* NativeChatRealtime.swift */; };
+		33ABB7FDC9EA9BA7A2022899 /* NativeExecutiveRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE8FD44DC22F4F5D4F2038F5 /* NativeExecutiveRecords.swift */; };
 		3C8EB1A2C089A1CB7D8D7F46 /* NativeCollaborationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */; };
 		42CFEFA8E03967008AAE4864 /* JaegunNativeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AC000B221F723B87A9E585E /* JaegunNativeApp.swift */; };
 		44ED8BE983CB3AF105BAF4F1 /* FaithConsent.md in Resources */ = {isa = PBXBuildFile; fileRef = B6AD8F9F82B973B4774FA4D2 /* FaithConsent.md */; };
+		4828ECF7CE781611B96461D0 /* NativeChatMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33ADF6FC96698C1E26FB5676 /* NativeChatMessageList.swift */; };
+		486322905CB6A22C14D55A55 /* NativeGovernanceUnion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CE80FF7E43EBB0E68962E0B /* NativeGovernanceUnion.swift */; };
+		52AA99587F7274221FC21A0B /* NativeChatState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D2C28763774E9F49681C6E /* NativeChatState.swift */; };
+		570036C3AD872ED48C8F6438 /* NativeRichChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36A92C4456DBA2857E1F8888 /* NativeRichChatTests.swift */; };
+		5AC1955638BF9238072244F8 /* NativeCalendarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDB2353008EE259ACE85F9A /* NativeCalendarTests.swift */; };
+		5E076FF514F7403ABB9F6B08 /* NativeAccountServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD2B017D74CA45E25AC5695 /* NativeAccountServices.swift */; };
+		610D597A24E3868D0D8D9AC8 /* NativeFaithCommunity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C63AFC8EF341F7467F24297D /* NativeFaithCommunity.swift */; };
+		66FEEC8F6C14618D09421538 /* NativeCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD1C150F18EC019AF42BA7E /* NativeCalendar.swift */; };
+		67EAF51202737D3057409BD2 /* NativeBackgroundWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845568DB8D01D00643C521D8 /* NativeBackgroundWork.swift */; };
 		68C405706612E67DF7F654D6 /* NativeEventRecurrenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E35BA73B5247793A3D161D6A /* NativeEventRecurrenceTests.swift */; };
+		6A513FD0B7147FD26B4FA97E /* Pods_JaegunNative.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7DCEF3F02F46712860D67C5E /* Pods_JaegunNative.framework */; };
 		75CAF80A98823F59DE8300BA /* NativeCommunityCollaboration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65A3D66C83AEDE790E890913 /* NativeCommunityCollaboration.swift */; };
 		7EFF8D79FC827013012D5356 /* NativeDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E365B8E3A54D5777FD40343 /* NativeDesign.swift */; };
+		83D7A181DDEBB7844211911A /* NativeAIErrorMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28C85F36835190871FDCDA18 /* NativeAIErrorMessages.swift */; };
+		8539521ADF18040E8607C8D0 /* NativeEventFieldView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3456DF4BC6FD1F58AA845321 /* NativeEventFieldView.swift */; };
+		8562938A2B102CF88DF32AEC /* NativeBibleReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1FEAF5B7109A6CF86BB84E3 /* NativeBibleReader.swift */; };
+		86805F1BF9E5287D5F7BC19A /* BibleKRV in Resources */ = {isa = PBXBuildFile; fileRef = 37F87BBD688747B494B821E0 /* BibleKRV */; };
+		8C1C2B6893300D3646491A4D /* NativeChatConversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 749715492556AB6FFED8AD1D /* NativeChatConversation.swift */; };
+		9036F915E66CB2F90DC027C9 /* NativeBoardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 656AAE3195A1464F3DEA3D8D /* NativeBoardTests.swift */; };
+		9D41F1A5D93DDBC2042FCDD7 /* NativeBoardComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB172C7D85D15975E7317BC3 /* NativeBoardComposer.swift */; };
 		A3F021AB74EBA29D39B0635E /* NativeApprovalOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA9B0FE847661DAE51729C82 /* NativeApprovalOperations.swift */; };
+		A66B3E307EEF8FDA674A06F7 /* NativeBoardPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77117CD6C108A097E73A9F41 /* NativeBoardPolicy.swift */; };
+		A7C4757506D1BC340F3EEBB6 /* NativeChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60B60A1A5E67D568B540DA7E /* NativeChatTests.swift */; };
+		A89A81FD3EB151547D6C0180 /* NativeGovernanceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AB371D4877FE4AD5975046A /* NativeGovernanceViews.swift */; };
 		AE733FE489BD34F4D39F9A5A /* NativeOnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E55B492C032D9698DE7BF2E /* NativeOnboardingView.swift */; };
 		B27C2CEBBBAAF15C2046B9AA /* NativeRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA28B2098A596187BD46A4A /* NativeRootView.swift */; };
+		B9F1B1C3B9D69662F83EF5D2 /* NativeLoginAssurance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58E2CF2AFC24AAFE740E8D1 /* NativeLoginAssurance.swift */; };
 		BBF699C0BC498702C4D10C10 /* NativeSignupOfficeRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761F36AD2AA7993D8002E53D /* NativeSignupOfficeRequests.swift */; };
 		BC7CEFAD06C959AC98630D70 /* NativeAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576C7FF82AB3606E675CDF1C /* NativeAPI.swift */; };
 		BDF432E799C07905F5C576BF /* LegalDocuments.json in Resources */ = {isa = PBXBuildFile; fileRef = B9391360E292500C2F27AB46 /* LegalDocuments.json */; };
+		BE4A4099CB2CC91E89C0EC4F /* Pods_JaegunNativeTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2D43FE7A48C421AE2F27EC6 /* Pods_JaegunNativeTests.framework */; };
+		BE70A3CE5FFF5262042B390B /* NativeAITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10A3FBB8FF15C08A88754ABD /* NativeAITests.swift */; };
+		C0C3C7E742AB52055C1D768E /* NativeLiveViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6640CD3F35F4D29F78984289 /* NativeLiveViews.swift */; };
+		C29CFA254D99DEAB33A03CF8 /* NativeChatManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ED4489C33CF2F91CC26F3C3 /* NativeChatManagement.swift */; };
+		C580EA3F16CDBD2C72A53ED7 /* NativeManagementHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7334F4E01F8838C253CCE5A4 /* NativeManagementHubView.swift */; };
 		C60DBB062DFFE238126CD470 /* BibleCanon.json in Resources */ = {isa = PBXBuildFile; fileRef = 84C207C5337B0C03AC5E9ADB /* BibleCanon.json */; };
+		C82FC8B7530621364790B16D /* NativeGovernanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E39059F69C62CBBF1E849BB0 /* NativeGovernanceTests.swift */; };
+		CBB3CD88906EDBE8A8B33A23 /* NativeMeetingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CDBEC49FB0EC88DC5559C48 /* NativeMeetingViews.swift */; };
+		D849391DE632CBF2FCD70F1D /* NativeAccountServicesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC55EC2949059EA71C49A8B1 /* NativeAccountServicesTests.swift */; };
 		D8C39F9CA021B4DD828DF7D1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8E9CB8E1109E2C13E2BAC121 /* Assets.xcassets */; };
+		D8EC1C273CB9870F1FB06DAC /* NativeRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D63B68FB66AD6C84C1638B2 /* NativeRefreshTests.swift */; };
+		D94D0665451AEA3805EB2C3E /* NativeBoardSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40E2A9241C50D274441C5A0 /* NativeBoardSafety.swift */; };
+		DA5783BB281CF5B1AB62115E /* NativeBoardActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D2D956B010FA61575B4CBD /* NativeBoardActions.swift */; };
 		E5AE03CF5EF8CDCEDCE0A0B1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 29A560F2DD8CB41D3C0A6923 /* PrivacyInfo.xcprivacy */; };
 		E623690B69A8C0C18DDD8858 /* NativeSecurityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 940E4A821DA8DB38946024EC /* NativeSecurityTests.swift */; };
 		E7C673E58B6CFC0108589492 /* NativeCommunityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8386CB9E3495ECD9BF566B73 /* NativeCommunityViews.swift */; };
+		E928EE25DCB3AA129EB9027A /* NativeMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4776031CC490F63B4F4406C /* NativeMedia.swift */; };
 		E990FD75F37C5A6B97A02BB2 /* NativeEventEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2229D5A1E0180AC4D99703FC /* NativeEventEditor.swift */; };
+		EDA773DD0E1E678B00619EE9 /* NativeBoardPostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8693682A653A2F847D4D1CD /* NativeBoardPostDetailView.swift */; };
+		F652D262FFBDE76CE19248B4 /* NativeExecutiveRecordsAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30F53BCE6C42ABBDA4D27069 /* NativeExecutiveRecordsAccess.swift */; };
+		F7CEB0FE393D0CD05534D8C1 /* NativeOperationsConsole.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE2890A946989DEDC137E04 /* NativeOperationsConsole.swift */; };
+		F9F399F5207F23B53607C937 /* NativeEventFieldScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15014739723CE0D23470D642 /* NativeEventFieldScanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -44,36 +94,119 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0549A4CE7F434A7F0C1C3A97 /* NativeEmailRecoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEmailRecoveryView.swift; sourceTree = "<group>"; };
 		08351006B1D2EAA2FBBA1927 /* NativeWebAlignedViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWebAlignedViews.swift; sourceTree = "<group>"; };
+		0CE80FF7E43EBB0E68962E0B /* NativeGovernanceUnion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGovernanceUnion.swift; sourceTree = "<group>"; };
+		0F464AE5D45B8FBE01836756 /* Pods-JaegunNative.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-JaegunNative.debug.xcconfig"; path = "Target Support Files/Pods-JaegunNative/Pods-JaegunNative.debug.xcconfig"; sourceTree = "<group>"; };
+		10A3FBB8FF15C08A88754ABD /* NativeAITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAITests.swift; sourceTree = "<group>"; };
+		15014739723CE0D23470D642 /* NativeEventFieldScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventFieldScanner.swift; sourceTree = "<group>"; };
 		1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCollaborationTests.swift; sourceTree = "<group>"; };
 		1C91154CAB59C1C64DC10AF6 /* NativeFaithTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFaithTests.swift; sourceTree = "<group>"; };
+		1DD1C150F18EC019AF42BA7E /* NativeCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCalendar.swift; sourceTree = "<group>"; };
 		2229D5A1E0180AC4D99703FC /* NativeEventEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventEditor.swift; sourceTree = "<group>"; };
+		28C85F36835190871FDCDA18 /* NativeAIErrorMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAIErrorMessages.swift; sourceTree = "<group>"; };
 		29A560F2DD8CB41D3C0A6923 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		2AB371D4877FE4AD5975046A /* NativeGovernanceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGovernanceViews.swift; sourceTree = "<group>"; };
+		2D63B68FB66AD6C84C1638B2 /* NativeRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRefreshTests.swift; sourceTree = "<group>"; };
+		30F53BCE6C42ABBDA4D27069 /* NativeExecutiveRecordsAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeExecutiveRecordsAccess.swift; sourceTree = "<group>"; };
+		33ADF6FC96698C1E26FB5676 /* NativeChatMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatMessageList.swift; sourceTree = "<group>"; };
+		3456DF4BC6FD1F58AA845321 /* NativeEventFieldView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventFieldView.swift; sourceTree = "<group>"; };
+		36A92C4456DBA2857E1F8888 /* NativeRichChatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRichChatTests.swift; sourceTree = "<group>"; };
+		37F87BBD688747B494B821E0 /* BibleKRV */ = {isa = PBXFileReference; lastKnownFileType = folder; name = BibleKRV; path = Resources/BibleKRV; sourceTree = SOURCE_ROOT; };
+		3D3E3E409D5467D2D141892F /* NativeEventFieldModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventFieldModels.swift; sourceTree = "<group>"; };
 		3E365B8E3A54D5777FD40343 /* NativeDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDesign.swift; sourceTree = "<group>"; };
 		3E55B492C032D9698DE7BF2E /* NativeOnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOnboardingView.swift; sourceTree = "<group>"; };
+		43107CA43F1B47058E95FFB7 /* NativeBuild.Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = NativeBuild.Debug.xcconfig; sourceTree = "<group>"; };
 		43BED3BC51730C4E9C2A8B5B /* NativeFaithViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFaithViews.swift; sourceTree = "<group>"; };
+		47D2D956B010FA61575B4CBD /* NativeBoardActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBoardActions.swift; sourceTree = "<group>"; };
 		49D486BA6CC3704A7DA8E430 /* NativeFaithWithdrawalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFaithWithdrawalView.swift; sourceTree = "<group>"; };
 		4AC000B221F723B87A9E585E /* JaegunNativeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JaegunNativeApp.swift; sourceTree = "<group>"; };
+		515FD4DBAC6737F5B8E43ED4 /* Pods-JaegunNativeTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-JaegunNativeTests.release.xcconfig"; path = "Target Support Files/Pods-JaegunNativeTests/Pods-JaegunNativeTests.release.xcconfig"; sourceTree = "<group>"; };
 		576C7FF82AB3606E675CDF1C /* NativeAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAPI.swift; sourceTree = "<group>"; };
+		5D19DC4F68A59FE18E4FDDCD /* Pods-JaegunNativeTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-JaegunNativeTests.debug.xcconfig"; path = "Target Support Files/Pods-JaegunNativeTests/Pods-JaegunNativeTests.debug.xcconfig"; sourceTree = "<group>"; };
+		60B60A1A5E67D568B540DA7E /* NativeChatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatTests.swift; sourceTree = "<group>"; };
+		65542071C2E685F6D7354CA0 /* NativeEventFieldTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventFieldTests.swift; sourceTree = "<group>"; };
+		656AAE3195A1464F3DEA3D8D /* NativeBoardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBoardTests.swift; sourceTree = "<group>"; };
 		65A3D66C83AEDE790E890913 /* NativeCommunityCollaboration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCommunityCollaboration.swift; sourceTree = "<group>"; };
+		6640CD3F35F4D29F78984289 /* NativeLiveViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLiveViews.swift; sourceTree = "<group>"; };
+		6DDB2353008EE259ACE85F9A /* NativeCalendarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCalendarTests.swift; sourceTree = "<group>"; };
 		6F442E5B95FD5C40936BC43D /* NativeSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSession.swift; sourceTree = "<group>"; };
+		70EC0F9A49D83E7430F33E0A /* NativeBuild.Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = NativeBuild.Release.xcconfig; sourceTree = "<group>"; };
+		7334F4E01F8838C253CCE5A4 /* NativeManagementHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeManagementHubView.swift; sourceTree = "<group>"; };
+		749715492556AB6FFED8AD1D /* NativeChatConversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatConversation.swift; sourceTree = "<group>"; };
 		756574A99AF283A7DF99EE15 /* NativeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConfig.swift; sourceTree = "<group>"; };
 		761F36AD2AA7993D8002E53D /* NativeSignupOfficeRequests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSignupOfficeRequests.swift; sourceTree = "<group>"; };
+		77117CD6C108A097E73A9F41 /* NativeBoardPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBoardPolicy.swift; sourceTree = "<group>"; };
+		7DCEF3F02F46712860D67C5E /* Pods_JaegunNative.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_JaegunNative.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		8139F3B32F33FD500E2ACFB4 /* NativeBoardFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBoardFeedView.swift; sourceTree = "<group>"; };
 		8386CB9E3495ECD9BF566B73 /* NativeCommunityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCommunityViews.swift; sourceTree = "<group>"; };
+		845568DB8D01D00643C521D8 /* NativeBackgroundWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBackgroundWork.swift; sourceTree = "<group>"; };
 		84C207C5337B0C03AC5E9ADB /* BibleCanon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = BibleCanon.json; sourceTree = "<group>"; };
+		8CDBEC49FB0EC88DC5559C48 /* NativeMeetingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMeetingViews.swift; sourceTree = "<group>"; };
 		8E9CB8E1109E2C13E2BAC121 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		934FD5693234CF3F9354106E /* NativeLoginAssuranceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLoginAssuranceTests.swift; sourceTree = "<group>"; };
 		940E4A821DA8DB38946024EC /* NativeSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSecurityTests.swift; sourceTree = "<group>"; };
+		9ED4489C33CF2F91CC26F3C3 /* NativeChatManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatManagement.swift; sourceTree = "<group>"; };
+		A2D43FE7A48C421AE2F27EC6 /* Pods_JaegunNativeTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_JaegunNativeTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE5D635A50CC52E632CA7382 /* NativeGovernanceEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGovernanceEditors.swift; sourceTree = "<group>"; };
 		B6AD8F9F82B973B4774FA4D2 /* FaithConsent.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = FaithConsent.md; sourceTree = "<group>"; };
 		B9391360E292500C2F27AB46 /* LegalDocuments.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = LegalDocuments.json; sourceTree = "<group>"; };
+		C11137DE7DE9729986EABE01 /* NativeChatRealtime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatRealtime.swift; sourceTree = "<group>"; };
+		C1717DE7CA9E5DC931EB1C7C /* Pods-JaegunNative.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-JaegunNative.release.xcconfig"; path = "Target Support Files/Pods-JaegunNative/Pods-JaegunNative.release.xcconfig"; sourceTree = "<group>"; };
+		C1D3E28E7322E5980B9812C1 /* NativeAIViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAIViews.swift; sourceTree = "<group>"; };
+		C40E2A9241C50D274441C5A0 /* NativeBoardSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBoardSafety.swift; sourceTree = "<group>"; };
+		C63AFC8EF341F7467F24297D /* NativeFaithCommunity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFaithCommunity.swift; sourceTree = "<group>"; };
 		C6C17AB09F50B9066DE2595F /* JaegunNative.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = JaegunNative.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C6D2C28763774E9F49681C6E /* NativeChatState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatState.swift; sourceTree = "<group>"; };
+		C6D7EEDD5A268A62EBED338F /* NativeAIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAIService.swift; sourceTree = "<group>"; };
+		CAE2890A946989DEDC137E04 /* NativeOperationsConsole.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOperationsConsole.swift; sourceTree = "<group>"; };
+		CFD2B017D74CA45E25AC5695 /* NativeAccountServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAccountServices.swift; sourceTree = "<group>"; };
+		D14D51CA478CABD0D22328FD /* NativeExecutiveRecordsFees.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeExecutiveRecordsFees.swift; sourceTree = "<group>"; };
 		D76F13114AC9977C7C9E33C4 /* JaegunNativeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = JaegunNativeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		DB70652F0E147C4483931E8E /* NativePublicConfig.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = NativePublicConfig.xcconfig; sourceTree = "<group>"; };
+		DCEFF5DB3D678C101B5F2879 /* NativeEventWorkbook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventWorkbook.swift; sourceTree = "<group>"; };
+		DE8FD44DC22F4F5D4F2038F5 /* NativeExecutiveRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeExecutiveRecords.swift; sourceTree = "<group>"; };
+		E1FEAF5B7109A6CF86BB84E3 /* NativeBibleReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBibleReader.swift; sourceTree = "<group>"; };
 		E35BA73B5247793A3D161D6A /* NativeEventRecurrenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventRecurrenceTests.swift; sourceTree = "<group>"; };
+		E39059F69C62CBBF1E849BB0 /* NativeGovernanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGovernanceTests.swift; sourceTree = "<group>"; };
+		E4776031CC490F63B4F4406C /* NativeMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMedia.swift; sourceTree = "<group>"; };
 		EA9B0FE847661DAE51729C82 /* NativeApprovalOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeApprovalOperations.swift; sourceTree = "<group>"; };
+		EB172C7D85D15975E7317BC3 /* NativeBoardComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBoardComposer.swift; sourceTree = "<group>"; };
+		F58E2CF2AFC24AAFE740E8D1 /* NativeLoginAssurance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLoginAssurance.swift; sourceTree = "<group>"; };
+		F8693682A653A2F847D4D1CD /* NativeBoardPostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBoardPostDetailView.swift; sourceTree = "<group>"; };
+		F9241E04FA3DBBA04185C8DE /* NativeCalendarMonthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCalendarMonthView.swift; sourceTree = "<group>"; };
 		FAA28B2098A596187BD46A4A /* NativeRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRootView.swift; sourceTree = "<group>"; };
+		FC55EC2949059EA71C49A8B1 /* NativeAccountServicesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAccountServicesTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		12270E52B0032027E5A83856 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6A513FD0B7147FD26B4FA97E /* Pods_JaegunNative.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5FADCE2C2E99967267689417 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BE4A4099CB2CC91E89C0EC4F /* Pods_JaegunNativeTests.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXGroup section */
+		01BE7F32A71DA7121E705407 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				7DCEF3F02F46712860D67C5E /* Pods_JaegunNative.framework */,
+				A2D43FE7A48C421AE2F27EC6 /* Pods_JaegunNativeTests.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		041956985E0737837F4F7EBA /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -89,7 +222,8 @@
 		15D218FF5A6D7938A86A38EE /* ios-native */ = {
 			isa = PBXGroup;
 			children = (
-				DB70652F0E147C4483931E8E /* NativePublicConfig.xcconfig */,
+				43107CA43F1B47058E95FFB7 /* NativeBuild.Debug.xcconfig */,
+				70EC0F9A49D83E7430F33E0A /* NativeBuild.Release.xcconfig */,
 			);
 			name = "ios-native";
 			path = .;
@@ -108,16 +242,53 @@
 			isa = PBXGroup;
 			children = (
 				4AC000B221F723B87A9E585E /* JaegunNativeApp.swift */,
+				CFD2B017D74CA45E25AC5695 /* NativeAccountServices.swift */,
+				28C85F36835190871FDCDA18 /* NativeAIErrorMessages.swift */,
+				C6D7EEDD5A268A62EBED338F /* NativeAIService.swift */,
+				C1D3E28E7322E5980B9812C1 /* NativeAIViews.swift */,
 				576C7FF82AB3606E675CDF1C /* NativeAPI.swift */,
 				EA9B0FE847661DAE51729C82 /* NativeApprovalOperations.swift */,
+				845568DB8D01D00643C521D8 /* NativeBackgroundWork.swift */,
+				E1FEAF5B7109A6CF86BB84E3 /* NativeBibleReader.swift */,
+				47D2D956B010FA61575B4CBD /* NativeBoardActions.swift */,
+				EB172C7D85D15975E7317BC3 /* NativeBoardComposer.swift */,
+				8139F3B32F33FD500E2ACFB4 /* NativeBoardFeedView.swift */,
+				77117CD6C108A097E73A9F41 /* NativeBoardPolicy.swift */,
+				F8693682A653A2F847D4D1CD /* NativeBoardPostDetailView.swift */,
+				C40E2A9241C50D274441C5A0 /* NativeBoardSafety.swift */,
+				1DD1C150F18EC019AF42BA7E /* NativeCalendar.swift */,
+				F9241E04FA3DBBA04185C8DE /* NativeCalendarMonthView.swift */,
+				749715492556AB6FFED8AD1D /* NativeChatConversation.swift */,
+				9ED4489C33CF2F91CC26F3C3 /* NativeChatManagement.swift */,
+				33ADF6FC96698C1E26FB5676 /* NativeChatMessageList.swift */,
+				C11137DE7DE9729986EABE01 /* NativeChatRealtime.swift */,
+				C6D2C28763774E9F49681C6E /* NativeChatState.swift */,
 				65A3D66C83AEDE790E890913 /* NativeCommunityCollaboration.swift */,
 				8386CB9E3495ECD9BF566B73 /* NativeCommunityViews.swift */,
 				756574A99AF283A7DF99EE15 /* NativeConfig.swift */,
 				3E365B8E3A54D5777FD40343 /* NativeDesign.swift */,
+				0549A4CE7F434A7F0C1C3A97 /* NativeEmailRecoveryView.swift */,
 				2229D5A1E0180AC4D99703FC /* NativeEventEditor.swift */,
+				3D3E3E409D5467D2D141892F /* NativeEventFieldModels.swift */,
+				15014739723CE0D23470D642 /* NativeEventFieldScanner.swift */,
+				3456DF4BC6FD1F58AA845321 /* NativeEventFieldView.swift */,
+				DCEFF5DB3D678C101B5F2879 /* NativeEventWorkbook.swift */,
+				DE8FD44DC22F4F5D4F2038F5 /* NativeExecutiveRecords.swift */,
+				30F53BCE6C42ABBDA4D27069 /* NativeExecutiveRecordsAccess.swift */,
+				D14D51CA478CABD0D22328FD /* NativeExecutiveRecordsFees.swift */,
+				C63AFC8EF341F7467F24297D /* NativeFaithCommunity.swift */,
 				43BED3BC51730C4E9C2A8B5B /* NativeFaithViews.swift */,
 				49D486BA6CC3704A7DA8E430 /* NativeFaithWithdrawalView.swift */,
+				AE5D635A50CC52E632CA7382 /* NativeGovernanceEditors.swift */,
+				0CE80FF7E43EBB0E68962E0B /* NativeGovernanceUnion.swift */,
+				2AB371D4877FE4AD5975046A /* NativeGovernanceViews.swift */,
+				6640CD3F35F4D29F78984289 /* NativeLiveViews.swift */,
+				F58E2CF2AFC24AAFE740E8D1 /* NativeLoginAssurance.swift */,
+				7334F4E01F8838C253CCE5A4 /* NativeManagementHubView.swift */,
+				E4776031CC490F63B4F4406C /* NativeMedia.swift */,
+				8CDBEC49FB0EC88DC5559C48 /* NativeMeetingViews.swift */,
 				3E55B492C032D9698DE7BF2E /* NativeOnboardingView.swift */,
+				CAE2890A946989DEDC137E04 /* NativeOperationsConsole.swift */,
 				FAA28B2098A596187BD46A4A /* NativeRootView.swift */,
 				6F442E5B95FD5C40936BC43D /* NativeSession.swift */,
 				761F36AD2AA7993D8002E53D /* NativeSignupOfficeRequests.swift */,
@@ -126,12 +297,34 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		642B258CF0395301949CBB55 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				0F464AE5D45B8FBE01836756 /* Pods-JaegunNative.debug.xcconfig */,
+				C1717DE7CA9E5DC931EB1C7C /* Pods-JaegunNative.release.xcconfig */,
+				5D19DC4F68A59FE18E4FDDCD /* Pods-JaegunNativeTests.debug.xcconfig */,
+				515FD4DBAC6737F5B8E43ED4 /* Pods-JaegunNativeTests.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		76B507CB934DD73951932092 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				FC55EC2949059EA71C49A8B1 /* NativeAccountServicesTests.swift */,
+				10A3FBB8FF15C08A88754ABD /* NativeAITests.swift */,
+				656AAE3195A1464F3DEA3D8D /* NativeBoardTests.swift */,
+				6DDB2353008EE259ACE85F9A /* NativeCalendarTests.swift */,
+				60B60A1A5E67D568B540DA7E /* NativeChatTests.swift */,
 				1A245006E5415493B3B8AF1E /* NativeCollaborationTests.swift */,
+				65542071C2E685F6D7354CA0 /* NativeEventFieldTests.swift */,
 				E35BA73B5247793A3D161D6A /* NativeEventRecurrenceTests.swift */,
 				1C91154CAB59C1C64DC10AF6 /* NativeFaithTests.swift */,
+				E39059F69C62CBBF1E849BB0 /* NativeGovernanceTests.swift */,
+				934FD5693234CF3F9354106E /* NativeLoginAssuranceTests.swift */,
+				2D63B68FB66AD6C84C1638B2 /* NativeRefreshTests.swift */,
+				36A92C4456DBA2857E1F8888 /* NativeRichChatTests.swift */,
 				940E4A821DA8DB38946024EC /* NativeSecurityTests.swift */,
 			);
 			path = Tests;
@@ -140,11 +333,14 @@
 		AA1393B6EBF19A03F091AF32 = {
 			isa = PBXGroup;
 			children = (
+				37F87BBD688747B494B821E0 /* BibleKRV */,
 				15D218FF5A6D7938A86A38EE /* ios-native */,
 				041956985E0737837F4F7EBA /* Resources */,
 				5D75256AAE3F0A79C001D5BA /* Sources */,
 				76B507CB934DD73951932092 /* Tests */,
 				17A37C88BF7CA562E7B35EE2 /* Products */,
+				642B258CF0395301949CBB55 /* Pods */,
+				01BE7F32A71DA7121E705407 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -155,7 +351,9 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = C449ECAE9B86A8700BE53A2C /* Build configuration list for PBXNativeTarget "JaegunNativeTests" */;
 			buildPhases = (
+				9E8C66E0BB6F930170DDE0E8 /* [CP] Check Pods Manifest.lock */,
 				6EE46F43CF2D7353D2C74364 /* Sources */,
+				5FADCE2C2E99967267689417 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -163,8 +361,6 @@
 				9CE87F9FFD48C7C067E2EC6A /* PBXTargetDependency */,
 			);
 			name = JaegunNativeTests;
-			packageProductDependencies = (
-			);
 			productName = JaegunNativeTests;
 			productReference = D76F13114AC9977C7C9E33C4 /* JaegunNativeTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -173,16 +369,17 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 627C945FDA741D93B2A8CA7B /* Build configuration list for PBXNativeTarget "JaegunNative" */;
 			buildPhases = (
+				DE269588B68C60CE6CCC9AA8 /* [CP] Check Pods Manifest.lock */,
 				3464574875D3AD2D2B5ED391 /* Sources */,
 				65F0CFFB5121A4D5D525CBEC /* Resources */,
+				12270E52B0032027E5A83856 /* Frameworks */,
+				E72FCF93D50F65565D134F42 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = JaegunNative;
-			packageProductDependencies = (
-			);
 			productName = JaegunNative;
 			productReference = C6C17AB09F50B9066DE2595F /* JaegunNative.app */;
 			productType = "com.apple.product-type.application";
@@ -233,6 +430,7 @@
 			files = (
 				D8C39F9CA021B4DD828DF7D1 /* Assets.xcassets in Resources */,
 				C60DBB062DFFE238126CD470 /* BibleCanon.json in Resources */,
+				86805F1BF9E5287D5F7BC19A /* BibleKRV in Resources */,
 				44ED8BE983CB3AF105BAF4F1 /* FaithConsent.md in Resources */,
 				BDF432E799C07905F5C576BF /* LegalDocuments.json in Resources */,
 				E5AE03CF5EF8CDCEDCE0A0B1 /* PrivacyInfo.xcprivacy in Resources */,
@@ -241,22 +439,123 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		9E8C66E0BB6F930170DDE0E8 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-JaegunNativeTests-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		DE269588B68C60CE6CCC9AA8 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-JaegunNative-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		E72FCF93D50F65565D134F42 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-JaegunNative/Pods-JaegunNative-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-JaegunNative/Pods-JaegunNative-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-JaegunNative/Pods-JaegunNative-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		3464574875D3AD2D2B5ED391 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				42CFEFA8E03967008AAE4864 /* JaegunNativeApp.swift in Sources */,
+				83D7A181DDEBB7844211911A /* NativeAIErrorMessages.swift in Sources */,
+				169C439A41216AC42EE31361 /* NativeAIService.swift in Sources */,
+				2D28E05FF771DFF7228284D2 /* NativeAIViews.swift in Sources */,
 				BC7CEFAD06C959AC98630D70 /* NativeAPI.swift in Sources */,
+				5E076FF514F7403ABB9F6B08 /* NativeAccountServices.swift in Sources */,
 				A3F021AB74EBA29D39B0635E /* NativeApprovalOperations.swift in Sources */,
+				67EAF51202737D3057409BD2 /* NativeBackgroundWork.swift in Sources */,
+				8562938A2B102CF88DF32AEC /* NativeBibleReader.swift in Sources */,
+				DA5783BB281CF5B1AB62115E /* NativeBoardActions.swift in Sources */,
+				9D41F1A5D93DDBC2042FCDD7 /* NativeBoardComposer.swift in Sources */,
+				0FDBD84D35910D8D7D6F1CF9 /* NativeBoardFeedView.swift in Sources */,
+				A66B3E307EEF8FDA674A06F7 /* NativeBoardPolicy.swift in Sources */,
+				EDA773DD0E1E678B00619EE9 /* NativeBoardPostDetailView.swift in Sources */,
+				D94D0665451AEA3805EB2C3E /* NativeBoardSafety.swift in Sources */,
+				66FEEC8F6C14618D09421538 /* NativeCalendar.swift in Sources */,
+				11FFD891B51224E276273729 /* NativeCalendarMonthView.swift in Sources */,
+				8C1C2B6893300D3646491A4D /* NativeChatConversation.swift in Sources */,
+				C29CFA254D99DEAB33A03CF8 /* NativeChatManagement.swift in Sources */,
+				4828ECF7CE781611B96461D0 /* NativeChatMessageList.swift in Sources */,
+				331E2C029C68A3D8448BF445 /* NativeChatRealtime.swift in Sources */,
+				52AA99587F7274221FC21A0B /* NativeChatState.swift in Sources */,
 				75CAF80A98823F59DE8300BA /* NativeCommunityCollaboration.swift in Sources */,
 				E7C673E58B6CFC0108589492 /* NativeCommunityViews.swift in Sources */,
 				13F8E8958A22ED411863CBD7 /* NativeConfig.swift in Sources */,
 				7EFF8D79FC827013012D5356 /* NativeDesign.swift in Sources */,
+				2533F1BD5E4A1393E5A17796 /* NativeEmailRecoveryView.swift in Sources */,
 				E990FD75F37C5A6B97A02BB2 /* NativeEventEditor.swift in Sources */,
+				004FCF2FA6EBF904F218D800 /* NativeEventFieldModels.swift in Sources */,
+				F9F399F5207F23B53607C937 /* NativeEventFieldScanner.swift in Sources */,
+				8539521ADF18040E8607C8D0 /* NativeEventFieldView.swift in Sources */,
+				152B8E1CC1B102251505453F /* NativeEventWorkbook.swift in Sources */,
+				33ABB7FDC9EA9BA7A2022899 /* NativeExecutiveRecords.swift in Sources */,
+				F652D262FFBDE76CE19248B4 /* NativeExecutiveRecordsAccess.swift in Sources */,
+				0268F1188C15613336DC754A /* NativeExecutiveRecordsFees.swift in Sources */,
+				610D597A24E3868D0D8D9AC8 /* NativeFaithCommunity.swift in Sources */,
 				0E5E182D2DF0F70613BCDB4C /* NativeFaithViews.swift in Sources */,
 				17ECE5D01FC0EBED5794F32B /* NativeFaithWithdrawalView.swift in Sources */,
+				2FACC33F27990071981B4EF4 /* NativeGovernanceEditors.swift in Sources */,
+				486322905CB6A22C14D55A55 /* NativeGovernanceUnion.swift in Sources */,
+				A89A81FD3EB151547D6C0180 /* NativeGovernanceViews.swift in Sources */,
+				C0C3C7E742AB52055C1D768E /* NativeLiveViews.swift in Sources */,
+				B9F1B1C3B9D69662F83EF5D2 /* NativeLoginAssurance.swift in Sources */,
+				C580EA3F16CDBD2C72A53ED7 /* NativeManagementHubView.swift in Sources */,
+				E928EE25DCB3AA129EB9027A /* NativeMedia.swift in Sources */,
+				CBB3CD88906EDBE8A8B33A23 /* NativeMeetingViews.swift in Sources */,
 				AE733FE489BD34F4D39F9A5A /* NativeOnboardingView.swift in Sources */,
+				F7CEB0FE393D0CD05534D8C1 /* NativeOperationsConsole.swift in Sources */,
 				B27C2CEBBBAAF15C2046B9AA /* NativeRootView.swift in Sources */,
 				1488D179E8310B2D519E8B72 /* NativeSession.swift in Sources */,
 				BBF699C0BC498702C4D10C10 /* NativeSignupOfficeRequests.swift in Sources */,
@@ -268,9 +567,19 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BE70A3CE5FFF5262042B390B /* NativeAITests.swift in Sources */,
+				D849391DE632CBF2FCD70F1D /* NativeAccountServicesTests.swift in Sources */,
+				9036F915E66CB2F90DC027C9 /* NativeBoardTests.swift in Sources */,
+				5AC1955638BF9238072244F8 /* NativeCalendarTests.swift in Sources */,
+				A7C4757506D1BC340F3EEBB6 /* NativeChatTests.swift in Sources */,
 				3C8EB1A2C089A1CB7D8D7F46 /* NativeCollaborationTests.swift in Sources */,
+				28045847CAB2474A44B6AA5C /* NativeEventFieldTests.swift in Sources */,
 				68C405706612E67DF7F654D6 /* NativeEventRecurrenceTests.swift in Sources */,
 				12E1AEA343EB730AF0AA1454 /* NativeFaithTests.swift in Sources */,
+				C82FC8B7530621364790B16D /* NativeGovernanceTests.swift in Sources */,
+				32A439BC2DD6E43D95A79044 /* NativeLoginAssuranceTests.swift in Sources */,
+				D8EC1C273CB9870F1FB06DAC /* NativeRefreshTests.swift in Sources */,
+				570036C3AD872ED48C8F6438 /* NativeRichChatTests.swift in Sources */,
 				E623690B69A8C0C18DDD8858 /* NativeSecurityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -288,6 +597,7 @@
 /* Begin XCBuildConfiguration section */
 		08666D59EE153E1C0518E597 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5D19DC4F68A59FE18E4FDDCD /* Pods-JaegunNativeTests.debug.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				GENERATE_INFOPLIST_FILE = YES;
@@ -305,7 +615,7 @@
 		};
 		3B27ABBC92DB2BC19FD8B08F /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = DB70652F0E147C4483931E8E /* NativePublicConfig.xcconfig */;
+			baseConfigurationReference = 43107CA43F1B47058E95FFB7 /* NativeBuild.Debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Native.entitlements;
@@ -320,6 +630,10 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.uichanlee.jaegun;
 				SDKROOT = iphoneos;
@@ -398,6 +712,7 @@
 		};
 		A8C769C874DE452D4C3F96D7 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 515FD4DBAC6737F5B8E43ED4 /* Pods-JaegunNativeTests.release.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				GENERATE_INFOPLIST_FILE = YES;
@@ -477,7 +792,7 @@
 		};
 		EE28815A005B9D6CE50116B1 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = DB70652F0E147C4483931E8E /* NativePublicConfig.xcconfig */;
+			baseConfigurationReference = 70EC0F9A49D83E7430F33E0A /* NativeBuild.Release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Native.entitlements;
@@ -492,6 +807,10 @@
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.uichanlee.jaegun;
 				SDKROOT = iphoneos;

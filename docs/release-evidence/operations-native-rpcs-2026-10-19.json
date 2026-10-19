@@ -1,0 +1,452 @@
+{
+  "functions": [
+    {
+      "name": "abandon_direct_media_objects",
+      "arguments": "p_bucket_id text, p_storage_paths text[]"
+    },
+    {
+      "name": "accept_faith_consent",
+      "arguments": "p_organization_id uuid, p_version text, p_content_sha256 text"
+    },
+    {
+      "name": "admin_operations_action",
+      "arguments": "p_report_id uuid, p_action text, p_reason text, p_appeal_id uuid"
+    },
+    {
+      "name": "admin_operations_audit",
+      "arguments": "p_query text, p_from timestamp with time zone, p_to timestamp with time zone, p_offset integer"
+    },
+    {
+      "name": "admin_operations_audit_provenance",
+      "arguments": "p_audit_id uuid, p_reason text"
+    },
+    {
+      "name": "admin_operations_case",
+      "arguments": "p_report_id uuid, p_reason text"
+    },
+    {
+      "name": "admin_operations_cases",
+      "arguments": "p_query text, p_status text, p_offset integer"
+    },
+    {
+      "name": "admin_operations_export",
+      "arguments": "p_from timestamp with time zone, p_to timestamp with time zone, p_reason text"
+    },
+    {
+      "name": "admin_operations_snapshot",
+      "arguments": ""
+    },
+    {
+      "name": "admin_operations_verify_export",
+      "arguments": "p_export_id uuid, p_records jsonb"
+    },
+    {
+      "name": "block_community_comment_author",
+      "arguments": "p_comment_id uuid, p_expected_actor_id uuid"
+    },
+    {
+      "name": "block_user",
+      "arguments": "p_user_id uuid, p_reason text"
+    },
+    {
+      "name": "cancel_event",
+      "arguments": "p_event_id uuid, p_client_operation_id uuid, p_reason text"
+    },
+    {
+      "name": "channel_command",
+      "arguments": "p_action text, p_channel_id uuid, p_payload jsonb"
+    },
+    {
+      "name": "channel_rich_command",
+      "arguments": "p_action text, p_channel_id uuid, p_payload jsonb"
+    },
+    {
+      "name": "channel_snapshot",
+      "arguments": "p_organization_id uuid, p_channel_id uuid, p_before_seq bigint"
+    },
+    {
+      "name": "create_my_qt",
+      "arguments": "p_organization_id uuid, p_client_request_id uuid, p_reference text, p_body text"
+    },
+    {
+      "name": "delete_my_qt",
+      "arguments": "p_organization_id uuid, p_qt_id uuid"
+    },
+    {
+      "name": "delete_scoped_record",
+      "arguments": "p_id uuid, p_expected_revision integer, p_operation_id uuid, p_reason text, p_expected_actor_id uuid"
+    },
+    {
+      "name": "export_event_field",
+      "arguments": "p_occurrence_id uuid"
+    },
+    {
+      "name": "export_finance_report",
+      "arguments": "p_scope_id uuid, p_event_id uuid, p_starts_on date, p_ends_on date, p_close boolean, p_expected_actor_id uuid"
+    },
+    {
+      "name": "get_conversation_summaries",
+      "arguments": ""
+    },
+    {
+      "name": "get_event_fee_status",
+      "arguments": "p_occurrence_id uuid"
+    },
+    {
+      "name": "get_event_field",
+      "arguments": "p_occurrence_id uuid"
+    },
+    {
+      "name": "get_faith_community",
+      "arguments": "p_organization_id uuid"
+    },
+    {
+      "name": "get_faith_consent_status",
+      "arguments": "p_organization_id uuid"
+    },
+    {
+      "name": "get_faith_snapshot",
+      "arguments": "p_organization_id uuid"
+    },
+    {
+      "name": "get_governance_management_scopes",
+      "arguments": ""
+    },
+    {
+      "name": "get_governance_tree",
+      "arguments": ""
+    },
+    {
+      "name": "get_my_event_scopes",
+      "arguments": ""
+    },
+    {
+      "name": "get_my_governance_access",
+      "arguments": ""
+    },
+    {
+      "name": "get_my_native_context",
+      "arguments": ""
+    },
+    {
+      "name": "get_my_safety_privacy_state",
+      "arguments": ""
+    },
+    {
+      "name": "get_or_create_conversation",
+      "arguments": "p_other_user_id uuid"
+    },
+    {
+      "name": "get_scoped_record_history",
+      "arguments": "p_id uuid"
+    },
+    {
+      "name": "get_scoped_records",
+      "arguments": "p_scope_id uuid, p_event_id uuid, p_year integer, p_kind text"
+    },
+    {
+      "name": "get_sensitive_action_auth_status",
+      "arguments": ""
+    },
+    {
+      "name": "get_service_clock",
+      "arguments": ""
+    },
+    {
+      "name": "get_union_department_detail",
+      "arguments": "p_department_id uuid, p_service_year integer"
+    },
+    {
+      "name": "get_union_departments",
+      "arguments": ""
+    },
+    {
+      "name": "issue_event_badge",
+      "arguments": "p_occurrence_id uuid"
+    },
+    {
+      "name": "list_church_departments",
+      "arguments": "p_organization_id uuid, p_service_year integer"
+    },
+    {
+      "name": "list_community_comments",
+      "arguments": "p_post_ids uuid[], p_comment_id uuid, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_community_posts",
+      "arguments": "p_post_id uuid, p_board_id uuid, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_department_office_candidates",
+      "arguments": "p_department_id uuid, p_service_year integer, p_search text, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_event_occurrences",
+      "arguments": "p_from timestamp with time zone, p_to timestamp with time zone, p_scope_id uuid, p_limit integer"
+    },
+    {
+      "name": "list_governance_delegations",
+      "arguments": "p_scope_id uuid"
+    },
+    {
+      "name": "list_governance_office_candidates",
+      "arguments": "p_scope_id uuid, p_service_year integer, p_office_code text, p_search text, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_governance_office_history",
+      "arguments": "p_scope_id uuid, p_service_year integer, p_department_id uuid"
+    },
+    {
+      "name": "list_governance_roster",
+      "arguments": "p_scope_id uuid, p_service_year integer, p_search text, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_membership_office_requests",
+      "arguments": "p_application_id uuid, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_my_anonymous_blocks",
+      "arguments": ""
+    },
+    {
+      "name": "list_my_qt",
+      "arguments": "p_organization_id uuid, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_scoped_record_scopes",
+      "arguments": ""
+    },
+    {
+      "name": "list_shared_qt",
+      "arguments": "p_organization_id uuid, p_day date, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_signup_office_options",
+      "arguments": "p_organization_id uuid"
+    },
+    {
+      "name": "list_union_department_candidates",
+      "arguments": "p_department_id uuid, p_search text, p_offset integer"
+    },
+    {
+      "name": "list_visible_organization_memberships",
+      "arguments": "p_organization_id uuid, p_limit integer, p_offset integer"
+    },
+    {
+      "name": "list_visible_profiles",
+      "arguments": "p_profile_ids uuid[]"
+    },
+    {
+      "name": "mark_conversation_read",
+      "arguments": "p_conversation_id uuid, p_message_id uuid"
+    },
+    {
+      "name": "mutate_governance_office",
+      "arguments": "p_request_id uuid, p_scope_id uuid, p_department_id uuid, p_service_year integer, p_office_code text, p_user_id uuid, p_expected_user_id uuid"
+    },
+    {
+      "name": "operations_my_reports",
+      "arguments": "p_offset integer"
+    },
+    {
+      "name": "operations_submit_appeal",
+      "arguments": "p_report_id uuid, p_reason text"
+    },
+    {
+      "name": "publish_owned_post",
+      "arguments": "p_post_id uuid, p_expected_author_id uuid, p_expected_media_paths text[]"
+    },
+    {
+      "name": "reconcile_post_operation",
+      "arguments": "p_post_id uuid, p_expected_author_id uuid"
+    },
+    {
+      "name": "record_event_fee",
+      "arguments": "p_occurrence_id uuid, p_user_id uuid, p_paid boolean, p_amount numeric, p_operation_id uuid, p_reason text, p_expected_revision integer, p_expected_actor_id uuid"
+    },
+    {
+      "name": "remove_my_anonymous_block",
+      "arguments": "p_block_id uuid"
+    },
+    {
+      "name": "respond_to_event",
+      "arguments": "p_occurrence_id uuid, p_response text, p_client_operation_id uuid"
+    },
+    {
+      "name": "review_membership_application",
+      "arguments": "p_application_id uuid, p_decision review_decision, p_reason text"
+    },
+    {
+      "name": "review_membership_office_request",
+      "arguments": "p_request_id uuid, p_decision review_decision, p_reason text"
+    },
+    {
+      "name": "save_community_post_draft",
+      "arguments": "p_post_id uuid, p_expected_author_id uuid, p_organization_id uuid, p_board_id uuid, p_title text, p_body text, p_is_anonymous boolean"
+    },
+    {
+      "name": "save_event_field_plan",
+      "arguments": "p_occurrence_id uuid, p_revision integer, p_groups jsonb, p_vehicles jsonb, p_rooms jsonb, p_assignments jsonb"
+    },
+    {
+      "name": "save_event_recurrence_checked",
+      "arguments": "p_id uuid, p_create boolean, p_scope_id uuid, p_title text, p_description text, p_location_text text, p_starts_at timestamp with time zone, p_ends_at timestamp with time zone, p_capacity integer, p_recurrence_frequency text, p_recurrence_interval integer, p_recurrence_weekdays smallint[], p_recurrence_month_day integer, p_recurrence_until timestamp with time zone, p_recurrence_count integer, p_reminder_offsets_minutes integer[], p_host_name text, p_expected_revision integer, p_recurrence_month_week integer, p_recurrence_month_weekday integer"
+    },
+    {
+      "name": "save_event_survey",
+      "arguments": "p_occurrence_id uuid, p_revision integer, p_attendance_start timestamp with time zone, p_attendance_end timestamp with time zone, p_departure text, p_driver_seats integer"
+    },
+    {
+      "name": "save_my_privacy_preferences_v2",
+      "arguments": "p_required_consents jsonb, p_avatar_visible boolean, p_church_title_visible boolean, p_email_visible boolean, p_bio_visible boolean"
+    },
+    {
+      "name": "save_scoped_record",
+      "arguments": "p_id uuid, p_scope_id uuid, p_event_id uuid, p_kind text, p_expected_revision integer, p_record_date date, p_title text, p_body text, p_status text, p_entry_type text, p_category text, p_amount numeric, p_currency text, p_operation_id uuid, p_expected_actor_id uuid"
+    },
+    {
+      "name": "send_message_batch",
+      "arguments": "p_conversation_id uuid, p_expected_sender_id uuid, p_messages jsonb"
+    },
+    {
+      "name": "set_event_staff",
+      "arguments": "p_occurrence_id uuid, p_user_id uuid, p_capabilities text[], p_expires_at timestamp with time zone"
+    },
+    {
+      "name": "set_faith_ranking_participation",
+      "arguments": "p_organization_id uuid, p_service_year integer, p_opted_in boolean, p_notice_version text, p_expected_revision integer, p_expected_actor_id uuid, p_challenge_department_code text"
+    },
+    {
+      "name": "set_my_reading_chapter",
+      "arguments": "p_organization_id uuid, p_service_year integer, p_chapter_id integer, p_completed boolean"
+    },
+    {
+      "name": "set_post_reaction",
+      "arguments": "p_post_id uuid, p_kind text, p_active boolean, p_expected_actor_id uuid, p_expected_revision bigint"
+    },
+    {
+      "name": "share_my_qt",
+      "arguments": "p_organization_id uuid, p_qt_id uuid, p_client_request_id uuid"
+    },
+    {
+      "name": "submit_membership_with_office_requests",
+      "arguments": "p_organization_id uuid, p_requested_role app_role, p_client_request_id uuid, p_applicant_note text, p_requested_church_title_code text, p_requested_executive_office_codes text[], p_requested_service_year integer, p_office_requests jsonb"
+    },
+    {
+      "name": "update_my_display_name",
+      "arguments": "p_display_name text"
+    },
+    {
+      "name": "update_owned_community_post",
+      "arguments": "p_post_id uuid, p_expected_revision bigint, p_title text, p_body text, p_delete boolean, p_remove_media_ids uuid[], p_add_media jsonb"
+    },
+    {
+      "name": "validate_chat_access",
+      "arguments": "p_channel_id uuid, p_conversation_id uuid"
+    },
+    {
+      "name": "verify_event_badge",
+      "arguments": "p_occurrence_id uuid, p_token text"
+    },
+    {
+      "name": "withdraw_faith_consent",
+      "arguments": "p_organization_id uuid, p_confirm_delete boolean"
+    }
+  ],
+  "checked_at": "2026-10-19T01:34:52.896801+00:00",
+  "project_ref": "opwzujhfsxqaivtbjewg",
+  "required_rpc_names": [
+    "abandon_direct_media_objects",
+    "accept_faith_consent",
+    "admin_operations_action",
+    "admin_operations_audit",
+    "admin_operations_audit_provenance",
+    "admin_operations_case",
+    "admin_operations_cases",
+    "admin_operations_export",
+    "admin_operations_snapshot",
+    "admin_operations_verify_export",
+    "block_community_comment_author",
+    "block_user",
+    "cancel_event",
+    "channel_command",
+    "channel_rich_command",
+    "channel_snapshot",
+    "church_live_command",
+    "church_live_snapshot",
+    "create_my_qt",
+    "delete_my_qt",
+    "delete_scoped_record",
+    "export_event_field",
+    "export_finance_report",
+    "get_conversation_summaries",
+    "get_event_fee_status",
+    "get_event_field",
+    "get_faith_community",
+    "get_faith_consent_status",
+    "get_faith_snapshot",
+    "get_governance_management_scopes",
+    "get_governance_tree",
+    "get_my_event_scopes",
+    "get_my_governance_access",
+    "get_my_native_context",
+    "get_my_safety_privacy_state",
+    "get_or_create_conversation",
+    "get_scoped_record_history",
+    "get_scoped_records",
+    "get_sensitive_action_auth_status",
+    "get_service_clock",
+    "get_union_department_detail",
+    "get_union_departments",
+    "issue_event_badge",
+    "list_church_departments",
+    "list_community_comments",
+    "list_community_posts",
+    "list_department_office_candidates",
+    "list_event_occurrences",
+    "list_governance_delegations",
+    "list_governance_office_candidates",
+    "list_governance_office_history",
+    "list_governance_roster",
+    "list_membership_office_requests",
+    "list_my_anonymous_blocks",
+    "list_my_qt",
+    "list_scoped_record_scopes",
+    "list_shared_qt",
+    "list_signup_office_options",
+    "list_union_department_candidates",
+    "list_visible_organization_memberships",
+    "list_visible_profiles",
+    "mark_conversation_read",
+    "meeting_command",
+    "meeting_snapshot",
+    "mutate_governance_office",
+    "operations_my_reports",
+    "operations_submit_appeal",
+    "publish_owned_post",
+    "reconcile_post_operation",
+    "record_event_fee",
+    "remove_my_anonymous_block",
+    "respond_to_event",
+    "review_membership_application",
+    "review_membership_office_request",
+    "save_community_post_draft",
+    "save_event_field_plan",
+    "save_event_recurrence_checked",
+    "save_event_survey",
+    "save_my_privacy_preferences_v2",
+    "save_scoped_record",
+    "send_message_batch",
+    "set_event_staff",
+    "set_faith_ranking_participation",
+    "set_my_reading_chapter",
+    "set_post_reaction",
+    "share_my_qt",
+    "submit_membership_with_office_requests",
+    "update_my_display_name",
+    "update_owned_community_post",
+    "validate_chat_access",
+    "verify_event_badge",
+    "withdraw_faith_consent"
+  ]
+}

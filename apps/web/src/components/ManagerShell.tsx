@@ -20,6 +20,7 @@ import {
 import { NavLink, Outlet } from "react-router-dom";
 import { resolveAppBranch, type AppBranch } from "./access";
 import { Brand } from "./Brand";
+import { AppearancePicker } from './AppearancePicker';
 import { useAppData } from "../data/AppDataProvider";
 import { canManageDepartmentOfficers } from "../data/departmentGovernance";
 import { ServiceErrorNotice } from "./ServiceErrorNotice";
@@ -40,6 +41,7 @@ const PLATFORM_NAV_ITEMS: ManagerNavItem[] = [
   { to: "/manage/organization", label: "조직 관리", icon: Buildings },
   { to: "/app/churches", label: "교회", icon: Church },
   { to: "/manage/profile", label: "내 정보", icon: UserCircle },
+  { to: "/manage/operations", label: "관제·감사", icon: ShieldCheck },
 ];
 
 const MINISTER_NAV_ITEMS: ManagerNavItem[] = [
@@ -146,6 +148,7 @@ export function ManagerShell() {
       <a className="community-skip-link" href="#community-main">본문으로 건너뛰기</a>
       <aside className="desktop-sidebar manager-sidebar" aria-label="관리자 메뉴">
         <Brand />
+        <AppearancePicker compact />
         <div className="manager-sidebar__scope">
           <span><ModeIcon weight="fill" /> {modeLabel} 모드</span>
           <strong>{scopeLabel}</strong>

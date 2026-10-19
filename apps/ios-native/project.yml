@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.uichanlee
   deploymentTarget:
     iOS: "18.0"
+  postGenCommand: pod install
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -25,13 +26,21 @@ targets:
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: 행사 QR 출석 확인, 화상회의, 게시글·대화 및 비공개 영수증 촬영에 카메라를 사용합니다.
+        NSMicrophoneUsageDescription: 사용자가 참여한 화상회의와 영상 촬영에 마이크를 사용합니다.
+        NSPhotoLibraryUsageDescription: 게시글·대화 및 비공개 영수증에 첨부할 사진과 영상을 선택합니다.
+        UIBackgroundModes: [audio, voip]
     sources:
       - Sources
       - path: Resources
         buildPhase: resources
+        excludes: [BibleKRV]
+      - path: Resources/BibleKRV
+        type: folder
+        buildPhase: resources
     configFiles:
-      Debug: NativePublicConfig.xcconfig
-      Release: NativePublicConfig.xcconfig
+      Debug: NativeBuild.Debug.xcconfig
+      Release: NativeBuild.Release.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.uichanlee.jaegun
@@ -43,6 +52,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         CODE_SIGN_ENTITLEMENTS: Native.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        OTHER_LDFLAGS: "$(inherited) -ObjC"
   JaegunNativeTests:
     type: bundle.unit-test
     platform: iOS

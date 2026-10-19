@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Camera,
@@ -6,7 +6,6 @@ import {
   CheckCircle,
   CircleNotch,
   FileVideo,
-  Heart,
   ImageSquare,
   MagnifyingGlass,
   PaperPlaneTilt,
@@ -33,6 +32,9 @@ import {
   ResilientImage,
 } from "../components/ui";
 import { useAppData } from "../data/AppDataProvider";
+import { BoardPostActions } from "./BoardPostActions";
+import { BoardAnonymousBlocks } from "./BoardAnonymousBlocks";
+import { BoardCommentBlockButton } from "./BoardCommentBlockButton";
 import { canPersistSensitiveClientState } from "../data/supabase";
 import {
   getUgcSubmissionErrorMessage,
@@ -48,6 +50,9 @@ const CATEGORIES: Array<{ value: "all" | PostCategory; label: string }> = [
   { value: "sharing", label: "나눔" },
   { value: "prayer", label: "기도" },
   { value: "photo_video", label: "사진·영상" },
+  { value: "anonymous_qa", label: "익명 질문·답변" },
+  { value: "official_document", label: "공문" },
+  { value: "family_news", label: "경조사" },
 ];
 
 const MEDIA_ACCEPT = "image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif,video/mp4,video/quicktime,video/webm";
@@ -110,6 +115,7 @@ export function FeedPage() {
           ))}
         </div>
       </div>
+      <BoardAnonymousBlocks />
 
       <div className="feed-summary"><strong>{filteredPosts.length}개의 이야기</strong><span>최신순</span></div>
       <div className="feed-list">
@@ -145,14 +151,13 @@ function fileSizeLabel(size: number) {
 }
 
 export function ComposerPage() {
-  const { createPost, posts, viewer } = useAppData();
+  const { createPost, posts, viewer, mode, consentGateOpen } = useAppData();
   const navigate = useNavigate();
   const nativeMediaUploadDisabled = isIosNativeMediaUploadDisabled();
   const [searchParams] = useSearchParams();
   const requestedCategory = searchParams.get("category");
-  const initialCategory: PostCategory = requestedCategory === "notice" || requestedCategory === "prayer" || requestedCategory === "photo_video"
-    ? requestedCategory
-    : "sharing";
+  const initialCategory: PostCategory = CATEGORIES.some((item) => item.value === requestedCategory && item.value !== "all")
+    ? requestedCategory as PostCategory : "sharing";
   const [category, setCategory] = useState<PostCategory>(initialCategory);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -162,9 +167,12 @@ export function ComposerPage() {
   const [progress, setProgress] = useState(0);
   const [localError, setLocalError] = useState<string | null>(null);
   const [clientOperationId, setClientOperationId] = useState<string>(() => crypto.randomUUID());
-  const operationStorageKey = viewer?.profile.id
-    ? `${POST_OPERATION_KEY_PREFIX}${viewer.profile.id}`
+  const operationStorageKey = viewer?.profile.id && viewer.membership?.organizationId && consentGateOpen
+    ? `${POST_OPERATION_KEY_PREFIX}${mode}:${viewer.profile.id}:${viewer.membership.organizationId}`
     : null;
+  const [draftOwnerKey, setDraftOwnerKey] = useState(operationStorageKey);
+  const binding = useRef({ key: operationStorageKey, epoch: 0 });
+  if (binding.current.key !== operationStorageKey) binding.current = { key: operationStorageKey, epoch: binding.current.epoch + 1 };
   const isDirty = category !== initialCategory || title.length > 0 || body.length > 0 || files.length > 0;
 
   const confirmHistoryNavigation = useUnsavedChangesWarning(isDirty);
@@ -176,29 +184,26 @@ export function ComposerPage() {
   }, [files]);
 
   useEffect(() => {
-    if (!operationStorageKey || !canPersistSensitiveClientState()) return;
-    try {
-      const pending = JSON.parse(window.sessionStorage.getItem(operationStorageKey) ?? "null") as unknown;
-      if (!pending || typeof pending !== "object") return;
-      const value = pending as Record<string, unknown>;
-      if (typeof value.operationId !== "string"
-        || typeof value.title !== "string"
-        || typeof value.body !== "string"
-        || (value.category !== "notice" && value.category !== "sharing" && value.category !== "prayer" && value.category !== "photo_video")) return;
-      setClientOperationId(value.operationId);
-      setCategory(value.category);
-      setTitle(value.title);
-      setBody(value.body);
-      if (value.hadFiles === true) {
-        setLocalError("이전 등록 시도의 첨부 파일은 보안상 복원되지 않습니다. 필요한 파일을 다시 선택해 주세요.");
-      }
-    } catch {
-      clearPostOperation(operationStorageKey);
+    setDraftOwnerKey(operationStorageKey); setClientOperationId(crypto.randomUUID());
+    setCategory(initialCategory); setTitle(""); setBody(""); setFiles([]); setSubmitting(false); setProgress(0); setLocalError(null);
+    if (operationStorageKey && canPersistSensitiveClientState()) {
+      try {
+        const pending = JSON.parse(window.sessionStorage.getItem(operationStorageKey) ?? "null") as unknown;
+        if (pending && typeof pending === "object") {
+          const value = pending as Record<string, unknown>;
+          if (typeof value.operationId === "string" && typeof value.title === "string" && typeof value.body === "string"
+            && CATEGORIES.some((item) => item.value !== "all" && item.value === value.category)) {
+            setClientOperationId(value.operationId); setCategory(value.category as PostCategory); setTitle(value.title); setBody(value.body);
+            if (value.hadFiles === true) setLocalError("이전 등록 시도의 첨부 파일은 보안상 복원되지 않습니다. 필요한 파일을 다시 선택해 주세요.");
+          }
+        }
+      } catch { clearPostOperation(operationStorageKey); }
     }
-  }, [operationStorageKey]);
+    return () => { binding.current = { ...binding.current, epoch: binding.current.epoch + 1 }; };
+  }, [initialCategory, operationStorageKey]);
 
   useEffect(() => {
-    if (!operationStorageKey || !isDirty || !canPersistSensitiveClientState()) return;
+    if (draftOwnerKey !== operationStorageKey || !operationStorageKey || !isDirty || !canPersistSensitiveClientState()) return;
     try {
       window.sessionStorage.setItem(operationStorageKey, JSON.stringify({
         operationId: clientOperationId,
@@ -210,7 +215,7 @@ export function ComposerPage() {
     } catch {
       // The provider still deduplicates duplicate clicks for this page lifetime.
     }
-  }, [body, category, clientOperationId, files.length, isDirty, operationStorageKey, title]);
+  }, [body, category, clientOperationId, draftOwnerKey, files.length, isDirty, operationStorageKey, title]);
 
   useEffect(() => {
     if (!operationStorageKey || !posts.some((post) => post.id === clientOperationId)) return;
@@ -226,17 +231,20 @@ export function ComposerPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestBinding = binding.current;
     setSubmitting(true);
     setLocalError(null);
     setProgress(files.length ? 0.04 : 1);
     try {
       const post = await createPost(
         { clientOperationId, category, title: title.trim(), body: body.trim(), files },
-        (nextProgress) => setProgress(Math.max(0.04, nextProgress)),
+        (nextProgress) => { if (binding.current === requestBinding) setProgress(Math.max(0.04, nextProgress)); },
       );
+      if (binding.current !== requestBinding) return;
       clearPostOperation(operationStorageKey);
       navigate(`/app/posts/${post.id}`, { replace: true });
     } catch (reason) {
+      if (binding.current !== requestBinding) return;
       setLocalError(getUgcSubmissionErrorMessage(reason, "게시글을 등록하지 못했습니다."));
       setSubmitting(false);
     }
@@ -247,6 +255,8 @@ export function ComposerPage() {
     clearPostOperation(operationStorageKey);
     navigate(-1);
   }
+
+  if (!operationStorageKey || draftOwnerKey !== operationStorageKey) return <div className="focused-page" role="status">작성 권한을 확인하고 있습니다.</div>;
 
   return (
     <div className="focused-page composer-page">
@@ -265,6 +275,7 @@ export function ComposerPage() {
             ))}
           </div>
         </fieldset>
+        {category === "anonymous_qa" ? <p role="note">작성자 신원은 서버 응답에서 제외됩니다. 신고 사건의 권한 있는 조사에는 사유와 감사 기록이 남습니다. 본문과 첨부에 본인 정보가 포함되지 않도록 확인해 주세요.</p> : null}
         <label className="composer-title">
           <span className="sr-only">제목</span>
           <input required maxLength={80} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="제목을 입력해 주세요" />
@@ -331,7 +342,7 @@ export function ComposerPage() {
 export function PostDetailPage() {
   const { postId } = useParams();
   const navigate = useNavigate();
-  const { posts, addComment, ensurePost, refreshProtectedMediaUrl, viewer } = useAppData();
+  const { posts, addComment, ensurePost, refreshProtectedMediaUrl, viewer, mode, consentGateOpen } = useAppData();
   const post = posts.find((item) => item.id === postId);
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -341,7 +352,14 @@ export function PostDetailPage() {
     key: string;
     status: "loading" | "not_found" | "error";
   }>({ key: "", status: "loading" });
-  const lookupKey = `${viewer?.profile.id ?? "signed-out"}:${postId ?? "missing"}`;
+  const lookupKey = `${mode}:${consentGateOpen}:${viewer?.profile.id ?? "signed-out"}:${viewer?.membership?.organizationId ?? "no-church"}:${postId ?? "missing"}`;
+  const [commentOwnerKey, setCommentOwnerKey] = useState(lookupKey);
+  const commentBinding = useRef({ key: lookupKey, epoch: 0 });
+  if (commentBinding.current.key !== lookupKey) commentBinding.current = { key: lookupKey, epoch: commentBinding.current.epoch + 1 };
+  useEffect(() => {
+    setCommentOwnerKey(lookupKey); setComment(""); setSubmitting(false); setLocalError(null);
+    return () => { commentBinding.current = { ...commentBinding.current, epoch: commentBinding.current.epoch + 1 }; };
+  }, [lookupKey]);
 
   useEffect(() => {
     if (post || !postId) return;
@@ -376,8 +394,9 @@ export function PostDetailPage() {
 
   async function handleComment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestBinding = commentBinding.current;
     const trimmedComment = comment.trim();
-    if (!post || !trimmedComment) return;
+    if (!post || !trimmedComment || commentOwnerKey !== lookupKey) return;
     if (trimmedComment.length > 5000) {
       setLocalError("댓글은 5,000자 이하로 입력해 주세요.");
       return;
@@ -386,11 +405,13 @@ export function PostDetailPage() {
     setLocalError(null);
     try {
       await addComment(post.id, trimmedComment);
+      if (commentBinding.current !== requestBinding) return;
       setComment("");
     } catch (reason) {
+      if (commentBinding.current !== requestBinding) return;
       setLocalError(getUgcSubmissionErrorMessage(reason, "댓글을 등록하지 못했습니다."));
     } finally {
-      setSubmitting(false);
+      if (commentBinding.current === requestBinding) setSubmitting(false);
     }
   }
 
@@ -477,9 +498,9 @@ export function PostDetailPage() {
           </div>
         ) : null}
         <div className="post-detail__actions">
-          <span aria-label={`공감 ${post.reactionCount}개`}><Heart weight="regular" /> 공감 {post.reactionCount}</span>
+          <BoardPostActions post={post} />
           <span><ChatCircle /> 댓글 {post.comments.length}</span>
-          {post.authorId !== viewer?.profile.id ? (
+          {!(post.isOwner ?? post.authorId === viewer?.profile.id) ? (
             <ReportActionLink
               targetType="post"
               targetId={post.id}
@@ -502,14 +523,15 @@ export function PostDetailPage() {
                   <div>
                     <strong>{item.authorName}</strong>
                     <span>{formatRelativeKorean(item.createdAt)}</span>
-                    {item.authorId !== viewer?.profile.id ? (
-                      <ReportActionLink
+                    {!(item.isOwner ?? item.authorId === viewer?.profile.id) ? (
+                      <><ReportActionLink
                         targetType="comment"
                         targetId={item.id}
                         targetLabel={`${item.authorName}님의 댓글`}
                         returnTo={`/app/posts/${post.id}`}
                         className="comment__report"
                       />
+                      <BoardCommentBlockButton commentId={item.id} /></>
                     ) : null}
                   </div>
                   <p>{item.body}</p>
@@ -519,13 +541,14 @@ export function PostDetailPage() {
           </div>
         ) : <p className="comments__empty">댓글이 없습니다.</p>}
         {localError ? <ErrorBanner message={localError} /> : null}
+        {post.isAnonymous ? <p role="note">질문과 답변 모두 익명으로 표시됩니다. 본문에 개인정보를 적지 마세요. 신고된 사건의 신원 조사에는 권한·최근 본인 확인·사유와 감사 기록이 필요합니다.</p> : null}
         <form className="comment-composer" onSubmit={handleComment}>
           <label>
             <span className="sr-only">댓글</span>
             <textarea
               rows={1}
               maxLength={5000}
-              value={comment}
+              value={commentOwnerKey === lookupKey ? comment : ""}
               onChange={(event) => {
                 setComment(event.target.value);
                 if (localError === "댓글은 5,000자 이하로 입력해 주세요.") setLocalError(null);
@@ -534,9 +557,9 @@ export function PostDetailPage() {
               aria-describedby="comment-character-count"
               aria-invalid={comment.trim().length > 5000}
             />
-            <small id="comment-character-count">{comment.length.toLocaleString("ko-KR")}/5,000</small>
+            <small id="comment-character-count">{(commentOwnerKey === lookupKey ? comment.length : 0).toLocaleString("ko-KR")}/5,000</small>
           </label>
-          <button type="submit" disabled={!comment.trim() || comment.trim().length > 5000 || submitting} aria-label="댓글 등록">{submitting ? <CircleNotch className="spin" /> : <PaperPlaneTilt weight="fill" />}</button>
+          <button type="submit" disabled={commentOwnerKey !== lookupKey || !comment.trim() || comment.trim().length > 5000 || submitting} aria-label="댓글 등록">{submitting ? <CircleNotch className="spin" /> : <PaperPlaneTilt weight="fill" />}</button>
         </form>
       </section>
     </div>

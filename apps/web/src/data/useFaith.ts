@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useAppData } from "./AppDataProvider";
 import { supabase } from "./supabase";
 import { parseFaithSnapshot, type FaithSnapshot } from "./faith";
 import { parseFaithConsentStatus, verifyFaithConsentText } from "./faithConsent";
+import { getFaithSessionEpoch, subscribeFaithSession } from "./faithSession";
 
 export function useFaithScope() {
   const { viewer, mode, consentGateOpen, serviceYear } = useAppData();
+  const sessionEpoch = useSyncExternalStore(subscribeFaithSession, getFaithSessionEpoch, getFaithSessionEpoch);
   const organization = viewer?.membership?.status === "active" && consentGateOpen === true ? viewer.membership.organizationId : null;
-  return { organization, mode, serviceYear, key: organization ? `${mode}:${viewer!.profile.id}:${organization}:${consentGateOpen}` : null };
+  return { organization, mode, serviceYear, sessionEpoch, actorID: viewer?.profile.id ?? null, key: organization ? `${mode}:${viewer!.profile.id}:${organization}:${consentGateOpen}:${sessionEpoch}` : null };
 }
 
 export function useFaithSnapshot() {
@@ -42,5 +44,5 @@ export function useFaithSnapshot() {
     return () => controller.abort();
   }, [scope.key, scope.organization, scope.mode, scope.serviceYear, revision]);
   const matches = state.key === scope.key;
-  return { ...scope, data: matches ? state.data : null, accepted: matches ? state.accepted : null, error: matches ? state.error : null, loading: matches ? state.loading : Boolean(scope.key), reload: () => setRevision((value) => value + 1), isCurrent: (key: string | null) => key !== null && currentScope.current === key };
+  return { ...scope, data: matches ? state.data : null, accepted: matches ? state.accepted : null, error: matches ? state.error : null, loading: matches ? state.loading : Boolean(scope.key), reload: () => setRevision((value) => value + 1), isCurrent: (key: string | null) => key !== null && currentScope.current === key && getFaithSessionEpoch() === scope.sessionEpoch };
 }

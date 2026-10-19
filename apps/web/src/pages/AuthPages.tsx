@@ -16,6 +16,7 @@ import {
 } from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
+import { AppearancePicker } from '../components/AppearancePicker';
 import { EmailAccountForm } from "./EmailAuthPages";
 import { SignupScopedOfficePicker } from "./SignupScopedOfficePicker";
 import { validateSignupOfficeRequests, type ScopedMembershipRequestInput, type SignupOfficeOptions, type SignupOfficeRequest } from "../data/signupOfficeRequests";
@@ -180,6 +181,7 @@ export function LoginPage({ signup = false }: { signup?: boolean }) {
 
   return (
     <main className="auth-page">
+      <div className="auth-appearance"><AppearancePicker compact /></div>
       <section className="auth-panel" aria-labelledby="auth-title">
         <div className="auth-panel__mobile-brand"><Brand /></div>
         <div className="auth-panel__inner">

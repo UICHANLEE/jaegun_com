@@ -36,6 +36,9 @@ import {
   type ExecutiveOfficeCode,
   type OrganizationMember,
 } from "../types/domain";
+import { requireGovernanceProof } from "../data/governanceManagement";
+import { DepartmentHistoryPanel, GovernanceAuthenticationControl } from "./GovernanceManagementPanels";
+import { useGovernanceBinding, type GovernanceBinding } from "../data/useGovernanceBinding";
 import "./department-officer-management.css";
 
 const DEPARTMENT_ICONS: Readonly<Record<ChurchDepartmentCode, Icon>> = {
@@ -162,6 +165,11 @@ function holderDescription(holder: DepartmentOfficeHolder) {
 }
 
 export function DepartmentOfficerManagementPage() {
+  const binding = useGovernanceBinding();
+  return <DepartmentOfficerManagementContent key={binding.key} binding={binding} />;
+}
+
+function DepartmentOfficerManagementContent({ binding }: { binding: GovernanceBinding }) {
   const { viewer, mode, organizations, members, serviceYear } = useAppData();
   const membership = viewer?.membership;
   const defaultOrganizationId = membership?.organizationId
@@ -183,6 +191,7 @@ export function DepartmentOfficerManagementPage() {
   const [selectedUserId, setSelectedUserId] = useState("");
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [demoAssignments, setDemoAssignments] = useState<DemoAssignments>(() => (
     import.meta.env.DEV
       ? initialDemoAssignments(members, defaultOrganizationId, serviceYear)
@@ -300,6 +309,8 @@ export function DepartmentOfficerManagementPage() {
     setSaving(true);
     setCandidateError(null);
     try {
+      await requireGovernanceProof(mode, viewer?.profile.id ?? "");
+      if (binding.current.current !== binding.key) return;
       if (import.meta.env.DEV && mode === "demo") {
         const candidate = candidates.find((item) => item.userId === selectedUserId);
         if (!candidate) throw new Error("선택한 담당자를 다시 확인해 주세요.");
@@ -319,9 +330,11 @@ export function DepartmentOfficerManagementPage() {
           serviceYear: selectedYear,
           officeCode: editingOffice,
           userId: selectedUserId,
+          expectedUserId: selectedDepartment.offices[editingOffice]?.userId ?? null,
         });
         await reloadDepartments();
       }
+      setHistoryRevision((current) => current + 1);
       setNotice(`${selectedDepartment.displayName} ${EXECUTIVE_OFFICE_LABELS[editingOffice]} 담당자를 저장했습니다.`);
       setEditingOffice(null);
       setSelectedUserId("");
@@ -337,6 +350,8 @@ export function DepartmentOfficerManagementPage() {
     setSaving(true);
     setCandidateError(null);
     try {
+      await requireGovernanceProof(mode, viewer?.profile.id ?? "");
+      if (binding.current.current !== binding.key) return;
       if (import.meta.env.DEV && mode === "demo") {
         const key = demoAssignmentKey(organizationId, selectedYear, selectedDepartment.code, editingOffice);
         setDemoAssignments((current) => {
@@ -349,9 +364,11 @@ export function DepartmentOfficerManagementPage() {
           departmentId: selectedDepartment.id,
           serviceYear: selectedYear,
           officeCode: editingOffice,
+          expectedUserId: selectedDepartment.offices[editingOffice]?.userId ?? null,
         });
         await reloadDepartments();
       }
+      setHistoryRevision((current) => current + 1);
       setNotice(`${selectedDepartment.displayName} ${EXECUTIVE_OFFICE_LABELS[editingOffice]} 직책을 공석으로 변경했습니다.`);
       setEditingOffice(null);
       setSelectedUserId("");
@@ -393,6 +410,8 @@ export function DepartmentOfficerManagementPage() {
             <span><small>현재 교회</small><strong>{organization?.name ?? "교회 선택 필요"}</strong></span>
           </div>
         </section>
+        <GovernanceAuthenticationControl />
+        {selectedDepartment && <DepartmentHistoryPanel organizationId={organizationId} departmentId={selectedDepartment.id} year={selectedYear} revision={historyRevision} />}
 
         <section className="department-controls" aria-labelledby="department-controls-title">
           <div className="department-section-heading">

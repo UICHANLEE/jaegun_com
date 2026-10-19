@@ -1,0 +1,11 @@
+platform :ios, '18.0'
+project 'JaegunNative.xcodeproj'
+use_frameworks!
+
+target 'JaegunNative' do
+  pod 'JitsiMeetSDK', '13.2.0'
+  pod 'SDWebImageWebPCoder', '0.14.6'
+  target 'JaegunNativeTests' do
+    inherit! :search_paths
+  end
+end
