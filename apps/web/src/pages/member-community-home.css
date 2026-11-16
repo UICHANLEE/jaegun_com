@@ -114,3 +114,52 @@
 .home-editor-action:disabled { opacity:.4; cursor:not-allowed; }
 @media(min-width:900px) { .member-home-page { padding:32px 30px 48px; } .member-home-widgets { grid-template-columns:repeat(2,minmax(0,1fr)); gap:30px 24px; } .home-widget--feed,.home-widget--notice { grid-column:1/-1; } .home-groups__links { grid-template-columns:1fr; } .home-feed__image { height:320px; } }
 @media(max-width:380px) { .member-home-page { padding:20px 15px 30px; } .member-home-heading { gap:8px; } .member-home-edit-button { padding:0 9px; } .member-home-church>span { font-size:.65rem; } .home-feed__filters { gap:9px; } .home-feed__filters button { font-size:.75rem; } .home-groups__links { gap:7px; } .home-groups__link { padding:10px 8px; font-size:.73rem; gap:6px; } .home-editor { padding:13px 9px; } .home-widget-option { gap:4px; padding-left:7px; } .home-widget-option__icon { display:none; } .home-widget-option__description { font-size:.58rem; } .home-editor-action { padding:0 10px; } }
+
+/* Shared feed polish for both compact and wide community layouts. */
+.member-home-page {
+  background: var(--community-surface);
+  color: var(--community-ink);
+}
+.member-home-page :is(a, button, summary):focus-visible {
+  outline: 2px solid var(--community-focus);
+  outline-offset: 3px;
+}
+.member-home-page .home-widget__heading h2 {
+  color: var(--community-ink);
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.member-home-page .home-notice__card {
+  border-color: var(--community-line);
+  border-inline-start: 3px solid var(--community-orange);
+  border-radius: 6px;
+  background: var(--community-surface);
+}
+.member-home-page .home-notice__title {
+  color: var(--community-ink);
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.member-home-page .home-feed__filters button {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+}
+.member-home-page .home-feed__post {
+  border-color: var(--community-line);
+}
+.member-home-page .home-feed__title {
+  color: var(--community-ink);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.member-home-page .home-feed__body {
+  color: var(--community-muted);
+  line-height: 1.65;
+}
+.member-home-page .home-schedule__item svg {
+  color: var(--community-blue-ink);
+}
